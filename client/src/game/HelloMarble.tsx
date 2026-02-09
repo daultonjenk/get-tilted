@@ -38,6 +38,7 @@ const TOPDOWN_HEIGHT = 16;
 const TOPDOWN_Z_OFFSET = 2;
 const TOPDOWN_LOOK_AHEAD = 4;
 const BOARD_TILT_SMOOTH = 10;
+const PIVOT_SMOOTH = 10;
 const MAX_BOARD_ANG_VEL = 2.5;
 const ENABLE_EXTRA_DOWNFORCE = false;
 const EXTRA_DOWN_FORCE = 4;
@@ -165,6 +166,11 @@ export function HelloMarble() {
     const visualTiltTargetEuler = new THREE.Euler(0, 0, 0, "XYZ");
     const visualTiltTargetQuat = new THREE.Quaternion();
     const extraDownForceVec = new CANNON.Vec3(0, -EXTRA_DOWN_FORCE, 0);
+    const rawPivot = new CANNON.Vec3();
+    const pivotSmoothed = new CANNON.Vec3(0, 0, 0);
+    const rotatedPivot = new CANNON.Vec3();
+    const boardPosition = new CANNON.Vec3();
+    const qFinalCannon = new CANNON.Quaternion();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -374,14 +380,31 @@ export function HelloMarble() {
       const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * delta);
       track.group.quaternion.slerp(visualTiltTargetQuat, boardTiltAlpha);
 
-      boardBody.quaternion.set(
+      rawPivot.set(marbleBody.position.x, 0, marbleBody.position.z);
+      const pivotAlpha = 1 - Math.exp(-PIVOT_SMOOTH * delta);
+      pivotSmoothed.x += (rawPivot.x - pivotSmoothed.x) * pivotAlpha;
+      pivotSmoothed.y += (rawPivot.y - pivotSmoothed.y) * pivotAlpha;
+      pivotSmoothed.z += (rawPivot.z - pivotSmoothed.z) * pivotAlpha;
+
+      qFinalCannon.set(
         track.group.quaternion.x,
         track.group.quaternion.y,
         track.group.quaternion.z,
         track.group.quaternion.w,
       );
+      qFinalCannon.vmult(pivotSmoothed, rotatedPivot);
+
+      boardPosition.set(
+        pivotSmoothed.x - rotatedPivot.x,
+        pivotSmoothed.y - rotatedPivot.y,
+        pivotSmoothed.z - rotatedPivot.z,
+      );
+
+      boardBody.quaternion.copy(qFinalCannon);
+      boardBody.position.copy(boardPosition);
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
+      track.group.position.set(boardPosition.x, boardPosition.y, boardPosition.z);
 
       if (ENABLE_EXTRA_DOWNFORCE) {
         marbleBody.applyForce(extraDownForceVec, marbleBody.position);
