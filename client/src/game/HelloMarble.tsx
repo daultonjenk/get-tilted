@@ -1666,6 +1666,10 @@ export function HelloMarble() {
 
   const showTouchFallback =
     !tiltStatus.supported || tiltStatus.permission === "denied";
+  const multiplayerRaceInProgress =
+    gameMode === "multiplayer" &&
+    racePhase === "racing" &&
+    trialState !== "finished";
   const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
   const waitingForReady =
     gameMode === "multiplayer" &&
@@ -1761,6 +1765,10 @@ export function HelloMarble() {
       setNetError("Join a room before setting READY.");
       return;
     }
+    if (racePhase !== "waiting") {
+      setNetError("READY can only be changed before countdown starts.");
+      return;
+    }
     setNetError(null);
     if (!localReady) {
       await enableTiltRef.current();
@@ -1822,76 +1830,80 @@ export function HelloMarble() {
   return (
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
-      <div className="raceOverlay">
-        <div className="raceOverlayCard">
-          <p className="raceOverlayTitle">Race Lobby</p>
-          <div className="modeSwitch" role="group" aria-label="Game mode">
-            <button
-              type="button"
-              className={`modeButton ${gameMode === "solo" ? "active" : ""}`}
-              onClick={() => switchGameMode("solo")}
-            >
-              Solo
-            </button>
-            <button
-              type="button"
-              className={`modeButton ${gameMode === "multiplayer" ? "active" : ""}`}
-              onClick={() => switchGameMode("multiplayer")}
-            >
-              Multiplayer
-            </button>
-          </div>
-          <p>
-            {gameMode === "solo"
-              ? "Solo run active."
-              : roomCode
-                ? `Room ${roomCode}`
-                : "Create or join a room from Network tab"}
-          </p>
-          <p>Status: {gameMode === "solo" ? "solo-local" : netStatus}</p>
-          {gameMode === "multiplayer" ? <p>Players: {playersInRoom.length}/2</p> : null}
-          {gameMode === "multiplayer" && playersInRoom.length > 0 ? (
-            <div className="racePlayers">
-              {playersInRoom.map((player) => {
-                const isReady = readyPlayerIds.includes(player.playerId);
-                const isLocal = player.playerId === localPlayerId;
-                return (
-                  <p key={player.playerId} className={isReady ? "ready" : "waiting"}>
-                    {isLocal ? "You" : player.name || player.playerId}:{" "}
-                    {isReady ? "READY" : "Waiting"}
-                  </p>
-                );
-              })}
+      {!multiplayerRaceInProgress ? (
+        <div className="raceOverlay">
+          <div className="raceOverlayCard">
+            <p className="raceOverlayTitle">Race Lobby</p>
+            <div className="modeSwitch" role="group" aria-label="Game mode">
+              <button
+                type="button"
+                className={`modeButton ${gameMode === "solo" ? "active" : ""}`}
+                onClick={() => switchGameMode("solo")}
+              >
+                Solo
+              </button>
+              <button
+                type="button"
+                className={`modeButton ${gameMode === "multiplayer" ? "active" : ""}`}
+                onClick={() => switchGameMode("multiplayer")}
+              >
+                Multiplayer
+              </button>
             </div>
-          ) : null}
-          {gameMode === "multiplayer" && racePhase === "countdown" ? (
-            <p className="raceHint">Countdown started...</p>
-          ) : null}
-          {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
-          {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
-          {gameMode === "solo" ? (
-            <p className="raceHint">Solo mode skips room ready checks and starts immediately.</p>
-          ) : null}
-          {!tiltStatus.supported ? (
-            <p className="raceHint">Tilt unavailable on this device. Fallback controls enabled.</p>
-          ) : null}
-          {gameMode === "multiplayer" ? (
-            <button
-              type="button"
-              className={`readyButton ${localReady ? "ready" : ""}`}
-              onClick={() => void toggleReady()}
-              disabled={
-                netStatus !== "connected" ||
-                !roomCode ||
-                !localPlayerId ||
-                racePhase === "countdown"
-              }
-            >
-              {localReady ? "UNREADY" : "READY"}
-            </button>
-          ) : null}
+            <p>
+              {gameMode === "solo"
+                ? "Solo run active."
+                : roomCode
+                  ? `Room ${roomCode}`
+                  : "Create or join a room from Network tab"}
+            </p>
+            <p>Status: {gameMode === "solo" ? "solo-local" : netStatus}</p>
+            {gameMode === "multiplayer" ? <p>Players: {playersInRoom.length}/2</p> : null}
+            {gameMode === "multiplayer" && playersInRoom.length > 0 ? (
+              <div className="racePlayers">
+                {playersInRoom.map((player) => {
+                  const isReady = readyPlayerIds.includes(player.playerId);
+                  const isLocal = player.playerId === localPlayerId;
+                  return (
+                    <p key={player.playerId} className={isReady ? "ready" : "waiting"}>
+                      {isLocal ? "You" : player.name || player.playerId}:{" "}
+                      {isReady ? "READY" : "Waiting"}
+                    </p>
+                  );
+                })}
+              </div>
+            ) : null}
+            {gameMode === "multiplayer" && racePhase === "countdown" ? (
+              <p className="raceHint">Countdown started...</p>
+            ) : null}
+            {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
+            {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
+            {gameMode === "solo" ? (
+              <p className="raceHint">Solo mode skips room ready checks and starts immediately.</p>
+            ) : null}
+            {!tiltStatus.supported ? (
+              <p className="raceHint">
+                Tilt unavailable on this device. Fallback controls enabled.
+              </p>
+            ) : null}
+            {gameMode === "multiplayer" ? (
+              <button
+                type="button"
+                className={`readyButton ${localReady ? "ready" : ""}`}
+                onClick={() => void toggleReady()}
+                disabled={
+                  netStatus !== "connected" ||
+                  !roomCode ||
+                  !localPlayerId ||
+                  racePhase !== "waiting"
+                }
+              >
+                {localReady ? "UNREADY" : "READY"}
+              </button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
       {countdownToken ? (
         <div className="countdownOverlay" key={`${countdownToken}-${countdownStartAtMs ?? 0}`}>
           <div className={`countdownValue ${countdownToken === "GO!" ? "go" : ""}`}>
@@ -1899,13 +1911,14 @@ export function HelloMarble() {
           </div>
         </div>
       ) : null}
-      <DebugDrawer
-        open={drawerOpen}
-        onToggle={() => setDrawerOpen((open) => !open)}
-        activeTab={activeDebugTab}
-        onTabChange={setActiveDebugTab}
-        tabs={DRAWER_TABS}
-      >
+      {!multiplayerRaceInProgress ? (
+        <DebugDrawer
+          open={drawerOpen}
+          onToggle={() => setDrawerOpen((open) => !open)}
+          activeTab={activeDebugTab}
+          onTabChange={setActiveDebugTab}
+          tabs={DRAWER_TABS}
+        >
         {activeDebugTab === "tuning" ? (
           <div className="debugSection">
             <p className="tiltMessage">{statusMessage}</p>
@@ -2509,7 +2522,8 @@ export function HelloMarble() {
             </div>
           </div>
         ) : null}
-      </DebugDrawer>
+        </DebugDrawer>
+      ) : null}
     </div>
   );
 }
