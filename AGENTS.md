@@ -1,180 +1,145 @@
 # AGENTS.md — Get Tilted (Codex Execution Playbook)
 
-This file instructs Codex (and any assistant agent) exactly how to plan, implement, and ship **Get Tilted** with minimal thrash.
+This file defines how Codex (and any assistant agent) should execute work on **Get Tilted** with minimal churn and maximum alignment to production constraints.
 
 ---
 
-## 1) Operating rules (non-negotiable)
+## 1) Non-negotiable project rules
 
 1. **Single-path stack (locked)**
    - Client: Vite + React + TypeScript + Three.js + cannon-es
-   - Multiplayer transport: **RAW WebSockets**
-   - Production: **Cloudflare Pages + Cloudflare Workers Durable Objects**
-   - Do not introduce alternate engines/frameworks unless explicitly asked.
+   - Transport: **raw WebSockets**
+   - Production: **Cloudflare Pages (client) + Cloudflare Workers Durable Objects (rooms)**
 
 2. **Always-on requirement**
    - The end state must be playable 24/7 via a link with no manual server “on switch”.
-   - Design the backend to fit the free/low-cost envelope:
-     - Cloudflare Pages static hosting for the client.
-     - Durable Object WebSocket rooms for multiplayer.
-   - Prefer WebSocket hibernation patterns for idle rooms. :contentReference[oaicite:4]{index=4}
+   - Durable Objects must be hibernation-friendly (avoid timers/intervals that prevent sleep).
 
-3. **No big rewrites**
-   - If refactor needed, do the smallest change that unblocks.
+3. **Networking separation**
+   - Game/physics modules must not directly create sockets.
+   - All networking must go through `client/src/net/wsClient.ts` and the shared protocol.
 
-4. **Mobile-first realities**
-   - iOS motion permission requires a user gesture path; must exist from v0.3 onward.
-   - Always maintain a fallback control scheme.
+4. **Minimal churn**
+   - Prefer small, incremental changes.
+   - Do not introduce alternative engines/frameworks unless explicitly requested.
 
-5. **Multiplayer is arcade-sync**
-   - Do **not** implement deterministic lockstep or rollback netcode.
+5. **Mobile-first reality**
+   - iOS motion permission requires an explicit user gesture path.
+   - Always keep a fallback control scheme (touch joystick + keyboard for desktop).
+
+6. **Multiplayer scope**
+   - Multiplayer is **arcade sync**, not deterministic lockstep or rollback netcode.
+   - Prioritize stability, interpolation, and simplicity over “perfect” sync.
+
+7. **Procedural content rule**
+   - Any “random” track generation must be **seeded and deterministic**:
+     - same seed => same track across devices
+     - seed is communicated via race start payloads when implemented
+   - MVP milestones (v0.2–v1.0) do **not** implement procedural generation unless explicitly scheduled.
 
 ---
 
-## 2) Response format for Codex planning prompts
-When asked to execute work, respond with:
+## 2) Expected response format for Codex work
+
+When implementing a milestone, respond with:
 - **Plan:** ON/OFF (default ON for non-trivial work)
-- **Reasoning strength:** Low/Medium/High (default Medium-High)
-- **Steps:** concise numbered steps (no alternatives)
+- **Reasoning strength:** Low/Medium/High (default Medium)
+- **Steps:** numbered, single optimal path (no alternatives unless asked)
 - **Commands:** exact commands to run
 - **Diff summary:** files created/changed
-- **Verification:** lint/typecheck/dev smoke test
-- **Commit plan:** commit messages
+- **Verification:** lint/typecheck/build + smoke steps
+- **Commit plan:** one commit per milestone minimum
 - After completion: **brief commit/push changelog** (required)
 
 ---
 
-## 3) Repo standards
+## 3) Repo structure (authoritative)
 
-### 3.1 TypeScript + tooling
-- TypeScript everywhere (client/server/worker).
-- Strict TS (reasonable defaults).
-- Scripts must exist and pass: `lint`, `typecheck`, `build`.
+```
+get-tilted/
+  client/
+  server/
+  shared/
+  worker/
+  README.md
+  SPEC.md
+  AGENTS.md
+  package.json
+```
 
-### 3.2 Folder structure
-- `client/` — Vite React app
-- `server/` — local dev WebSocket server (mirrors protocol)
-- `worker/` — Cloudflare Worker + Durable Object
+### Client (authoritative files)
+- `client/src/game/HelloMarble.tsx` — physics/render loop (single-player baseline)
+- `client/src/net/wsClient.ts` — raw WS client wrapper (protocol-driven)
+- `client/src/ui/NetDebugPanel.tsx` — dev-only network debug UI
+- `client/src/App.tsx` — wires viewport + panels
 
-### 3.3 Naming conventions
-- TS modules: `camelCase.ts`
-- React components: `PascalCase.tsx`
-- Network messages: `namespace:action` (e.g., `race:state`)
+### Server (authoritative files)
+- `server/src/index.ts` — HTTP health + WS endpoint (`/ws`)
+- `server/src/ws/wsRouter.ts` — message routing
+- `server/src/ws/roomStore.ts` — room lifecycle (dev)
+- `server/src/ws/roomCode.ts` — room code generator
+
+### Worker/DO (authoritative files)
+- `worker/src/index.ts` — Worker entry
+- `worker/src/roomDO.ts` — Durable Object WS room skeleton
+- `worker/src/env.ts` — env bindings/types
+
+### Shared protocol
+- `shared/src/protocol.ts` — message envelope, typing, runtime guards, safe parsing
 
 ---
 
-## 4) Implementation sequence (versions)
-Work strictly in this order:
-- v0.1 Scaffold + Hello Marble
+## 4) Version order (locked)
+
+Work in this order unless the user explicitly changes it:
 - v0.2 Track + Respawn
 - v0.3 Tilt + Fallback Controls
 - v0.4 Solo Time Trial
-- v0.5 Multiplayer Rooms + QR Join (**RAW WS**)
+- v0.5 Multiplayer Rooms + QR Join
 - v0.6 Race Result + Rematch
-- v0.7 Cloudflare Deploy (Pages + Durable Objects)
-- v1.0 Demo RC (stability)
+- v0.7 Cloudflare Deploy (Pages + DO)
+- v0.8 Seeded Modular Tracks
+- v1.0 Demo Release Candidate
 
 Do not start a later version until the current version’s acceptance checklist passes.
 
 ---
 
-## 5) Command discipline
-- Batch commands sensibly:
-  - install once, then run dev server
-  - combine checks: `npm run lint && npm run typecheck`
-- Avoid destructive commands unless necessary.
+## 5) Transport/protocol rules
+
+1. **No Socket.IO for production**
+   - Raw WebSockets only.
+   - Shared protocol module must be the single source of truth.
+
+2. **Message frequency**
+   - `race:state` target: ~15 Hz
+   - Ignore/drop packets above 30 Hz
+
+3. **Validation**
+   - Validate payload shape and numeric finiteness server-side and DO-side.
+   - On invalid input: drop packet; optionally send `error`.
+
+4. **Opponent smoothing**
+   - Interpolate buffered states (100–150ms buffer).
+   - Avoid snapping unless error is extreme.
 
 ---
 
-## 6) Multiplayer transport rules (updated)
+## 6) Mobile motion control requirements (v0.3+)
 
-### 6.1 DO NOT use Socket.IO for production
-- Socket.IO is not the target production transport.
-- Use raw WebSockets end-to-end.
-- Build a tiny typed protocol layer so client/dev-server/DO share the same message shapes.
-
-### 6.2 Message rate
-- Send `race:state` at **~15 Hz**.
-- Ignore/limit clients that exceed **30 Hz**.
-
-### 6.3 Payload validation
-- Validate on receive (dev server + DO):
-  - `pos` length 3, `quat` length 4, `vel` length 3
-  - all numbers finite
-- Drop invalid packets; optionally send `error`.
-
-### 6.4 Interpolation
-- Client buffers opponent states with ~100–150ms delay.
-- Interpolate position and slerp rotation.
-- Gentle correction; avoid snapping unless error is extreme.
+- UI must include **Enable Tilt Controls** button.
+- If `DeviceMotionEvent.requestPermission` exists, call only within a click/tap handler.
+- If denied/unavailable: switch to joystick fallback with a clear message.
+- Provide **Calibrate**.
 
 ---
 
-## 7) Cloudflare Durable Objects guidance (production behavior)
-- Durable Object should act as the WebSocket server for rooms.
-- Prefer the WebSocket Hibernation API patterns:
-  - Avoid `setInterval` / `setTimeout` loops that prevent hibernation.
-  - Keep the DO idle-friendly: no unnecessary scheduled work.
-  - Treat each room as a DO instance keyed by roomCode. :contentReference[oaicite:5]{index=5}
+## 7) Definition of done per milestone
 
----
-
-## 8) Motion controls (iOS requirements)
-- Provide explicit UI button: **Enable Tilt Controls**
-- If `DeviceMotionEvent.requestPermission` exists:
-  - call only inside click/tap handler
-- If permission denied/unavailable:
-  - auto-switch to joystick fallback and show a clear message
-- Include **Calibrate** button.
-
----
-
-## 9) Definition of done per milestone
 A milestone is complete only if:
-- App runs without runtime errors
-- `lint` + `typecheck` pass
-- Manual smoke tests pass (desktop + mobile assumptions respected)
+- App runs without runtime errors.
+- `npm run lint`, `npm run typecheck`, `npm run build` all pass.
+- Manual smoke tests pass (desktop + mobile assumptions respected).
+- One commit is created and a brief changelog is provided.
 
 ---
-
-## 10) Git discipline
-- Commit at the end of each milestone minimum.
-- Conventional Commits:
-  - `feat: ...`, `fix: ...`, `chore: ...`, `refactor: ...`
-- After pushing, produce a **brief changelog**:
-  - user-visible changes + key technical notes
-
----
-
-## 11) Milestone checklists (quick reference)
-
-### v0.3 tilt checklist
-- iOS permission path exists (button triggers prompt if needed)
-- tilt affects marble motion
-- joystick fallback works and is discoverable
-- calibration works
-
-### v0.5 multiplayer checklist
-- Host creates room + QR appears
-- Join via URL works
-- both clients see opponent marble moving smoothly
-- race starts in sync via `startAt`
-- transport is raw WebSockets (client + dev server), not Socket.IO
-
-### v0.7 deploy checklist
-- Client deployed on Cloudflare Pages (static)
-- Durable Object room server deployed
-- Idle rooms can hibernate (no runaway timers)
-- README includes “share link” and QR flow
-
----
-
-## 12) Deliverables
-- `SPEC.md` and `AGENTS.md` must stay current.
-- `README.md` must include:
-  - install
-  - dev run
-  - phone testing steps
-  - iOS motion permission note
-  - host/join via QR/link flow
-  - deploy notes for Pages + DO

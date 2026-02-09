@@ -11,63 +11,86 @@
 1. **Great-feeling tilt controls** on Android + iOS (with an on-screen fallback).
 2. **Single-player time trial**: start → checkpoints → finish → best time.
 3. **2-player race via QR/link**: Host creates room, Joiner scans, both play the same track.
-4. **Always-available**: the game link works 24/7 without manually “starting” anything.
+4. **Always-available**: the game works 24/7 without manually “starting” anything.
 
-### 1.2 Hard constraints (updated)
-- Target dev time: **2–3 days**, ~**10–15 hours** total.
+### 1.2 Hard constraints
+- Target dev time: **2–3 days**, ~**10–15 hours** total for the MVP demo.
 - Players install nothing beyond opening a link (optional PWA install later).
 - Production must be **always-on** and **free or extremely low cost**.
 - Avoid architectures that require a personal machine to host or a manual “on switch”.
+- Multiplayer transport must be **raw WebSockets** (not Socket.IO) to port cleanly to Durable Objects.
 
-### 1.3 Non-goals (explicitly out of scope for this phase)
+### 1.3 Non-goals (out of scope for MVP)
 - App Store / Play Store shipping, native wrappers, payments.
-- Deterministic rollback netcode.
-- Track editor and large content library.
-- Matchmaking, accounts, anti-cheat, reconnection guarantees.
+- Deterministic rollback netcode / lockstep physics.
+- Track editor, large content library, cosmetics/progression.
+- Accounts/matchmaking/anti-cheat/reconnect guarantees.
 
-### 1.4 “Demo Done” checklist
+### 1.4 “Demo Done” checklist (minimum bar)
 - A brand-new player can:
-  - open link on phone
-  - press **Enable Tilt Controls** (iOS motion prompt may appear)
+  - open the link on phone
+  - press **Enable Tilt Controls** (iOS prompt may appear)
   - complete a race
   - host a room and show QR
   - a second phone scans and joins with no extra installs
 - No crashes on iOS Safari or Android Chrome during a 2–3 minute session.
 
+### 1.5 Replayability intent (post-demo)
+We want eventual “random” tracks, but **not full maze generation during the MVP**.
+
+Planned approach: **seeded, modular track generation**
+- Track assembled from a library of pre-authored “pieces” (straight, slope, left/right turn, S-curve, bump gate, etc.).
+- Deterministic generator assembles a valid course from a **seed**.
+- Same seed => same track (required for multiplayer fairness and reproducible debugging).
+- Implementation scheduled post-demo (see v0.8).
+
 ---
 
-## 2) Platform + production architecture (updated)
+## 2) Platform + production architecture (locked)
 
 ### 2.1 Platforms
 - **Mobile browsers**: iOS Safari, Android Chrome.
-- Desktop Chrome supported for development/testing (keyboard fallback).
+- Desktop Chrome supported for dev/testing (keyboard fallback).
 
 ### 2.2 Production hosting target (locked)
 #### Client (website)
-- **Cloudflare Pages (Free)** for static hosting.
-- Rationale: Pages Free advertises **Unlimited static requests** and **Unlimited bandwidth**, plus unlimited sites (within platform limits). :contentReference[oaicite:1]{index=1}
+- **Cloudflare Pages (Free)** for static hosting.  
+  https://pages.cloudflare.com/
 
 #### Multiplayer backend (rooms + realtime)
-- **Cloudflare Workers + Durable Objects** (WebSocket server inside a Durable Object).
-- Rationale: Durable Objects are designed for coordination/state with WebSockets. For cost efficiency, prefer the **WebSocket Hibernation API** so idle rooms can sleep. :contentReference[oaicite:2]{index=2}
+- **Cloudflare Workers + Durable Objects** where each room is a Durable Object that acts as the WebSocket server.
+- Prefer WebSocket hibernation patterns (avoid timers/alarms that prevent sleep):
+  - https://developers.cloudflare.com/durable-objects/best-practices/websockets/
+  - https://developers.cloudflare.com/durable-objects/examples/websocket-hibernation-server/
 
 #### Cost reality (important)
-- Static asset requests on Pages are free/unmetered as described above.
-- Any dynamic requests (Workers / Pages Functions / DO messages) count toward Workers usage; the Workers Free plan has a **daily request limit** (100,000/day) and resets daily. :contentReference[oaicite:3]{index=3}
-- MVP goal: keep realtime messages small and low-frequency (≈15 Hz state) and rely on hibernation so casual play remains within free limits.
+- Pages static traffic is separate from Workers request limits.
+- Workers Free plan includes a **daily request limit**:  
+  https://developers.cloudflare.com/workers/platform/limits/
+
+MVP goal: keep realtime messages small + low-frequency (≈15 Hz state) and leverage DO hibernation so casual play remains within free limits.
 
 ### 2.3 Local development architecture (mirrors production)
-- Dev server can be Node-based, but the **network protocol must be raw WebSockets** (not Socket.IO) so it ports cleanly to Durable Objects.
-- Production will not depend on Socket.IO. Socket.IO may be used only if explicitly approved later (not expected).
+- Node-based dev backend is allowed, but the protocol/transport must remain **raw WebSockets** with the same message envelope as production.
 
 ---
 
-## 3) Client tech stack
+## 3) Tech stack (single path)
+
+### 3.1 Client
 - **Vite + React + TypeScript**
-- 3D rendering: **Three.js**
+- Rendering: **Three.js**
 - Physics: **cannon-es**
-- QR code generation: a lightweight QR library (e.g., `qrcode`)
-- PWA: minimal manifest/service worker (later milestone)
+- QR generation: lightweight library (e.g., `qrcode`)
+- Optional PWA: manifest + service worker (later milestone)
+
+### 3.2 Backend
+- Local dev: Node + TypeScript (raw WS endpoint).
+- Production: Cloudflare Worker + Durable Object (raw WS endpoint).
+
+### 3.3 Shared protocol
+- Shared TypeScript protocol module with runtime guards.
+- Message envelope: `{ type: string, payload: unknown }`.
 
 ---
 
@@ -85,11 +108,16 @@
    - best time stored locally
    - rematch
 
-### 4.2 Track (MVP)
-- 1 authored track in code:
-  - start platform → downhill run → a few turns → finish gate
+### 4.2 Track plan (fixed now, seeded later)
+**MVP (v0.2–v1.0):** one authored track (code-defined), designed for stable physics:
+- Start platform → downhill run → a few turns → finish area
 - Static colliders: floor segments + wall rails
 - 2–4 sequential checkpoints (invisible triggers)
+
+**Design requirement now:**
+- Track builder API accepts an optional seed:
+  - `createTrack(opts?: { seed?: string })`
+- For MVP milestones, seed is accepted but layout stays fixed.
 
 ### 4.3 Physics feel targets
 - Controllable, weighty motion.
@@ -99,152 +127,87 @@
   - linear + angular damping
   - tilt accel clamp
 - Safety rails:
-  - soft speed cap
-  - auto-respawn if falling too long
+  - soft speed cap if needed
+  - auto-respawn when out of bounds
 
 ---
 
 ## 5) Controls and permissions
 
 ### 5.1 Tilt controls
-- Use DeviceMotion/DeviceOrientation as available.
+- Use DeviceMotion/DeviceOrientation where available.
 - iOS may require a user gesture to request motion permission:
-  - show an explicit **Enable Motion Controls** button
-- Apply smoothing (EMA) and include **Calibrate** button.
+  - provide explicit **Enable Tilt Controls** button
+- Apply smoothing (EMA) and provide **Calibrate** button.
 
 ### 5.2 Fallback controls (required)
-- On-screen thumb joystick (or left/right controls).
-- Desktop fallback: WASD / arrows.
+- On-screen thumb joystick (or equivalent).
+- Desktop fallback: WASD / arrow keys.
 
 ---
 
-## 6) Multiplayer design (2-player “arcade sync”, updated transport)
+## 6) Multiplayer design (2-player “arcade sync”)
 
 ### 6.1 Room flow
 - Host creates room → gets `roomCode` + join URL → shows QR.
 - Joiner scans QR → opens join URL → joins room.
 
 ### 6.2 Start synchronization
-- Host presses Start → backend broadcasts `startAt` (server time + offset).
+- Host presses Start → backend broadcasts `startAt`.
 - Both clients align countdown to `startAt`.
+- Later: include `seed` in the start payload.
 
 ### 6.3 State sync (not deterministic)
-- Each client simulates locally.
+- Each client simulates its own marble locally.
 - At ~15 Hz, client sends:
   - timestamp
   - pos (x,y,z), quat (x,y,z,w), vel (x,y,z)
-- Receiver renders opponent using interpolation buffer and gentle correction.
+- Receiver renders opponent using interpolation.
 
 ### 6.4 Win condition
 - Each client reports finish time.
 - Backend announces winner once both finish.
 
 ### 6.5 Abuse/stability limits
-- Rate limit incoming state packets (ignore > 30 Hz).
-- Validate payload shapes and numeric finiteness.
+- Rate limit incoming state packets.
+- Validate payload shapes.
 - Room max 2 players.
 
 ---
 
-## 7) Architecture + data model (updated)
+## 7) Repository layout
 
-### 7.1 Repo layout (monorepo)
+```
 get-tilted/
   client/
-  server/                  # local dev WS server + (optional) build scripts
-  worker/                  # Cloudflare Worker + Durable Object implementation
-  package.json
+  server/
+  shared/
+  worker/
   README.md
   SPEC.md
   AGENTS.md
-
-### 7.2 Client modules
-- engine/
-  - physicsWorld.ts
-  - track.ts
-  - marble.ts
-  - input/tilt.ts
-  - input/joystick.ts
-- net/
-  - wsClient.ts            # raw WebSocket client
-  - protocol.ts            # message types + runtime guards
-  - interp.ts              # opponent smoothing
-- ui/
-  - lobby, host/join, HUD, results, permissions
-
-### 7.3 Backend modules
-- server/ (local dev)
-  - wsDevServer.ts         # dev-only websocket server
-  - rooms.ts               # room lifecycle (dev)
-- worker/ (production)
-  - index.ts               # Worker entry
-  - roomDO.ts              # Durable Object WebSocket room
-  - protocol.ts            # shared protocol (ideally same as client)
+  package.json
+```
 
 ---
 
-## 8) Network protocol (raw WebSocket messages)
+## 8) Roadmap (versions)
 
-### 8.1 Message format (MVP)
-- JSON messages with `type` and `payload`
-- Example:
-  { "type": "room:create", "payload": {} }
-
-### 8.2 Messages (MVP)
-Client → Backend
-- room:create
-- room:join { roomCode, name }
-- race:ready
-- race:start
-- race:state { t, pos[3], quat[4], vel[3] }
-- race:finish { timeMs, checkpointsHit }
-
-Backend → Client
-- room:state { roomCode, players[] }
-- race:countdown { startAt }
-- race:opponentState { playerId, t, pos, quat, vel }
-- race:result { winnerId, times[] }
-- error { code, message }
+- v0.1 — Scaffold + Hello Marble (complete)
+- v0.1.1 — Protocol + WS abstraction + DO skeleton (complete)
+- v0.2 — Track + Respawn (next)
+- v0.3 — Tilt + Fallback Controls
+- v0.4 — Solo Time Trial
+- v0.5 — Multiplayer Rooms + QR Join
+- v0.6 — Race Result + Rematch
+- v0.7 — Cloudflare Deploy
+- v0.8 — Seeded Modular Tracks
+- v1.0 — Demo Release Candidate
 
 ---
 
-## 9) Roadmap with versions (updated to reflect production target)
-
-### v0.1 — Scaffold + “Hello Marble”
-- Monorepo + client renders sphere + plane, physics stepping, reset, keyboard fallback.
-- Backend boots locally (can be minimal).
-
-### v0.2 — Track + Respawn
-- Playable downhill track + stable respawn.
-
-### v0.3 — Tilt + Fallback Controls
-- iOS permission flow + smoothing + joystick fallback + calibrate.
-
-### v0.4 — Solo Time Trial
-- Checkpoints, finish gate, timer + local best time.
-
-### v0.5 — Multiplayer Rooms + QR Join (RAW WS)
-- Replace any Socket.IO assumptions with raw WebSockets.
-- Room codes, QR join URL, start sync via `startAt`.
-- Opponent interpolation.
-
-### v0.6 — Race Result + Rematch
-- Winner display, stable rematch.
-
-### v0.7 — Cloudflare Deploy (Pages + DO)
-- Deploy client to Cloudflare Pages.
-- Deploy Worker + Durable Object WebSocket rooms.
-- Ensure DO uses WebSocket hibernation patterns (no timers/intervals preventing sleep).
-
-### v1.0 — Demo Release Candidate
-- Performance pass + bugfixes from device testing.
-- Final packaging + README “share this link” steps.
-
----
-
-## 10) Acceptance criteria for “Major Planning Complete”
-This SPEC is complete when:
-- MVP scope is explicit (single track, 2 players, arcade sync).
-- Production target is locked (Cloudflare Pages + Workers/DO).
-- Multiplayer protocol is raw WebSockets and mirrors production.
-- Version roadmap is linear and testable.
+## 9) Acceptance criteria for “Major Planning Complete”
+- MVP scope is explicit.
+- Production target is locked.
+- Multiplayer protocol mirrors production.
+- Roadmap is linear and testable.
