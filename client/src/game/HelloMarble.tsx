@@ -47,6 +47,7 @@ type TuningState = {
   physicsPreset: PhysicsPresetId;
   gravityG: number;
   tiltStrength: number;
+  gyroSensitivity: number;
   maxSpeed: number;
   maxTiltDeg: number;
   maxBoardAngVel: number;
@@ -88,6 +89,7 @@ const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
   gravityG: 21.9,
   tiltStrength: 1.56,
+  gyroSensitivity: 1.35,
   maxSpeed: 20,
   maxTiltDeg: 14,
   maxBoardAngVel: 8.7,
@@ -96,7 +98,7 @@ const DEFAULT_TUNING: TuningState = {
   angularDamping: 0.04,
   cameraPreset: "chaseRight",
   bounce: 0.1,
-  contactFriction: 0.99,
+  contactFriction: 0.88,
   contactRestitution: 0.1,
   invertTiltX: false,
   invertTiltZ: false,
@@ -124,6 +126,7 @@ const PHYSICS_PRESETS: Record<
     | "linearDamping"
     | "angularDamping"
     | "bounce"
+    | "gyroSensitivity"
     | "contactFriction"
     | "contactRestitution"
     | "maxBoardAngVel"
@@ -135,7 +138,8 @@ const PHYSICS_PRESETS: Record<
     linearDamping: 0.08,
     angularDamping: 0.08,
     bounce: 0.1,
-    contactFriction: 0.75,
+    gyroSensitivity: 1.35,
+    contactFriction: 0.88,
     contactRestitution: 0.1,
     maxBoardAngVel: 5,
     tiltFilterTau: 0.1,
@@ -145,6 +149,7 @@ const PHYSICS_PRESETS: Record<
     linearDamping: 0.18,
     angularDamping: 0.18,
     bounce: 0.03,
+    gyroSensitivity: 1.35,
     contactFriction: 0.85,
     contactRestitution: 0.03,
     maxBoardAngVel: 3.5,
@@ -155,6 +160,7 @@ const PHYSICS_PRESETS: Record<
     linearDamping: 0.06,
     angularDamping: 0.06,
     bounce: 0.08,
+    gyroSensitivity: 1.35,
     contactFriction: 0.7,
     contactRestitution: 0.08,
     maxBoardAngVel: 6,
@@ -195,6 +201,9 @@ function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.gravityG === "number") base.gravityG = clamp(value.gravityG, 8, 24);
   if (typeof value.tiltStrength === "number") {
     base.tiltStrength = clamp(value.tiltStrength, 0.5, 2);
+  }
+  if (typeof value.gyroSensitivity === "number") {
+    base.gyroSensitivity = clamp(value.gyroSensitivity, 0.5, 2.5);
   }
   if (typeof value.maxSpeed === "number") base.maxSpeed = clamp(value.maxSpeed, 4, 20);
   if (typeof value.maxTiltDeg === "number") {
@@ -812,7 +821,11 @@ export function HelloMarble() {
       const touchIntent = touchTiltRef.current;
 
       if (status.enabled && status.permission === "granted" && status.supported) {
-        sourceIntent = motionTiltRef.current;
+        sourceIntent = {
+          x: motionTiltRef.current.x * currentTuning.gyroSensitivity,
+          y: 0,
+          z: motionTiltRef.current.z * currentTuning.gyroSensitivity,
+        };
       } else if (!status.supported || status.permission === "denied") {
         sourceIntent = { x: touchIntent.x, y: 0, z: touchIntent.z };
       } else {
@@ -1287,6 +1300,29 @@ export function HelloMarble() {
                   value={tuning.tiltStrength}
                   onChange={(event) =>
                     updateTuning("tiltStrength", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              Gyro Sensitivity
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={0.5}
+                  max={2.5}
+                  step={0.01}
+                  value={tuning.gyroSensitivity}
+                  onChange={(event) =>
+                    updateTuning("gyroSensitivity", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.gyroSensitivity}
+                  onChange={(event) =>
+                    updateTuning("gyroSensitivity", Number(event.target.value))
                   }
                 />
               </div>

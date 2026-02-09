@@ -189,7 +189,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       .multiplyScalar(0.5);
     const floorCenter = topCenter.clone().addScaledVector(up, -FLOOR_THICK / 2);
 
-    addPart(group, boardBody, {
+    addVisualPart(group, {
       size: new THREE.Vector3(width, FLOOR_THICK, length),
       position: floorCenter,
       rotation,
@@ -261,6 +261,16 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     width: finishSegment.width,
     railLeft: true,
     railRight: true,
+  });
+
+  // Keep floor visuals segmented, but use one collider slab for seamless rolling.
+  const fullFloorLength = pathStartTopPoint.z - startTopBackPoint.z;
+  const fullFloorCenterZ = startTopBackPoint.z + fullFloorLength / 2;
+  addCompoundPart(boardBody, {
+    size: new THREE.Vector3(FINISH_WIDTH, FLOOR_THICK, fullFloorLength),
+    position: new THREE.Vector3(0, 0, fullFloorCenterZ),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: floorMaterial,
   });
 
   boardBody.aabbNeedsUpdate = true;
