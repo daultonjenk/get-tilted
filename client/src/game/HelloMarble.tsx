@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
+import { createTrack } from "./track/createTrack";
 
 type MarbleDebug = {
   fps: number;
@@ -9,7 +10,6 @@ type MarbleDebug = {
   posZ: number;
 };
 
-const SPAWN = new CANNON.Vec3(0, 3, 0);
 const INPUT_FORCE = 12;
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
@@ -17,6 +17,7 @@ const MAX_FRAME_DELTA = 0.1;
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const resetRef = useRef<() => void>(() => {});
+  const [respawnCount, setRespawnCount] = useState(0);
   const [debug, setDebug] = useState<MarbleDebug>({
     fps: 0,
     posX: 0,
@@ -48,25 +49,24 @@ export function HelloMarble() {
     directionalLight.position.set(6, 8, 5);
     scene.add(directionalLight);
 
+    const track = createTrack();
+    scene.add(track.group);
+
     const world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
+    for (const body of track.bodies) {
+      world.addBody(body);
+    }
 
     const marbleRadius = 0.5;
     const marbleBody = new CANNON.Body({
       mass: 1,
       shape: new CANNON.Sphere(marbleRadius),
-      position: SPAWN.clone(),
+      position: track.spawn.clone(),
       linearDamping: 0.2,
       angularDamping: 0.2,
     });
     world.addBody(marbleBody);
-
-    const groundBody = new CANNON.Body({
-      mass: 0,
-      shape: new CANNON.Plane(),
-    });
-    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-    world.addBody(groundBody);
 
     const marbleMesh = new THREE.Mesh(
       new THREE.SphereGeometry(marbleRadius, 32, 32),
@@ -74,18 +74,12 @@ export function HelloMarble() {
     );
     scene.add(marbleMesh);
 
-    const groundMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(24, 24),
-      new THREE.MeshStandardMaterial({ color: 0x2d5a27 }),
-    );
-    groundMesh.rotation.x = -Math.PI / 2;
-    scene.add(groundMesh);
-
-    const gridHelper = new THREE.GridHelper(24, 24, 0x88ff88, 0x244224);
-    scene.add(gridHelper);
-
     const pressedKeys = new Set<string>();
     const force = new CANNON.Vec3();
+    const cameraOffset = new THREE.Vector3(0, 4.5, 8);
+    const lookOffset = new THREE.Vector3(0, 0.6, 0);
+    const cameraTarget = new THREE.Vector3();
+    const lookTarget = new THREE.Vector3();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -106,13 +100,17 @@ export function HelloMarble() {
     window.addEventListener("keydown", handleKeyDown, { passive: false });
     window.addEventListener("keyup", handleKeyUp);
 
-    const resetMarble = () => {
-      marbleBody.position.copy(SPAWN);
+    const respawnMarble = (incrementCounter: boolean) => {
+      marbleBody.position.copy(track.spawn);
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
+      force.set(0, 0, 0);
+      if (incrementCounter) {
+        setRespawnCount((count) => count + 1);
+      }
     };
-    resetRef.current = resetMarble;
+    resetRef.current = () => respawnMarble(false);
 
     const resize = () => {
       const width = mount.clientWidth;
@@ -150,6 +148,10 @@ export function HelloMarble() {
         accumulator -= TIMESTEP;
       }
 
+      if (marbleBody.position.y < track.respawnY) {
+        respawnMarble(true);
+      }
+
       marbleMesh.position.set(
         marbleBody.position.x,
         marbleBody.position.y,
@@ -161,6 +163,20 @@ export function HelloMarble() {
         marbleBody.quaternion.z,
         marbleBody.quaternion.w,
       );
+
+      cameraTarget.set(
+        marbleBody.position.x + cameraOffset.x,
+        marbleBody.position.y + cameraOffset.y,
+        marbleBody.position.z + cameraOffset.z,
+      );
+      const cameraAlpha = 1 - Math.exp(-8 * delta);
+      camera.position.lerp(cameraTarget, cameraAlpha);
+      lookTarget.set(
+        marbleBody.position.x + lookOffset.x,
+        marbleBody.position.y + lookOffset.y,
+        marbleBody.position.z + lookOffset.z,
+      );
+      camera.lookAt(lookTarget);
 
       renderer.render(scene, camera);
 
@@ -187,10 +203,25 @@ export function HelloMarble() {
       window.removeEventListener("resize", resize);
       mount.removeChild(renderer.domElement);
       renderer.dispose();
+      scene.remove(track.group);
+      for (const child of track.group.children) {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            for (const material of child.material) {
+              material.dispose();
+            }
+          } else {
+            child.material.dispose();
+          }
+        }
+      }
+      for (const body of track.bodies) {
+        world.removeBody(body);
+      }
+      world.removeBody(marbleBody);
       marbleMesh.geometry.dispose();
       (marbleMesh.material as THREE.Material).dispose();
-      groundMesh.geometry.dispose();
-      (groundMesh.material as THREE.Material).dispose();
     };
   }, []);
 
@@ -203,6 +234,7 @@ export function HelloMarble() {
           Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)},{" "}
           {debug.posZ.toFixed(2)}
         </p>
+        <p>Respawns: {respawnCount}</p>
         <button type="button" onClick={() => resetRef.current()}>
           Reset Marble
         </button>
