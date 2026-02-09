@@ -98,7 +98,10 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
 
     switch (parsed.msg.type) {
       case "ping":
-        send(ws as SendableSocket, "pong", { t: parsed.msg.payload.t });
+        send(ws as SendableSocket, "pong", {
+          t: parsed.msg.payload.t,
+          serverNowMs: Date.now(),
+        });
         return;
       case "room:create": {
         let roomCode = generateRoomCode();

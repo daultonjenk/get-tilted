@@ -77,6 +77,7 @@ type GameMode = "solo" | "multiplayer";
 
 type GhostSnapshot = {
   t: number;
+  recvAtMs: number;
   pos: THREE.Vector3;
   quat: THREE.Quaternion;
   vel: THREE.Vector3;
@@ -85,6 +86,8 @@ type GhostSnapshot = {
   trackVel?: THREE.Vector3;
 };
 
+type GhostPoseMode = "world" | "trackLocal";
+
 type GhostRenderState = {
   snapshots: GhostSnapshot[];
   mesh: THREE.Mesh;
@@ -92,6 +95,8 @@ type GhostRenderState = {
   jitterMs: number;
   interpolationDelayMs: number;
   lastSourceT: number;
+  lastRecvAtMs: number;
+  poseMode: GhostPoseMode | null;
   hasRendered: boolean;
   renderedPos: THREE.Vector3;
   renderedQuat: THREE.Quaternion;
@@ -106,6 +111,7 @@ type NetSmoothingDebug = {
   droppedStale: number;
   snapshotQueueSummary: string;
   latestRemoteAgeMs: number | null;
+  serverClockOffsetMs: number;
   inputSourcesSummary: string;
   inputIntentX: number;
   inputIntentZ: number;
@@ -120,8 +126,8 @@ const TOPDOWN_Z_OFFSET = 2;
 const BOARD_TILT_SMOOTH = 12;
 const PIVOT_SMOOTH = 10;
 const SOURCE_RATE_MS = 1000 / 15;
-const INTERP_DELAY_MIN_MS = 55;
-const INTERP_DELAY_MAX_MS = 110;
+const INTERP_DELAY_MIN_MS = 35;
+const INTERP_DELAY_MAX_MS = 80;
 const EXTRAPOLATION_MAX_MS = 80;
 const SNAP_DISTANCE_M = 8;
 const MAX_GHOST_STEP_SPEED_MPS = 35;
@@ -248,14 +254,6 @@ function sanitizeJoinHost(value: string): string {
 
   const hostPattern = /^[A-Za-z0-9.-]+(?::\d+)?$/;
   return hostPattern.test(next) ? next : "";
-}
-
-function normalizeCountdownStartAt(startAtMs: number, stepMs: number): number {
-  const now = Date.now();
-  const remainingMs = startAtMs - now;
-  // Clamp skewed clocks to keep countdown progression reliable across devices.
-  const clampedRemainingMs = clamp(remainingMs, 0, stepMs);
-  return now + clampedRemainingMs;
 }
 
 function isLocalHost(hostname: string): boolean {
@@ -516,6 +514,7 @@ export function HelloMarble() {
     droppedStale: 0,
     snapshotQueueSummary: "none",
     latestRemoteAgeMs: null,
+    serverClockOffsetMs: 0,
     inputSourcesSummary: "none",
     inputIntentX: 0,
     inputIntentZ: 0,
@@ -742,7 +741,9 @@ export function HelloMarble() {
     let trialStartAt: number | null = null;
     let prevMarbleZ = marbleBody.position.z;
     let totalDroppedStale = 0;
-    let latestRemoteEpochMs: number | null = null;
+    let latestRemoteRecvAtMs: number | null = null;
+    let serverClockOffsetMs = 0;
+    let isRaceFinishedLocal = false;
     let inputSourcesSummary = "none";
     let inputIntentX = 0;
     let inputIntentZ = 0;
@@ -765,6 +766,8 @@ export function HelloMarble() {
         jitterMs: 0,
         interpolationDelayMs: 75,
         lastSourceT: -1,
+        lastRecvAtMs: -1,
+        poseMode: null,
         hasRendered: false,
         renderedPos: new THREE.Vector3(),
         renderedQuat: new THREE.Quaternion(),
@@ -778,6 +781,8 @@ export function HelloMarble() {
       for (const [, playerState] of ghostPlayers) {
         playerState.snapshots.length = 0;
         playerState.lastSourceT = -1;
+        playerState.lastRecvAtMs = -1;
+        playerState.poseMode = null;
         playerState.hasRendered = false;
         playerState.mesh.visible = false;
       }
@@ -816,6 +821,9 @@ export function HelloMarble() {
     });
     raceClient.onError((error) => {
       setNetError(error);
+    });
+    raceClient.onClockSync((offsetMs) => {
+      serverClockOffsetMs = offsetMs;
     });
     raceClient.onMessage((message: TypedMessage) => {
       switch (message.type) {
@@ -880,9 +888,7 @@ export function HelloMarble() {
           );
           if (typeof message.payload.countdownStartAtMs === "number") {
             resetGhostSnapshots();
-            setCountdownStartAtMs(
-              normalizeCountdownStartAt(message.payload.countdownStartAtMs, 1000),
-            );
+            setCountdownStartAtMs(message.payload.countdownStartAtMs);
             setCountdownStepMs(1000);
             setRacePhase("countdown");
             setControlsLocked(true);
@@ -907,9 +913,7 @@ export function HelloMarble() {
             return;
           }
           resetGhostSnapshots();
-          setCountdownStartAtMs(
-            normalizeCountdownStartAt(message.payload.startAtMs, message.payload.stepMs),
-          );
+          setCountdownStartAtMs(message.payload.startAtMs);
           setCountdownStepMs(message.payload.stepMs);
           setRacePhase("countdown");
           setControlsLocked(true);
@@ -922,19 +926,31 @@ export function HelloMarble() {
           if (gameModeRef.current !== "multiplayer") {
             return;
           }
-          latestRemoteEpochMs = message.payload.t;
+          const recvAtMs = Date.now();
+          latestRemoteRecvAtMs = recvAtMs;
           if (message.payload.playerId === raceClient.getPlayerId()) {
             return;
           }
           const playerState = getOrCreateGhostState(message.payload.playerId);
+          const hasTrackLocalSnapshot = Boolean(
+            message.payload.trackPos &&
+              message.payload.trackQuat &&
+              message.payload.trackVel,
+          );
+          if (playerState.poseMode === null) {
+            playerState.poseMode = hasTrackLocalSnapshot ? "trackLocal" : "world";
+          }
+          if (playerState.poseMode === "trackLocal" && !hasTrackLocalSnapshot) {
+            return;
+          }
           if (playerState.lastSourceT >= 0 && message.payload.t <= playerState.lastSourceT) {
             playerState.droppedStaleCount += 1;
             totalDroppedStale += 1;
             return;
           }
 
-          if (playerState.lastSourceT >= 0) {
-            const sourceDelta = message.payload.t - playerState.lastSourceT;
+          if (playerState.lastRecvAtMs >= 0) {
+            const sourceDelta = recvAtMs - playerState.lastRecvAtMs;
             if (sourceDelta > 0 && sourceDelta < 1000) {
               playerState.avgSourceDeltaMs +=
                 (sourceDelta - playerState.avgSourceDeltaMs) * 0.16;
@@ -950,9 +966,11 @@ export function HelloMarble() {
             }
           }
           playerState.lastSourceT = message.payload.t;
+          playerState.lastRecvAtMs = recvAtMs;
 
           playerState.snapshots.push({
             t: message.payload.t,
+            recvAtMs,
             pos: new THREE.Vector3(...message.payload.pos),
             quat: new THREE.Quaternion(...message.payload.quat),
             vel: new THREE.Vector3(...message.payload.vel),
@@ -1070,6 +1088,11 @@ export function HelloMarble() {
     window.addEventListener("keyup", handleKeyUp);
 
     const respawnMarble = (incrementCounter: boolean) => {
+      isRaceFinishedLocal = false;
+      marbleBody.type = CANNON.Body.DYNAMIC;
+      marbleBody.mass = 1;
+      marbleBody.updateMassProperties();
+      marbleBody.wakeUp();
       marbleBody.position.copy(computeSpawnWorld());
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
@@ -1173,9 +1196,21 @@ export function HelloMarble() {
 
     const resolveSnapshotPose = (
       snapshot: GhostSnapshot,
+      boardPos: THREE.Vector3,
+      boardQuat: THREE.Quaternion,
+      poseMode: GhostPoseMode,
       outPos: THREE.Vector3,
       outQuat: THREE.Quaternion,
     ): void => {
+      if (
+        poseMode === "trackLocal" &&
+        snapshot.trackPos &&
+        snapshot.trackQuat
+      ) {
+        outPos.copy(snapshot.trackPos).applyQuaternion(boardQuat).add(boardPos);
+        outQuat.copy(boardQuat).multiply(snapshot.trackQuat);
+        return;
+      }
       outPos.copy(snapshot.pos);
       outQuat.copy(snapshot.quat);
     };
@@ -1257,7 +1292,7 @@ export function HelloMarble() {
       const countdownStart = countdownStartAtRef.current;
       if (countdownStart != null) {
         const stepMs = countdownStepMsRef.current;
-        const elapsedMs = Date.now() - countdownStart;
+        const elapsedMs = raceClient.getServerNowMs() - countdownStart;
         if (elapsedMs >= 0 && elapsedMs < stepMs * COUNTDOWN_LABELS.length) {
           const nextIndex = clamp(
             Math.floor(elapsedMs / stepMs),
@@ -1396,7 +1431,8 @@ export function HelloMarble() {
         nowMs - lastRaceSendAt >= SOURCE_RATE_MS &&
         gameModeRef.current === "multiplayer" &&
         racePhaseRef.current === "racing" &&
-        trialStateRef.current !== "finished"
+        trialStateRef.current !== "finished" &&
+        !isRaceFinishedLocal
       ) {
         boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
         boardQuatThree.set(
@@ -1440,7 +1476,7 @@ export function HelloMarble() {
         lastRaceSendAt = nowMs;
       }
 
-      if (marbleBody.position.y < track.respawnY) {
+      if (!isRaceFinishedLocal && marbleBody.position.y < track.respawnY) {
         respawnMarble(true);
       }
 
@@ -1456,6 +1492,15 @@ export function HelloMarble() {
       ) {
         const elapsed = nowMs - trialStartAt;
         trialStartAt = null;
+        if (gameModeRef.current === "multiplayer") {
+          isRaceFinishedLocal = true;
+          setControlsLocked(true);
+          marbleBody.type = CANNON.Body.STATIC;
+          marbleBody.mass = 0;
+          marbleBody.updateMassProperties();
+          marbleBody.velocity.set(0, 0, 0);
+          marbleBody.angularVelocity.set(0, 0, 0);
+        }
         setTrialState("finished");
         setTrialCurrentMs(null);
         setTrialLastMs(elapsed);
@@ -1490,17 +1535,35 @@ export function HelloMarble() {
         if (snapshots.length === 0) {
           continue;
         }
+        const poseMode = playerState.poseMode ?? "world";
         const targetInterpTime = interpNowMs - playerState.interpolationDelayMs;
-        while (snapshots.length >= 2 && snapshots[1]!.t <= targetInterpTime) {
+        while (
+          snapshots.length >= 2 &&
+          snapshots[1]!.recvAtMs <= targetInterpTime
+        ) {
           snapshots.shift();
         }
         if (snapshots.length >= 2) {
           const a = snapshots[0]!;
           const b = snapshots[1]!;
-          resolveSnapshotPose(a, tempVecA, tempQuatA);
-          resolveSnapshotPose(b, tempVecB, tempQuatB);
-          const span = Math.max(b.t - a.t, 1);
-          const alpha = clamp((targetInterpTime - a.t) / span, 0, 1);
+          resolveSnapshotPose(
+            a,
+            boardPosThree,
+            boardQuatThree,
+            poseMode,
+            tempVecA,
+            tempQuatA,
+          );
+          resolveSnapshotPose(
+            b,
+            boardPosThree,
+            boardQuatThree,
+            poseMode,
+            tempVecB,
+            tempQuatB,
+          );
+          const span = Math.max(b.recvAtMs - a.recvAtMs, 1);
+          const alpha = clamp((targetInterpTime - a.recvAtMs) / span, 0, 1);
           tempVecA.lerp(tempVecB, alpha);
           tempQuatA.slerp(tempQuatB, alpha);
           applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
@@ -1508,11 +1571,27 @@ export function HelloMarble() {
         }
 
         const latest = snapshots[0]!;
-        resolveSnapshotPose(latest, tempVecA, tempQuatA);
-        const extrapolationMs = targetInterpTime - latest.t;
+        resolveSnapshotPose(
+          latest,
+          boardPosThree,
+          boardQuatThree,
+          poseMode,
+          tempVecA,
+          tempQuatA,
+        );
+        const extrapolationMs = targetInterpTime - latest.recvAtMs;
         if (extrapolationMs > 0 && extrapolationMs <= EXTRAPOLATION_MAX_MS) {
           const dt = extrapolationMs / 1000;
-          tempVecA.addScaledVector(latest.vel, dt);
+          if (
+            poseMode === "trackLocal" &&
+            latest.trackPos &&
+            latest.trackVel
+          ) {
+            tempVecB.copy(latest.trackPos).addScaledVector(latest.trackVel, dt);
+            tempVecA.copy(tempVecB).applyQuaternion(boardQuatThree).add(boardPosThree);
+          } else {
+            tempVecA.addScaledVector(latest.vel, dt);
+          }
           extrapolatingPlayers += 1;
         }
         applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
@@ -1635,8 +1714,8 @@ export function HelloMarble() {
                 .join(", ")
             : "none";
         const latestRemoteAgeMs =
-          typeof latestRemoteEpochMs === "number"
-            ? Math.max(0, Date.now() - latestRemoteEpochMs)
+          typeof latestRemoteRecvAtMs === "number"
+            ? Math.max(0, Date.now() - latestRemoteRecvAtMs)
             : null;
 
         if (trialStartAt != null) {
@@ -1665,6 +1744,7 @@ export function HelloMarble() {
           droppedStale: totalDroppedStale,
           snapshotQueueSummary,
           latestRemoteAgeMs,
+          serverClockOffsetMs,
           inputSourcesSummary,
           inputIntentX,
           inputIntentZ,
@@ -2482,6 +2562,7 @@ export function HelloMarble() {
                 ? "n/a"
                 : netSmoothing.latestRemoteAgeMs.toFixed(1)}
             </p>
+            <p>Server clock offset (ms): {netSmoothing.serverClockOffsetMs.toFixed(1)}</p>
             <p>Input sources: {netSmoothing.inputSourcesSummary}</p>
             <p>
               Input intent: {netSmoothing.inputIntentX.toFixed(2)},{" "}

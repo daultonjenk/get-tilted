@@ -1,6 +1,6 @@
 export type MessagePayloadMap = {
   ping: { t: number };
-  pong: { t: number };
+  pong: { t: number; serverNowMs: number };
   "room:create": Record<string, never>;
   "room:created": { roomCode: string };
   "room:join": { roomCode: string; name?: string };
@@ -155,10 +155,16 @@ export function validatePayload<TType extends MessageType>(
 
   switch (type) {
     case "ping":
-    case "pong":
       return isNumber(payload.t)
         ? { ok: true }
         : { ok: false, error: "Expected numeric field t" };
+    case "pong":
+      if (!isNumber(payload.t)) {
+        return { ok: false, error: "Expected numeric field t" };
+      }
+      return isNumber(payload.serverNowMs)
+        ? { ok: true }
+        : { ok: false, error: "Expected numeric field serverNowMs" };
     case "room:create":
       return hasNoOwnKeys(payload)
         ? { ok: true }

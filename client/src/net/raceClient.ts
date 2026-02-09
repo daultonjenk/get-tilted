@@ -21,6 +21,9 @@ export type RemoteRaceState = {
 type MessageListener = (message: TypedMessage) => void;
 type ErrorListener = (error: string) => void;
 type StatusListener = (status: WSStatus) => void;
+type ClockSyncListener = (offsetMs: number) => void;
+
+const PING_INTERVAL_MS = 2000;
 
 export class RaceClient {
   private readonly ws: WSClient;
@@ -35,6 +38,14 @@ export class RaceClient {
 
   private readonly statusListeners = new Set<StatusListener>();
 
+  private readonly clockSyncListeners = new Set<ClockSyncListener>();
+
+  private serverClockOffsetMs = 0;
+
+  private hasClockSync = false;
+
+  private pingTimer: number | null = null;
+
   constructor(url?: string) {
     this.ws = new WSClient(url);
     this.ws.onStatusChange((status) => {
@@ -44,6 +55,12 @@ export class RaceClient {
       if (status === "disconnected") {
         this.roomCode = "";
         this.playerId = "";
+        this.stopPingLoop();
+        this.serverClockOffsetMs = 0;
+        this.hasClockSync = false;
+        this.emitClockOffset();
+      } else if (status === "connected") {
+        this.startPingLoop();
       }
     });
     this.ws.onError((error) => {
@@ -62,6 +79,9 @@ export class RaceClient {
       if (message.type === "race:hello:ack") {
         this.roomCode = message.payload.roomCode;
         this.playerId = message.payload.playerId;
+      }
+      if (message.type === "pong") {
+        this.onPong(message.payload.t, message.payload.serverNowMs);
       }
       for (const cb of this.messageListeners) {
         cb(message);
@@ -139,6 +159,10 @@ export class RaceClient {
     });
   }
 
+  getServerNowMs(): number {
+    return Date.now() + this.serverClockOffsetMs;
+  }
+
   onMessage(cb: MessageListener): () => void {
     this.messageListeners.add(cb);
     return () => this.messageListeners.delete(cb);
@@ -153,5 +177,59 @@ export class RaceClient {
     this.statusListeners.add(cb);
     cb(this.ws.getStatus());
     return () => this.statusListeners.delete(cb);
+  }
+
+  onClockSync(cb: ClockSyncListener): () => void {
+    this.clockSyncListeners.add(cb);
+    cb(this.serverClockOffsetMs);
+    return () => this.clockSyncListeners.delete(cb);
+  }
+
+  private startPingLoop(): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (this.pingTimer != null) {
+      return;
+    }
+    this.sendPing();
+    this.pingTimer = window.setInterval(() => {
+      this.sendPing();
+    }, PING_INTERVAL_MS);
+  }
+
+  private stopPingLoop(): void {
+    if (this.pingTimer == null) {
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.clearInterval(this.pingTimer);
+    }
+    this.pingTimer = null;
+  }
+
+  private sendPing(): void {
+    this.ws.send("ping", { t: Date.now() });
+  }
+
+  private onPong(sentAtMs: number, serverNowMs: number): void {
+    const receivedAtMs = Date.now();
+    const rttMs = Math.max(0, receivedAtMs - sentAtMs);
+    const estimatedServerNowAtReceive = serverNowMs + rttMs * 0.5;
+    const sampleOffset = estimatedServerNowAtReceive - receivedAtMs;
+    if (!this.hasClockSync) {
+      this.serverClockOffsetMs = sampleOffset;
+      this.hasClockSync = true;
+    } else {
+      this.serverClockOffsetMs =
+        this.serverClockOffsetMs * 0.85 + sampleOffset * 0.15;
+    }
+    this.emitClockOffset();
+  }
+
+  private emitClockOffset(): void {
+    for (const cb of this.clockSyncListeners) {
+      cb(this.serverClockOffsetMs);
+    }
   }
 }

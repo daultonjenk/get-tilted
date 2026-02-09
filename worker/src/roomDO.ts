@@ -38,7 +38,10 @@ export class RoomDO {
       }
 
       if (parsed.msg.type === "ping") {
-        this.send(server, "pong", { t: parsed.msg.payload.t });
+        this.send(server, "pong", {
+          t: parsed.msg.payload.t,
+          serverNowMs: Date.now(),
+        });
       }
     });
 
