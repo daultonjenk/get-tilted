@@ -13,6 +13,9 @@ export type RemoteRaceState = {
   pos: [number, number, number];
   quat: [number, number, number, number];
   vel: [number, number, number];
+  trackPos?: [number, number, number];
+  trackQuat?: [number, number, number, number];
+  trackVel?: [number, number, number];
 };
 
 type MessageListener = (message: TypedMessage) => void;
@@ -119,6 +122,9 @@ export class RaceClient {
       pos: state.pos,
       quat: state.quat,
       vel: state.vel,
+      trackPos: state.trackPos,
+      trackQuat: state.trackQuat,
+      trackVel: state.trackVel,
     });
   }
 

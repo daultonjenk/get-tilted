@@ -18,6 +18,9 @@ export type MessagePayloadMap = {
     pos: [number, number, number];
     quat: [number, number, number, number];
     vel: [number, number, number];
+    trackPos?: [number, number, number];
+    trackQuat?: [number, number, number, number];
+    trackVel?: [number, number, number];
   };
   "race:left": { roomCode: string; playerId: string };
   error: { code: string; message: string };
@@ -94,6 +97,16 @@ function isTuple4(value: unknown): value is [number, number, number, number] {
     value.length === 4 &&
     value.every((entry) => isNumber(entry))
   );
+}
+
+function isOptionalTuple3(value: unknown): value is [number, number, number] | undefined {
+  return typeof value === "undefined" || isTuple3(value);
+}
+
+function isOptionalTuple4(
+  value: unknown,
+): value is [number, number, number, number] | undefined {
+  return typeof value === "undefined" || isTuple4(value);
 }
 
 function isPlayerList(
@@ -186,9 +199,18 @@ export function validatePayload<TType extends MessageType>(
       if (!isTuple4(payload.quat)) {
         return { ok: false, error: "Expected numeric quat tuple" };
       }
-      return isTuple3(payload.vel)
+      if (!isTuple3(payload.vel)) {
+        return { ok: false, error: "Expected numeric vel tuple" };
+      }
+      if (!isOptionalTuple3(payload.trackPos)) {
+        return { ok: false, error: "Expected optional numeric trackPos tuple" };
+      }
+      if (!isOptionalTuple4(payload.trackQuat)) {
+        return { ok: false, error: "Expected optional numeric trackQuat tuple" };
+      }
+      return isOptionalTuple3(payload.trackVel)
         ? { ok: true }
-        : { ok: false, error: "Expected numeric vel tuple" };
+        : { ok: false, error: "Expected optional numeric trackVel tuple" };
     case "race:left":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };

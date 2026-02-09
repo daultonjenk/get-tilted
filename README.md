@@ -73,6 +73,12 @@ Current v0.5 flow:
 3. Joiner scans QR or opens the shown URL (`?room=ROOMCODE`) and clicks `Join`.
 4. Both players can see a real-time ghost marble representation of the opponent.
 
+Ghost smoothing notes:
+
+1. Ghost updates remain at ~15 Hz for free-tier bandwidth safety.
+2. Clients now use adaptive interpolation (roughly 55-110 ms), bounded extrapolation, and
+   track-local ghost sync with world-space fallback for mixed client versions.
+
 Dev LAN notes:
 
 1. Run with host exposure so phone can reach the client:
