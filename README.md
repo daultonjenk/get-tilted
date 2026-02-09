@@ -84,11 +84,10 @@ Ghost smoothing notes:
 
 1. Ghost updates remain at ~15 Hz for free-tier bandwidth safety.
 2. Clients now use adaptive interpolation (roughly 55-110 ms), bounded extrapolation, and
-   track-local ghost sync with world-space fallback for mixed client versions.
+   world-space-only ghost sync.
 3. `race:state` now supports optional monotonic `seq` ordering. Clients prefer `seq` for
    deterministic out-of-order drops and fall back to timestamp ordering for older peers.
-4. If a player's track-local reconstruction repeatedly diverges from that same snapshot's world
-   pose, that ghost is forced to one-way world mode for the remainder of the race session.
+4. World-space-only ghost rendering avoids per-client board-frame divergence in multiplayer.
 
 Snapshot correctness diagnostics (Network tab):
 
@@ -100,9 +99,6 @@ Snapshot correctness diagnostics (Network tab):
    enqueue timestamp is normalized to keep strict interpolation order.
 4. `Queue order violations` counts render-loop invariant fixes when snapshot queue ordering is
    not strictly increasing by timestamp.
-5. `Forced world fallbacks` counts how many times a ghost was switched from track-local to world
-   mode due to repeated divergence checks.
-6. `Ghost pose modes` reports `playerId:trackLocal|world` for each visible ghost.
 
 Dev LAN notes:
 

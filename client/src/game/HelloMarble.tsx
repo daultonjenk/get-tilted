@@ -82,12 +82,7 @@ type GhostSnapshot = {
   pos: THREE.Vector3;
   quat: THREE.Quaternion;
   vel: THREE.Vector3;
-  trackPos?: THREE.Vector3;
-  trackQuat?: THREE.Quaternion;
-  trackVel?: THREE.Vector3;
 };
-
-type GhostPoseMode = "world" | "trackLocal";
 
 type GhostRenderState = {
   snapshots: GhostSnapshot[];
@@ -101,7 +96,6 @@ type GhostRenderState = {
   lastSourceSeq: number;
   lastSourceT: number;
   lastRecvAtMs: number;
-  poseMode: GhostPoseMode | null;
   hasRendered: boolean;
   renderedPos: THREE.Vector3;
   renderedQuat: THREE.Quaternion;
@@ -111,8 +105,6 @@ type GhostRenderState = {
   timestampCorrectedCount: number;
   queueOrderViolationCount: number;
   droppedStaleCount: number;
-  trackLocalMismatchStreak: number;
-  forcedWorldFallback: boolean;
 };
 
 type NetSmoothingDebug = {
@@ -129,8 +121,6 @@ type NetSmoothingDebug = {
   timestampCorrected: number;
   queueOrderViolations: number;
   snapshotQueueSummary: string;
-  forcedWorldFallbacks: number;
-  poseModeSummary: string;
   latestSnapshotAgeMs: number | null;
   serverClockOffsetMs: number;
   inputSourcesSummary: string;
@@ -157,8 +147,6 @@ const SNAP_DISTANCE_M = 8;
 const MAX_GHOST_STEP_SPEED_MPS = 35;
 const SNAP_ANGLE_RAD = 1.3;
 const MAX_GHOST_ANGULAR_RAD_PER_SEC = 8;
-const TRACK_LOCAL_DIVERGENCE_M = 12;
-const TRACK_LOCAL_DIVERGENCE_STREAK = 4;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const LEGACY_TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
@@ -546,8 +534,6 @@ export function HelloMarble() {
     timestampCorrected: 0,
     queueOrderViolations: 0,
     snapshotQueueSummary: "none",
-    forcedWorldFallbacks: 0,
-    poseModeSummary: "none",
     latestSnapshotAgeMs: null,
     serverClockOffsetMs: 0,
     inputSourcesSummary: "none",
@@ -757,14 +743,9 @@ export function HelloMarble() {
     const tempQuatB = new THREE.Quaternion();
     const boardPosThree = new THREE.Vector3();
     const boardQuatThree = new THREE.Quaternion();
-    const boardQuatInvThree = new THREE.Quaternion();
-    const trackLocalWorldPosThree = new THREE.Vector3();
     const marblePosThree = new THREE.Vector3();
     const marbleVelThree = new THREE.Vector3();
     const marbleQuatThree = new THREE.Quaternion();
-    const marbleLocalPosThree = new THREE.Vector3();
-    const marbleLocalVelThree = new THREE.Vector3();
-    const marbleLocalQuatThree = new THREE.Quaternion();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -783,7 +764,6 @@ export function HelloMarble() {
     let totalDroppedTooOld = 0;
     let totalTimestampCorrected = 0;
     let totalQueueOrderViolations = 0;
-    let totalForcedWorldFallbacks = 0;
     let latestAcceptedSnapshotAgeMs: number | null = null;
     let serverClockOffsetMs = 0;
     let isRaceFinishedLocal = false;
@@ -814,7 +794,6 @@ export function HelloMarble() {
         lastSourceSeq: -1,
         lastSourceT: -1,
         lastRecvAtMs: -1,
-        poseMode: null,
         hasRendered: false,
         renderedPos: new THREE.Vector3(),
         renderedQuat: new THREE.Quaternion(),
@@ -824,8 +803,6 @@ export function HelloMarble() {
         timestampCorrectedCount: 0,
         queueOrderViolationCount: 0,
         droppedStaleCount: 0,
-        trackLocalMismatchStreak: 0,
-        forcedWorldFallback: false,
       };
       ghostPlayers.set(playerId, next);
       return next;
@@ -840,9 +817,6 @@ export function HelloMarble() {
         playerState.latestSnapshotAgeMs = null;
         playerState.avgSnapshotAgeMs = 0;
         playerState.snapshotAgeJitterMs = 0;
-        playerState.poseMode = null;
-        playerState.trackLocalMismatchStreak = 0;
-        playerState.forcedWorldFallback = false;
         playerState.hasRendered = false;
         playerState.mesh.visible = false;
       }
@@ -991,16 +965,6 @@ export function HelloMarble() {
             return;
           }
           const playerState = getOrCreateGhostState(message.payload.playerId);
-          const hasTrackLocalSnapshot = Boolean(
-            message.payload.trackPos &&
-              message.payload.trackQuat,
-          );
-          if (playerState.poseMode === null) {
-            playerState.poseMode = hasTrackLocalSnapshot ? "trackLocal" : "world";
-          }
-          if (playerState.poseMode === "trackLocal" && !hasTrackLocalSnapshot) {
-            return;
-          }
 
           const sourceSeq = message.payload.seq;
           if (
@@ -1095,15 +1059,6 @@ export function HelloMarble() {
             pos: new THREE.Vector3(...message.payload.pos),
             quat: new THREE.Quaternion(...message.payload.quat),
             vel: new THREE.Vector3(...message.payload.vel),
-            trackPos: message.payload.trackPos
-              ? new THREE.Vector3(...message.payload.trackPos)
-              : undefined,
-            trackQuat: message.payload.trackQuat
-              ? new THREE.Quaternion(...message.payload.trackQuat)
-              : undefined,
-            trackVel: message.payload.trackVel
-              ? new THREE.Vector3(...message.payload.trackVel)
-              : undefined,
           });
           while (playerState.snapshots.length > 64) {
             playerState.snapshots.shift();
@@ -1317,21 +1272,9 @@ export function HelloMarble() {
 
     const resolveSnapshotPose = (
       snapshot: GhostSnapshot,
-      boardPos: THREE.Vector3,
-      boardQuat: THREE.Quaternion,
-      poseMode: GhostPoseMode,
       outPos: THREE.Vector3,
       outQuat: THREE.Quaternion,
     ): void => {
-      if (
-        poseMode === "trackLocal" &&
-        snapshot.trackPos &&
-        snapshot.trackQuat
-      ) {
-        outPos.copy(snapshot.trackPos).applyQuaternion(boardQuat).add(boardPos);
-        outQuat.copy(boardQuat).multiply(snapshot.trackQuat);
-        return;
-      }
       outPos.copy(snapshot.pos);
       outQuat.copy(snapshot.quat);
     };
@@ -1562,7 +1505,6 @@ export function HelloMarble() {
           boardBody.quaternion.z,
           boardBody.quaternion.w,
         );
-        boardQuatInvThree.copy(boardQuatThree).invert();
         marblePosThree.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
         marbleVelThree.set(marbleBody.velocity.x, marbleBody.velocity.y, marbleBody.velocity.z);
         marbleQuatThree.set(
@@ -1571,9 +1513,6 @@ export function HelloMarble() {
           marbleBody.quaternion.z,
           marbleBody.quaternion.w,
         );
-        marbleLocalPosThree.copy(marblePosThree).sub(boardPosThree).applyQuaternion(boardQuatInvThree);
-        marbleLocalVelThree.copy(marbleVelThree).applyQuaternion(boardQuatInvThree);
-        marbleLocalQuatThree.copy(boardQuatInvThree).multiply(marbleQuatThree);
         const candidateT = raceClient.getServerNowMs();
         const monotonicT = Math.max(candidateT, lastSentRaceStateT + 1);
         lastSentRaceStateT = monotonicT;
@@ -1588,14 +1527,6 @@ export function HelloMarble() {
             marbleBody.quaternion.w,
           ],
           vel: [marbleBody.velocity.x, marbleBody.velocity.y, marbleBody.velocity.z],
-          trackPos: [marbleLocalPosThree.x, marbleLocalPosThree.y, marbleLocalPosThree.z],
-          trackQuat: [
-            marbleLocalQuatThree.x,
-            marbleLocalQuatThree.y,
-            marbleLocalQuatThree.z,
-            marbleLocalQuatThree.w,
-          ],
-          trackVel: [marbleLocalVelThree.x, marbleLocalVelThree.y, marbleLocalVelThree.z],
         });
         lastRaceSendAt = nowMs;
       }
@@ -1674,40 +1605,6 @@ export function HelloMarble() {
             continue;
           }
         }
-
-        if (playerState.poseMode === "trackLocal" && !playerState.forcedWorldFallback) {
-          const latestSample = snapshots[snapshots.length - 1]!;
-          if (latestSample.trackPos && latestSample.trackQuat) {
-            trackLocalWorldPosThree
-              .copy(latestSample.trackPos)
-              .applyQuaternion(boardQuatThree)
-              .add(boardPosThree);
-            const divergenceM = trackLocalWorldPosThree.distanceTo(latestSample.pos);
-            if (divergenceM > TRACK_LOCAL_DIVERGENCE_M) {
-              playerState.trackLocalMismatchStreak += 1;
-              if (playerState.trackLocalMismatchStreak >= TRACK_LOCAL_DIVERGENCE_STREAK) {
-                playerState.poseMode = "world";
-                playerState.forcedWorldFallback = true;
-                playerState.trackLocalMismatchStreak = 0;
-                playerState.hasRendered = false;
-                totalForcedWorldFallbacks += 1;
-                if (snapshots.length > 1) {
-                  const latestSafe = snapshots[snapshots.length - 1]!;
-                  snapshots.length = 0;
-                  snapshots.push(latestSafe);
-                }
-              }
-            } else {
-              playerState.trackLocalMismatchStreak = 0;
-            }
-          } else {
-            playerState.trackLocalMismatchStreak = 0;
-          }
-        } else {
-          playerState.trackLocalMismatchStreak = 0;
-        }
-
-        const poseMode = playerState.poseMode ?? "world";
         const targetInterpTime = interpNowMs - playerState.interpolationDelayMs;
         while (
           snapshots.length >= 3 &&
@@ -1720,17 +1617,11 @@ export function HelloMarble() {
           const b = snapshots[1]!;
           resolveSnapshotPose(
             a,
-            boardPosThree,
-            boardQuatThree,
-            poseMode,
             tempVecA,
             tempQuatA,
           );
           resolveSnapshotPose(
             b,
-            boardPosThree,
-            boardQuatThree,
-            poseMode,
             tempVecB,
             tempQuatB,
           );
@@ -1747,23 +1638,13 @@ export function HelloMarble() {
           const extrapolationMs = clamp(targetInterpTime - b.t, 0, EXTRAPOLATION_MAX_MS);
           if (extrapolationMs > 0) {
             const dt = extrapolationMs / 1000;
-            if (
-              poseMode === "trackLocal" &&
-              a.trackPos &&
-              b.trackPos
-            ) {
-              tempVecA.copy(b.trackPos);
-              tempVecB.copy(b.trackPos).sub(a.trackPos).multiplyScalar(1000 / spanMs);
-              tempVecA.addScaledVector(tempVecB, dt).applyQuaternion(boardQuatThree).add(boardPosThree);
+            tempVecA.copy(b.pos);
+            if (rawSpanMs > 0) {
+              tempVecB.copy(b.pos).sub(a.pos).multiplyScalar(1000 / rawSpanMs);
             } else {
-              tempVecA.copy(b.pos);
-              if (rawSpanMs > 0) {
-                tempVecB.copy(b.pos).sub(a.pos).multiplyScalar(1000 / rawSpanMs);
-              } else {
-                tempVecB.copy(b.vel);
-              }
-              tempVecA.addScaledVector(tempVecB, dt);
+              tempVecB.copy(b.vel);
             }
+            tempVecA.addScaledVector(tempVecB, dt);
             extrapolatingPlayers += 1;
           } else {
             tempVecA.copy(tempVecB);
@@ -1775,9 +1656,6 @@ export function HelloMarble() {
         const latest = snapshots[0]!;
         resolveSnapshotPose(
           latest,
-          boardPosThree,
-          boardQuatThree,
-          poseMode,
           tempVecA,
           tempQuatA,
         );
@@ -1914,14 +1792,6 @@ export function HelloMarble() {
                 .map(([playerId, state]) => `${playerId}:${state.snapshots.length}`)
                 .join(", ")
             : "none";
-        const poseModeSummary =
-          ghostCount > 0
-            ? [...ghostPlayers.entries()]
-                .map(([playerId, state]) =>
-                  `${playerId}:${state.poseMode === "trackLocal" ? "trackLocal" : "world"}`,
-                )
-                .join(", ")
-            : "none";
 
         if (trialStartAt != null) {
           setTrialCurrentMs(nowMs - trialStartAt);
@@ -1955,8 +1825,6 @@ export function HelloMarble() {
           timestampCorrected: totalTimestampCorrected,
           queueOrderViolations: totalQueueOrderViolations,
           snapshotQueueSummary,
-          forcedWorldFallbacks: totalForcedWorldFallbacks,
-          poseModeSummary,
           latestSnapshotAgeMs: latestAcceptedSnapshotAgeMs,
           serverClockOffsetMs,
           inputSourcesSummary,
@@ -2776,9 +2644,7 @@ export function HelloMarble() {
             <p>Dropped too-old packets: {netSmoothing.droppedTooOld}</p>
             <p>Timestamp corrections: {netSmoothing.timestampCorrected}</p>
             <p>Queue order violations: {netSmoothing.queueOrderViolations}</p>
-            <p>Forced world fallbacks: {netSmoothing.forcedWorldFallbacks}</p>
             <p>Snapshot queues: {netSmoothing.snapshotQueueSummary}</p>
-            <p>Ghost pose modes: {netSmoothing.poseModeSummary}</p>
             <p>
               Latest snapshot age (ms):{" "}
               {netSmoothing.latestSnapshotAgeMs == null
