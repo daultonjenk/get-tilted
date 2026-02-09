@@ -104,6 +104,8 @@ type NetSmoothingDebug = {
   avgJitterMs: number;
   extrapolatingPlayers: number;
   droppedStale: number;
+  snapshotQueueSummary: string;
+  latestRemoteAgeMs: number | null;
 };
 
 const TIMESTEP = 1 / 60;
@@ -509,6 +511,8 @@ export function HelloMarble() {
     avgJitterMs: 0,
     extrapolatingPlayers: 0,
     droppedStale: 0,
+    snapshotQueueSummary: "none",
+    latestRemoteAgeMs: null,
   });
 
   const tiltStatusRef = useRef(tiltStatus);
@@ -732,6 +736,7 @@ export function HelloMarble() {
     let trialStartAt: number | null = null;
     let prevMarbleZ = marbleBody.position.z;
     let totalDroppedStale = 0;
+    let latestRemoteEpochMs: number | null = null;
 
     const getOrCreateGhostState = (playerId: string): GhostRenderState => {
       const existing = ghostPlayers.get(playerId);
@@ -908,6 +913,7 @@ export function HelloMarble() {
           if (gameModeRef.current !== "multiplayer") {
             return;
           }
+          latestRemoteEpochMs = message.payload.t;
           if (message.payload.playerId === raceClient.getPlayerId()) {
             return;
           }
@@ -1617,6 +1623,16 @@ export function HelloMarble() {
           ghostCount > 0
             ? ghostStateList.reduce((sum, state) => sum + state.jitterMs, 0) / ghostCount
             : 0;
+        const snapshotQueueSummary =
+          ghostCount > 0
+            ? [...ghostPlayers.entries()]
+                .map(([playerId, state]) => `${playerId}:${state.snapshots.length}`)
+                .join(", ")
+            : "none";
+        const latestRemoteAgeMs =
+          typeof latestRemoteEpochMs === "number"
+            ? Math.max(0, Date.now() - latestRemoteEpochMs)
+            : null;
 
         if (trialStartAt != null) {
           setTrialCurrentMs(nowMs - trialStartAt);
@@ -1642,6 +1658,8 @@ export function HelloMarble() {
           avgJitterMs,
           extrapolatingPlayers,
           droppedStale: totalDroppedStale,
+          snapshotQueueSummary,
+          latestRemoteAgeMs,
         });
         debugTimer = 0;
       }
@@ -2443,11 +2461,19 @@ export function HelloMarble() {
             <p>Players: {playersInRoom.length}</p>
             <p>Ready players: {readyPlayerIds.length}</p>
             <p>Race phase: {racePhase}</p>
+            <p>Controls locked: {controlsLocked ? "yes" : "no"}</p>
             <p>Ghost players: {netSmoothing.ghostPlayers}</p>
             <p>Ghost interp delay (avg ms): {netSmoothing.avgDelayMs.toFixed(1)}</p>
             <p>Ghost jitter (avg ms): {netSmoothing.avgJitterMs.toFixed(1)}</p>
             <p>Ghost extrapolating: {netSmoothing.extrapolatingPlayers}</p>
             <p>Dropped stale packets: {netSmoothing.droppedStale}</p>
+            <p>Snapshot queues: {netSmoothing.snapshotQueueSummary}</p>
+            <p>
+              Latest remote age (ms):{" "}
+              {netSmoothing.latestRemoteAgeMs == null
+                ? "n/a"
+                : netSmoothing.latestRemoteAgeMs.toFixed(1)}
+            </p>
             {netError ? <p className="errorText">{netError}</p> : null}
             <div className="debugButtonRow">
               <button type="button" onClick={connectMultiplayer}>
