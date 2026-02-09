@@ -34,11 +34,11 @@ type PartSpec = {
 };
 
 const TRACK_W = 6;
-const FLOOR_THICK = 0.5;
+const FLOOR_THICK = 0.6;
 const RAIL_THICK = 0.35;
 const RAIL_H = 2.0;
 const RAIL_INSET = 0.15;
-const RAIL_FLOOR_OVERLAP = 0.08;
+const RAIL_FLOOR_OVERLAP = 0.12;
 const FLOOR_COLOR = 0x2f6b39;
 const RAIL_COLOR = 0x9aa7b2;
 const MARBLE_RADIUS = 0.5;
@@ -46,6 +46,10 @@ const START_LENGTH = 8;
 const FINISH_LENGTH = 10;
 const FINISH_WIDTH = 8;
 const MARKER_THICK = 0.12;
+const SLALOM_COUNT = 6;
+const SLALOM_OBSTACLE_W = 3.6;
+const SLALOM_OBSTACLE_H = 1.8;
+const SLALOM_OBSTACLE_L = 0.8;
 
 const SEGMENTS: SegmentDef[] = [
   { length: 9, slopeDeg: 0, yawDeg: 0 },
@@ -139,6 +143,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const railMaterial = new THREE.MeshStandardMaterial({ color: RAIL_COLOR });
   const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
   const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
+  const obstacleMaterial = new THREE.MeshStandardMaterial({ color: 0x536dfe });
 
   let currentYawDeg = 0;
   let lowestFloorY = 0;
@@ -263,6 +268,24 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     .add(new THREE.Vector3(0, MARBLE_RADIUS + 0.6, 0));
   const trialStartZ = spawn.z + 2;
   const trialFinishZ = pathStartTopPoint.z - 1;
+  const slalomStartZ = trialStartZ + 6;
+  const slalomEndZ = trialFinishZ - 6;
+  const slalomSpan = Math.max(slalomEndZ - slalomStartZ, 1);
+
+  for (let i = 0; i < SLALOM_COUNT; i += 1) {
+    const t = i / (SLALOM_COUNT - 1);
+    const z = slalomStartZ + slalomSpan * t;
+    const side = i % 2 === 0 ? -1 : 1;
+    const x = side * (TRACK_W / 2 - SLALOM_OBSTACLE_W / 2 - 0.25);
+    const y = FLOOR_THICK / 2 + SLALOM_OBSTACLE_H / 2;
+
+    addPart(group, boardBody, {
+      size: new THREE.Vector3(SLALOM_OBSTACLE_W, SLALOM_OBSTACLE_H, SLALOM_OBSTACLE_L),
+      position: new THREE.Vector3(x, y, z),
+      rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+      material: obstacleMaterial,
+    });
+  }
 
   addVisualPart(group, {
     size: new THREE.Vector3(TRACK_W + 0.8, MARKER_THICK, 0.45),

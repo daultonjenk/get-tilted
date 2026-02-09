@@ -77,22 +77,22 @@ const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 
 const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
-  gravityG: 18,
-  tiltStrength: 1,
-  maxSpeed: 10,
+  gravityG: 21.9,
+  tiltStrength: 1.56,
+  maxSpeed: 20,
   maxTiltDeg: 14,
-  maxBoardAngVel: 5,
+  maxBoardAngVel: 8.7,
   tiltFilterTau: 0.1,
-  linearDamping: 0.08,
-  angularDamping: 0.08,
-  cameraPreset: "chaseCentered",
-  contactFriction: 0.75,
+  linearDamping: 0.02,
+  angularDamping: 0.04,
+  cameraPreset: "chaseRight",
+  contactFriction: 0.99,
   contactRestitution: 0.1,
   invertTiltX: false,
   invertTiltZ: false,
   invertCameraSide: false,
   enableExtraDownforce: false,
-  extraDownForce: 4,
+  extraDownForce: 2.4,
 };
 
 const CAMERA_PRESETS: CameraPresetId[] = [
@@ -429,6 +429,12 @@ export function HelloMarble() {
     }
 
     const world = new CANNON.World();
+    const solver = world.solver as unknown as {
+      iterations: number;
+      tolerance: number;
+    };
+    solver.iterations = 12;
+    solver.tolerance = 1e-4;
     world.gravity.set(0, -tuningRef.current.gravityG, 0);
     world.addBody(boardBody);
 
@@ -455,6 +461,12 @@ export function HelloMarble() {
       angularDamping: tuningRef.current.angularDamping,
       material: marbleMat,
     });
+    const marbleBodyWithCcd = marbleBody as CANNON.Body & {
+      ccdSpeedThreshold: number;
+      ccdIterations: number;
+    };
+    marbleBodyWithCcd.ccdSpeedThreshold = 1.0;
+    marbleBodyWithCcd.ccdIterations = 10;
     world.addBody(marbleBody);
 
     const marbleMesh = new THREE.Mesh(
@@ -669,8 +681,8 @@ export function HelloMarble() {
       world.gravity.set(0, -currentTuning.gravityG, 0);
       marbleBody.linearDamping = currentTuning.linearDamping;
       marbleBody.angularDamping = currentTuning.angularDamping;
-      contactMat.friction = currentTuning.contactFriction;
-      contactMat.restitution = currentTuning.contactRestitution;
+      contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
+      contactMat.restitution = clamp(currentTuning.contactRestitution, 0, 0.2);
 
       if (Math.abs(currentTuning.tiltFilterTau - lastFilterTau) > 0.0001) {
         lastFilterTau = currentTuning.tiltFilterTau;
