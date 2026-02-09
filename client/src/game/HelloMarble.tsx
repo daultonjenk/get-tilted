@@ -24,11 +24,15 @@ type MarbleDebug = {
   gravZ: number;
 };
 
-type CameraMode = "chase" | "topdown";
+type CameraMode = "chase" | "topdown" | "isometric" | "topdownForward";
+
+type HelloMarbleProps = {
+  panelOpen: boolean;
+};
 
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
-const BASE_G = 12.0;
+const BASE_G = 14.0;
 const MAX_TILT_DEG = 15;
 const FOLLOW_DIST = 10;
 const CAM_HEIGHT = 7.5;
@@ -37,9 +41,12 @@ const LOOK_AHEAD = 16;
 const TOPDOWN_HEIGHT = 16;
 const TOPDOWN_Z_OFFSET = 2;
 const TOPDOWN_LOOK_AHEAD = 4;
-const BOARD_TILT_SMOOTH = 10;
+const BOARD_TILT_SMOOTH = 12;
+const ISO_X_OFFSET = 4;
+const ISO_HEIGHT = 14;
+const ISO_Z_OFFSET = 8;
 const PIVOT_SMOOTH = 10;
-const MAX_BOARD_ANG_VEL = 2.5;
+const MAX_BOARD_ANG_VEL = 4.0;
 const ENABLE_EXTRA_DOWNFORCE = false;
 const EXTRA_DOWN_FORCE = 4;
 
@@ -47,7 +54,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function HelloMarble() {
+export function HelloMarble({ panelOpen }: HelloMarbleProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const resetRef = useRef<() => void>(() => {});
   const enableTiltRef = useRef<() => Promise<void>>(async () => {});
@@ -148,8 +155,8 @@ export function HelloMarble() {
       mass: 1,
       shape: new CANNON.Sphere(marbleRadius),
       position: track.spawn.clone(),
-      linearDamping: 0.2,
-      angularDamping: 0.2,
+      linearDamping: 0.18,
+      angularDamping: 0.18,
       material: marbleMat,
     });
     world.addBody(marbleBody);
@@ -176,7 +183,7 @@ export function HelloMarble() {
       current: { x: 0, y: 0, z: 0 },
     };
     let stopTiltListener: (() => void) | null = null;
-    const filter = makeTiltFilter({ tau: 0.15 });
+    const filter = makeTiltFilter({ tau: 0.1 });
     const maxTiltRad = (MAX_TILT_DEG * Math.PI) / 180;
     let currentPitch = 0;
     let currentRoll = 0;
@@ -439,7 +446,7 @@ export function HelloMarble() {
         camera.position.x = 0;
         camera.position.y = CAM_HEIGHT;
         lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
-      } else {
+      } else if (cameraModeRef.current === "topdown") {
         const desiredTopX = marbleBody.position.x;
         const desiredTopZ = marbleBody.position.z - TOPDOWN_Z_OFFSET;
         cameraTarget.set(desiredTopX, TOPDOWN_HEIGHT, desiredTopZ);
@@ -450,6 +457,20 @@ export function HelloMarble() {
           0,
           marbleBody.position.z + TOPDOWN_LOOK_AHEAD,
         );
+      } else if (cameraModeRef.current === "isometric") {
+        const desiredIsoX = marbleBody.position.x + ISO_X_OFFSET;
+        const desiredIsoZ = marbleBody.position.z - ISO_Z_OFFSET;
+        cameraTarget.set(desiredIsoX, ISO_HEIGHT, desiredIsoZ);
+        camera.position.lerp(cameraTarget, cameraAlpha);
+        camera.position.y = ISO_HEIGHT;
+        lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + LOOK_AHEAD);
+      } else {
+        const desiredTopX = marbleBody.position.x;
+        const desiredTopZ = marbleBody.position.z - TOPDOWN_Z_OFFSET;
+        cameraTarget.set(desiredTopX, TOPDOWN_HEIGHT, desiredTopZ);
+        camera.position.lerp(cameraTarget, cameraAlpha);
+        camera.position.y = TOPDOWN_HEIGHT;
+        lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + 6);
       }
 
       camera.lookAt(lookTarget);
@@ -513,7 +534,7 @@ export function HelloMarble() {
   return (
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
-      <div className="hud">
+      {panelOpen ? <div className="hud">
         <p>FPS: {debug.fps}</p>
         <p>
           Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {" "}
@@ -555,11 +576,23 @@ export function HelloMarble() {
           </button>
           <button
             type="button"
-            onClick={() =>
-              setCameraMode((mode) => (mode === "chase" ? "topdown" : "chase"))
-            }
+            onClick={() => {
+              setCameraMode((mode) => {
+                if (mode === "chase") return "topdown";
+                if (mode === "topdown") return "isometric";
+                if (mode === "isometric") return "topdownForward";
+                return "chase";
+              });
+            }}
           >
-            Camera: {cameraMode === "chase" ? "Chase" : "Top-down"}
+            Camera:{" "}
+            {cameraMode === "chase"
+              ? "Chase"
+              : cameraMode === "topdown"
+                ? "Top-down"
+                : cameraMode === "isometric"
+                  ? "Isometric"
+                  : "Top-down (Forward)"}
           </button>
         </div>
         {showTouchFallback ? (
@@ -618,7 +651,7 @@ export function HelloMarble() {
         <button type="button" onClick={() => resetRef.current()}>
           Reset Marble
         </button>
-      </div>
+      </div> : null}
     </div>
   );
 }

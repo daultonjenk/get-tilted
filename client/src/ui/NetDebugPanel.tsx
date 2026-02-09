@@ -2,7 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { TypedMessage } from "@get-tilted/shared-protocol";
 import { WSClient, type WSStatus } from "../net/wsClient";
 
-export function NetDebugPanel() {
+type NetDebugPanelProps = {
+  panelOpen: boolean;
+};
+
+export function NetDebugPanel({ panelOpen }: NetDebugPanelProps) {
   const client = useMemo(() => new WSClient(), []);
   const [status, setStatus] = useState<WSStatus>(client.getStatus());
   const [roomCode, setRoomCode] = useState("");
@@ -45,6 +49,10 @@ export function NetDebugPanel() {
       client.disconnect();
     };
   }, [client]);
+
+  if (!panelOpen) {
+    return null;
+  }
 
   return (
     <div className="netDebug">
