@@ -128,6 +128,17 @@ export class RaceClient {
     });
   }
 
+  sendReady(ready: boolean): void {
+    if (!this.roomCode || !this.playerId) {
+      return;
+    }
+    this.ws.send("race:ready", {
+      roomCode: this.roomCode,
+      playerId: this.playerId,
+      ready,
+    });
+  }
+
   onMessage(cb: MessageListener): () => void {
     this.messageListeners.add(cb);
     return () => this.messageListeners.delete(cb);

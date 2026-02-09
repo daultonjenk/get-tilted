@@ -11,6 +11,13 @@ export type MessagePayloadMap = {
     playerId: string;
     players: Array<{ playerId: string; name?: string }>;
   };
+  "race:ready": { roomCode: string; playerId: string; ready: boolean };
+  "race:ready:state": {
+    roomCode: string;
+    readyPlayerIds: string[];
+    countdownStartAtMs?: number;
+  };
+  "race:countdown:start": { roomCode: string; startAtMs: number; stepMs: number };
   "race:state": {
     roomCode: string;
     playerId: string;
@@ -58,6 +65,9 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "room:state",
   "race:hello",
   "race:hello:ack",
+  "race:ready",
+  "race:ready:state",
+  "race:countdown:start",
   "race:state",
   "race:left",
   "error",
@@ -77,6 +87,10 @@ function isNumber(value: unknown): value is number {
 
 function isOptionalString(value: unknown): value is string | undefined {
   return typeof value === "undefined" || isString(value);
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
 }
 
 function hasNoOwnKeys(value: Record<string, unknown>): boolean {
@@ -121,6 +135,10 @@ function isPlayerList(
         isOptionalString(entry.name),
     )
   );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => isString(entry));
 }
 
 export function isMessageType(value: string): value is MessageType {
@@ -183,6 +201,40 @@ export function validatePayload<TType extends MessageType>(
       return isPlayerList(payload.players)
         ? { ok: true }
         : { ok: false, error: "Expected players array" };
+    case "race:ready":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isString(payload.playerId)) {
+        return { ok: false, error: "Expected playerId string" };
+      }
+      return isBoolean(payload.ready)
+        ? { ok: true }
+        : { ok: false, error: "Expected ready boolean" };
+    case "race:ready:state":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isStringArray(payload.readyPlayerIds)) {
+        return { ok: false, error: "Expected readyPlayerIds string array" };
+      }
+      if (
+        typeof payload.countdownStartAtMs !== "undefined" &&
+        !isNumber(payload.countdownStartAtMs)
+      ) {
+        return { ok: false, error: "Expected optional countdownStartAtMs number" };
+      }
+      return { ok: true };
+    case "race:countdown:start":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isNumber(payload.startAtMs)) {
+        return { ok: false, error: "Expected startAtMs number" };
+      }
+      return isNumber(payload.stepMs)
+        ? { ok: true }
+        : { ok: false, error: "Expected stepMs number" };
     case "race:state":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };

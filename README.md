@@ -66,12 +66,14 @@ Tilt permissions are introduced in v0.3. iOS Safari requires a user gesture befo
 
 Host/join via QR is available in the debug drawer `Network` tab.
 
-Current v0.5 flow:
+Current v0.5.1 flow:
 
 1. Open `Network` tab and click `Connect`.
 2. Host clicks `Create Room`, then toggles `Show QR`.
-3. Joiner scans QR or opens the shown URL (`?room=ROOMCODE`) and clicks `Join`.
-4. Both players can see a real-time ghost marble representation of the opponent.
+3. Joiner scans QR or opens the shown URL (`?room=ROOMCODE`) and is auto-connected + auto-joined.
+4. Both players press the in-game `READY` button.
+5. Once both are ready, a synced `3 / 2 / 1 / GO!` countdown starts and controls unlock at `GO!`.
+6. Both players can see a real-time ghost marble representation of the opponent.
 
 Ghost smoothing notes:
 

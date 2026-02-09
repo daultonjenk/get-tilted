@@ -10,6 +10,9 @@ import { RoomStore } from "./roomStore.js";
 
 type SendableSocket = WebSocket & { readyState: number };
 const OPEN_STATE = 1;
+const COUNTDOWN_STEP_MS = 1000;
+const COUNTDOWN_PREROLL_MS = 600;
+const COUNTDOWN_TOTAL_STEPS = 4;
 
 const roomStore = new RoomStore();
 
@@ -32,6 +35,19 @@ function broadcastRoomState(roomCode: string): void {
   };
   for (const client of clients) {
     send(client as SendableSocket, "room:state", payload);
+  }
+}
+
+function broadcastReadyState(roomCode: string): void {
+  const clients = roomStore.getClients(roomCode);
+  const countdownStartAtMs = roomStore.getCountdownStart(roomCode);
+  const payload = {
+    roomCode,
+    readyPlayerIds: roomStore.getReadyPlayerIds(roomCode),
+    countdownStartAtMs,
+  };
+  for (const client of clients) {
+    send(client as SendableSocket, "race:ready:state", payload);
   }
 }
 
@@ -76,6 +92,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         roomStore.join(roomCode, ws);
         send(ws as SendableSocket, "room:created", { roomCode });
         broadcastRoomState(roomCode);
+        broadcastReadyState(roomCode);
         return;
       }
       case "room:join": {
@@ -96,6 +113,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
           return;
         }
         broadcastRoomState(roomCode);
+        broadcastReadyState(roomCode);
         return;
       }
       case "race:hello": {
@@ -134,6 +152,52 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         broadcastToOthers(roomCode, ws, "race:state", parsed.msg.payload);
         return;
       }
+      case "race:ready": {
+        const roomCode = roomStore.getRoomCode(ws);
+        if (!roomCode || roomCode !== parsed.msg.payload.roomCode) {
+          return;
+        }
+        const playerId = roomStore.getPlayerId(ws);
+        if (!playerId || playerId !== parsed.msg.payload.playerId) {
+          return;
+        }
+        const updated = roomStore.setReady(roomCode, playerId, parsed.msg.payload.ready);
+        if (!updated) {
+          return;
+        }
+
+        const readyPlayerIds = roomStore.getReadyPlayerIds(roomCode);
+        const playerCount = roomStore.getClientCount(roomCode);
+        const now = Date.now();
+        const activeCountdown = roomStore.getCountdownStart(roomCode);
+        const countdownExpired =
+          typeof activeCountdown === "number" &&
+          now >= activeCountdown + COUNTDOWN_STEP_MS * COUNTDOWN_TOTAL_STEPS;
+
+        if (countdownExpired) {
+          roomStore.clearCountdownStart(roomCode);
+        }
+
+        if (
+          readyPlayerIds.length === 2 &&
+          playerCount === 2 &&
+          typeof roomStore.getCountdownStart(roomCode) !== "number"
+        ) {
+          const startAtMs = now + COUNTDOWN_PREROLL_MS;
+          roomStore.setCountdownStart(roomCode, startAtMs);
+          const clients = roomStore.getClients(roomCode);
+          for (const client of clients) {
+            send(client as SendableSocket, "race:countdown:start", {
+              roomCode,
+              startAtMs,
+              stepMs: COUNTDOWN_STEP_MS,
+            });
+          }
+        }
+
+        broadcastReadyState(roomCode);
+        return;
+      }
       default:
         send(ws as SendableSocket, "error", {
           code: "UNHANDLED_TYPE",
@@ -147,6 +211,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
     const leaveResult = roomStore.leave(ws);
     if (leaveResult.roomCode) {
       broadcastRoomState(leaveResult.roomCode);
+      broadcastReadyState(leaveResult.roomCode);
       if (leaveResult.playerId) {
         broadcastToOthers(leaveResult.roomCode, ws, "race:left", {
           roomCode: leaveResult.roomCode,

@@ -21,6 +21,10 @@ export class RoomStore {
 
   private readonly clientToPlayer = new Map<WebSocket, PlayerId>();
 
+  private readonly readyByRoom = new Map<RoomCode, Set<PlayerId>>();
+
+  private readonly countdownStartByRoom = new Map<RoomCode, number>();
+
   private nextPlayerSeq = 1;
 
   join(
@@ -39,6 +43,12 @@ export class RoomStore {
     this.rooms.set(roomCode, roomClients);
     this.clientToRoom.set(client, roomCode);
     this.clientToPlayer.set(client, playerId);
+    if (!this.readyByRoom.has(roomCode)) {
+      this.readyByRoom.set(roomCode, new Set());
+    }
+    if (roomClients.length < 2) {
+      this.clearCountdownStart(roomCode);
+    }
     return { size: roomClients.length, playerId };
   }
 
@@ -61,12 +71,21 @@ export class RoomStore {
     if (idx >= 0) {
       roomClients.splice(idx, 1);
     }
+    if (playerId) {
+      const ready = this.readyByRoom.get(roomCode);
+      ready?.delete(playerId);
+    }
     this.clientToRoom.delete(client);
     this.clientToPlayer.delete(client);
 
     if (roomClients.length === 0) {
       this.rooms.delete(roomCode);
+      this.readyByRoom.delete(roomCode);
+      this.clearCountdownStart(roomCode);
       return { size: 0, roomCode, playerId };
+    }
+    if (roomClients.length < 2) {
+      this.clearCountdownStart(roomCode);
     }
     return { size: roomClients.length, roomCode, playerId };
   }
@@ -96,5 +115,37 @@ export class RoomStore {
       playerId: entry.playerId,
       name: entry.name,
     }));
+  }
+
+  setReady(roomCode: string, playerId: string, ready: boolean): boolean {
+    const roomClients = this.rooms.get(roomCode) ?? [];
+    if (!roomClients.some((entry) => entry.playerId === playerId)) {
+      return false;
+    }
+    const readySet = this.readyByRoom.get(roomCode) ?? new Set<PlayerId>();
+    if (ready) {
+      readySet.add(playerId);
+    } else {
+      readySet.delete(playerId);
+      this.clearCountdownStart(roomCode);
+    }
+    this.readyByRoom.set(roomCode, readySet);
+    return true;
+  }
+
+  getReadyPlayerIds(roomCode: string): string[] {
+    return [...(this.readyByRoom.get(roomCode) ?? new Set<PlayerId>())];
+  }
+
+  setCountdownStart(roomCode: string, startAtMs: number): void {
+    this.countdownStartByRoom.set(roomCode, startAtMs);
+  }
+
+  getCountdownStart(roomCode: string): number | undefined {
+    return this.countdownStartByRoom.get(roomCode);
+  }
+
+  clearCountdownStart(roomCode: string): void {
+    this.countdownStartByRoom.delete(roomCode);
   }
 }

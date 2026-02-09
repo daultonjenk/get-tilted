@@ -72,6 +72,7 @@ type TuningState = {
 };
 
 type TrialState = "idle" | "running" | "finished";
+type RacePhase = "waiting" | "countdown" | "racing";
 
 type GhostSnapshot = {
   t: number;
@@ -124,6 +125,7 @@ const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const LEGACY_TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
+const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 
 const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
@@ -463,18 +465,26 @@ export function HelloMarble() {
   });
   const [netStatus, setNetStatus] = useState<WSStatus>("disconnected");
   const [netError, setNetError] = useState<string | null>(null);
-  const [roomCode, setRoomCode] = useState("");
-  const [joinRoomCode, setJoinRoomCode] = useState(() => {
+  const [autoJoinRoomCode] = useState(() => {
     if (typeof window === "undefined") {
       return "";
     }
     const room = new URLSearchParams(window.location.search).get("room");
     return room ? room.toUpperCase() : "";
   });
+  const [roomCode, setRoomCode] = useState("");
+  const [joinRoomCode, setJoinRoomCode] = useState(autoJoinRoomCode);
   const [localPlayerId, setLocalPlayerId] = useState("");
   const [playersInRoom, setPlayersInRoom] = useState<Array<{ playerId: string; name?: string }>>(
     [],
   );
+  const [readyPlayerIds, setReadyPlayerIds] = useState<string[]>([]);
+  const [localReady, setLocalReady] = useState(false);
+  const [racePhase, setRacePhase] = useState<RacePhase>("waiting");
+  const [controlsLocked, setControlsLocked] = useState(false);
+  const [countdownStartAtMs, setCountdownStartAtMs] = useState<number | null>(null);
+  const [countdownStepMs, setCountdownStepMs] = useState(1000);
+  const [countdownToken, setCountdownToken] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [devJoinHost, setDevJoinHost] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -492,6 +502,15 @@ export function HelloMarble() {
   const touchTiltRef = useRef(touchTilt);
   const tuningRef = useRef(tuning);
   const raceClientRef = useRef<RaceClient | null>(null);
+  const localPlayerIdRef = useRef(localPlayerId);
+  const autoJoinRoomCodeRef = useRef(autoJoinRoomCode);
+  const racePhaseRef = useRef(racePhase);
+  const controlsLockedRef = useRef(controlsLocked);
+  const countdownStartAtRef = useRef<number | null>(countdownStartAtMs);
+  const countdownStepMsRef = useRef(countdownStepMs);
+  const countdownIndexRef = useRef(-1);
+  const countdownGoHandledRef = useRef(false);
+  const autoJoinAttemptedRef = useRef(false);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -516,9 +535,29 @@ export function HelloMarble() {
   }, [touchTilt]);
 
   useEffect(() => {
+    localPlayerIdRef.current = localPlayerId;
+  }, [localPlayerId]);
+
+  useEffect(() => {
     tuningRef.current = tuning;
     window.localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(tuning));
   }, [tuning]);
+
+  useEffect(() => {
+    racePhaseRef.current = racePhase;
+  }, [racePhase]);
+
+  useEffect(() => {
+    controlsLockedRef.current = controlsLocked;
+  }, [controlsLocked]);
+
+  useEffect(() => {
+    countdownStartAtRef.current = countdownStartAtMs;
+  }, [countdownStartAtMs]);
+
+  useEffect(() => {
+    countdownStepMsRef.current = countdownStepMs;
+  }, [countdownStepMs]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -699,7 +738,31 @@ export function HelloMarble() {
 
     const raceClient = new RaceClient();
     raceClientRef.current = raceClient;
-    raceClient.onStatusChange(setNetStatus);
+    raceClient.onStatusChange((status) => {
+      setNetStatus(status);
+      if (status === "disconnected") {
+        setReadyPlayerIds([]);
+        setLocalReady(false);
+        if (racePhaseRef.current !== "racing") {
+          setRacePhase("waiting");
+          setControlsLocked(true);
+        }
+        setCountdownStartAtMs(null);
+        setCountdownToken(null);
+        countdownIndexRef.current = -1;
+        countdownGoHandledRef.current = false;
+        autoJoinAttemptedRef.current = false;
+      }
+      if (
+        status === "connected" &&
+        autoJoinRoomCodeRef.current &&
+        !autoJoinAttemptedRef.current
+      ) {
+        autoJoinAttemptedRef.current = true;
+        setNetError(null);
+        raceClient.joinRoom(autoJoinRoomCodeRef.current);
+      }
+    });
     raceClient.onError((error) => {
       setNetError(error);
     });
@@ -710,16 +773,67 @@ export function HelloMarble() {
           setJoinRoomCode(message.payload.roomCode);
           setShowQr(true);
           setNetError(null);
+          setReadyPlayerIds([]);
+          setLocalReady(false);
+          setRacePhase("waiting");
+          setControlsLocked(true);
+          setCountdownStartAtMs(null);
+          setCountdownToken(null);
+          countdownIndexRef.current = -1;
+          countdownGoHandledRef.current = false;
           return;
         case "room:state":
           setRoomCode(message.payload.roomCode);
           setNetError(null);
+          if (racePhaseRef.current !== "racing") {
+            setControlsLocked(true);
+          }
           return;
         case "race:hello:ack":
+          localPlayerIdRef.current = message.payload.playerId;
           setLocalPlayerId(message.payload.playerId);
           setPlayersInRoom(message.payload.players);
           setRoomCode(message.payload.roomCode);
+          setLocalReady(false);
           setNetError(null);
+          return;
+        case "race:ready:state":
+          setReadyPlayerIds(message.payload.readyPlayerIds);
+          setLocalReady(
+            localPlayerIdRef.current
+              ? message.payload.readyPlayerIds.includes(localPlayerIdRef.current)
+              : false,
+          );
+          if (typeof message.payload.countdownStartAtMs === "number") {
+            setCountdownStartAtMs(message.payload.countdownStartAtMs);
+            setCountdownStepMs(1000);
+            setRacePhase("countdown");
+            setControlsLocked(true);
+            setCountdownToken(null);
+            countdownIndexRef.current = -1;
+            countdownGoHandledRef.current = false;
+            resetRef.current();
+          } else if (racePhaseRef.current !== "racing") {
+            setCountdownStartAtMs(null);
+            setCountdownToken(null);
+            setRacePhase("waiting");
+            setControlsLocked(true);
+            countdownIndexRef.current = -1;
+            countdownGoHandledRef.current = false;
+          }
+          return;
+        case "race:countdown:start":
+          if (message.payload.roomCode !== raceClient.getRoomCode()) {
+            return;
+          }
+          setCountdownStartAtMs(message.payload.startAtMs);
+          setCountdownStepMs(message.payload.stepMs);
+          setRacePhase("countdown");
+          setControlsLocked(true);
+          setCountdownToken(null);
+          countdownIndexRef.current = -1;
+          countdownGoHandledRef.current = false;
+          resetRef.current();
           return;
         case "race:state": {
           if (message.payload.playerId === raceClient.getPlayerId()) {
@@ -780,6 +894,14 @@ export function HelloMarble() {
           setPlayersInRoom((prev) =>
             prev.filter((entry) => entry.playerId !== message.payload.playerId),
           );
+          if (racePhaseRef.current !== "racing") {
+            setRacePhase("waiting");
+            setControlsLocked(true);
+            setCountdownStartAtMs(null);
+            setCountdownToken(null);
+            countdownIndexRef.current = -1;
+            countdownGoHandledRef.current = false;
+          }
           return;
         }
         case "error":
@@ -789,6 +911,9 @@ export function HelloMarble() {
           return;
       }
     });
+    if (autoJoinRoomCodeRef.current) {
+      raceClient.connect();
+    }
 
     const computeSpawnWorld = (): CANNON.Vec3 => {
       const spawn = track.spawn;
@@ -1046,11 +1171,40 @@ export function HelloMarble() {
         filter.reset(lastFilteredIntent);
       }
 
+      const countdownStart = countdownStartAtRef.current;
+      if (countdownStart != null) {
+        const stepMs = countdownStepMsRef.current;
+        const elapsedMs = nowMs - countdownStart;
+        if (elapsedMs >= 0 && elapsedMs < stepMs * COUNTDOWN_LABELS.length) {
+          const nextIndex = clamp(
+            Math.floor(elapsedMs / stepMs),
+            0,
+            COUNTDOWN_LABELS.length - 1,
+          );
+          if (nextIndex !== countdownIndexRef.current) {
+            countdownIndexRef.current = nextIndex;
+            setCountdownToken(COUNTDOWN_LABELS[nextIndex] ?? null);
+          }
+          if (!countdownGoHandledRef.current && nextIndex >= COUNTDOWN_LABELS.length - 1) {
+            countdownGoHandledRef.current = true;
+            setControlsLocked(false);
+            setRacePhase("racing");
+            calibrateTiltRef.current();
+          }
+        } else if (elapsedMs >= stepMs * COUNTDOWN_LABELS.length) {
+          setCountdownStartAtMs(null);
+          setCountdownToken(null);
+          countdownIndexRef.current = -1;
+        }
+      }
+
       let sourceIntent: TiltSample;
       const status = tiltStatusRef.current;
       const touchIntent = touchTiltRef.current;
 
-      if (status.enabled && status.permission === "granted" && status.supported) {
+      if (controlsLockedRef.current) {
+        sourceIntent = { x: 0, y: 0, z: 0 };
+      } else if (status.enabled && status.permission === "granted" && status.supported) {
         sourceIntent = {
           x: motionTiltRef.current.x * currentTuning.gyroSensitivity,
           y: 0,
@@ -1448,6 +1602,8 @@ export function HelloMarble() {
 
   const showTouchFallback =
     !tiltStatus.supported || tiltStatus.permission === "denied";
+  const waitingForPlayers = playersInRoom.length < 2;
+  const waitingForReady = playersInRoom.length === 2 && readyPlayerIds.length < 2;
 
   const updateTuning = <K extends keyof TuningState>(
     key: K,
@@ -1529,12 +1685,16 @@ export function HelloMarble() {
     raceClientRef.current?.joinRoom(code);
   };
 
-  const sendRaceHello = () => {
-    if (!roomCode) {
-      setNetError("No room available for hello.");
+  const toggleReady = async () => {
+    if (!roomCode || !localPlayerId) {
+      setNetError("Join a room before setting READY.");
       return;
     }
-    raceClientRef.current?.sendHello(undefined, roomCode);
+    setNetError(null);
+    if (!localReady) {
+      await enableTiltRef.current();
+    }
+    raceClientRef.current?.sendReady(!localReady);
   };
 
   const resolvedWsUrl = resolveDefaultWsUrl();
@@ -1571,6 +1731,56 @@ export function HelloMarble() {
   return (
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
+      <div className="raceOverlay">
+        <div className="raceOverlayCard">
+          <p className="raceOverlayTitle">Race Lobby</p>
+          <p>
+            {roomCode ? `Room ${roomCode}` : "Create or join a room from Network tab"}
+          </p>
+          <p>Status: {netStatus}</p>
+          <p>Players: {playersInRoom.length}/2</p>
+          {playersInRoom.length > 0 ? (
+            <div className="racePlayers">
+              {playersInRoom.map((player) => {
+                const isReady = readyPlayerIds.includes(player.playerId);
+                const isLocal = player.playerId === localPlayerId;
+                return (
+                  <p key={player.playerId} className={isReady ? "ready" : "waiting"}>
+                    {isLocal ? "You" : player.name || player.playerId}:{" "}
+                    {isReady ? "READY" : "Waiting"}
+                  </p>
+                );
+              })}
+            </div>
+          ) : null}
+          {racePhase === "countdown" ? <p className="raceHint">Countdown started...</p> : null}
+          {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
+          {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
+          {!tiltStatus.supported ? (
+            <p className="raceHint">Tilt unavailable on this device. Fallback controls enabled.</p>
+          ) : null}
+          <button
+            type="button"
+            className={`readyButton ${localReady ? "ready" : ""}`}
+            onClick={() => void toggleReady()}
+            disabled={
+              netStatus !== "connected" ||
+              !roomCode ||
+              !localPlayerId ||
+              racePhase === "countdown"
+            }
+          >
+            {localReady ? "UNREADY" : "READY"}
+          </button>
+        </div>
+      </div>
+      {countdownToken ? (
+        <div className="countdownOverlay" key={`${countdownToken}-${countdownStartAtMs ?? 0}`}>
+          <div className={`countdownValue ${countdownToken === "GO!" ? "go" : ""}`}>
+            {countdownToken}
+          </div>
+        </div>
+      ) : null}
       <DebugDrawer
         open={drawerOpen}
         onToggle={() => setDrawerOpen((open) => !open)}
@@ -2076,6 +2286,8 @@ export function HelloMarble() {
             <p>Room: {roomCode || "n/a"}</p>
             <p>Player ID: {localPlayerId || "n/a"}</p>
             <p>Players: {playersInRoom.length}</p>
+            <p>Ready players: {readyPlayerIds.length}</p>
+            <p>Race phase: {racePhase}</p>
             <p>Ghost players: {netSmoothing.ghostPlayers}</p>
             <p>Ghost interp delay (avg ms): {netSmoothing.avgDelayMs.toFixed(1)}</p>
             <p>Ghost jitter (avg ms): {netSmoothing.avgJitterMs.toFixed(1)}</p>
@@ -2093,9 +2305,6 @@ export function HelloMarble() {
             <div className="debugButtonRow">
               <button type="button" onClick={createRoom}>
                 Create Room
-              </button>
-              <button type="button" onClick={sendRaceHello}>
-                Race Hello
               </button>
             </div>
             <label className="controlLabel" htmlFor="joinRoomCode">
