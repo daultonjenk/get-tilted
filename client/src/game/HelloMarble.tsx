@@ -39,21 +39,29 @@ type CameraPresetId =
   | "topdownForward"
   | "broadcast";
 
+type PhysicsPresetId = "marble" | "floaty" | "heavy";
+
 type TuningState = {
+  physicsPreset: PhysicsPresetId;
   gravityG: number;
   tiltStrength: number;
   maxSpeed: number;
   maxTiltDeg: number;
   maxBoardAngVel: number;
+  tiltFilterTau: number;
   linearDamping: number;
   angularDamping: number;
   cameraPreset: CameraPresetId;
+  contactFriction: number;
+  contactRestitution: number;
   invertTiltX: boolean;
   invertTiltZ: boolean;
   invertCameraSide: boolean;
   enableExtraDownforce: boolean;
   extraDownForce: number;
 };
+
+type TrialState = "idle" | "running" | "finished";
 
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
@@ -65,16 +73,21 @@ const BOARD_TILT_SMOOTH = 12;
 const PIVOT_SMOOTH = 10;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const LEGACY_TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
+const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 
 const DEFAULT_TUNING: TuningState = {
-  gravityG: 14,
+  physicsPreset: "marble",
+  gravityG: 18,
   tiltStrength: 1,
   maxSpeed: 10,
   maxTiltDeg: 14,
-  maxBoardAngVel: 4,
-  linearDamping: 0.18,
-  angularDamping: 0.18,
+  maxBoardAngVel: 5,
+  tiltFilterTau: 0.1,
+  linearDamping: 0.08,
+  angularDamping: 0.08,
   cameraPreset: "chaseCentered",
+  contactFriction: 0.75,
+  contactRestitution: 0.1,
   invertTiltX: false,
   invertTiltZ: false,
   invertCameraSide: false,
@@ -93,6 +106,48 @@ const CAMERA_PRESETS: CameraPresetId[] = [
   "broadcast",
 ];
 
+const PHYSICS_PRESETS: Record<
+  PhysicsPresetId,
+  Pick<
+    TuningState,
+    | "gravityG"
+    | "linearDamping"
+    | "angularDamping"
+    | "contactFriction"
+    | "contactRestitution"
+    | "maxBoardAngVel"
+    | "tiltFilterTau"
+  >
+> = {
+  marble: {
+    gravityG: 18,
+    linearDamping: 0.08,
+    angularDamping: 0.08,
+    contactFriction: 0.75,
+    contactRestitution: 0.1,
+    maxBoardAngVel: 5,
+    tiltFilterTau: 0.1,
+  },
+  floaty: {
+    gravityG: 14,
+    linearDamping: 0.18,
+    angularDamping: 0.18,
+    contactFriction: 0.85,
+    contactRestitution: 0.03,
+    maxBoardAngVel: 3.5,
+    tiltFilterTau: 0.15,
+  },
+  heavy: {
+    gravityG: 20,
+    linearDamping: 0.06,
+    angularDamping: 0.06,
+    contactFriction: 0.7,
+    contactRestitution: 0.08,
+    maxBoardAngVel: 6,
+    tiltFilterTau: 0.08,
+  },
+};
+
 const DRAWER_TABS: { id: DebugTabId; label: string }[] = [
   { id: "tuning", label: "Tuning" },
   { id: "camera", label: "Camera" },
@@ -108,6 +163,10 @@ function isCameraPresetId(value: unknown): value is CameraPresetId {
   return typeof value === "string" && CAMERA_PRESETS.includes(value as CameraPresetId);
 }
 
+function isPhysicsPresetId(value: unknown): value is PhysicsPresetId {
+  return value === "marble" || value === "floaty" || value === "heavy";
+}
+
 function sanitizeTuning(input: unknown): TuningState {
   const base = { ...DEFAULT_TUNING };
   if (!input || typeof input !== "object") {
@@ -116,6 +175,9 @@ function sanitizeTuning(input: unknown): TuningState {
 
   const value = input as Partial<TuningState>;
 
+  if (isPhysicsPresetId(value.physicsPreset)) {
+    base.physicsPreset = value.physicsPreset;
+  }
   if (typeof value.gravityG === "number") base.gravityG = clamp(value.gravityG, 8, 24);
   if (typeof value.tiltStrength === "number") {
     base.tiltStrength = clamp(value.tiltStrength, 0.5, 2);
@@ -127,11 +189,20 @@ function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.maxBoardAngVel === "number") {
     base.maxBoardAngVel = clamp(value.maxBoardAngVel, 1, 10);
   }
+  if (typeof value.tiltFilterTau === "number") {
+    base.tiltFilterTau = clamp(value.tiltFilterTau, 0.05, 0.25);
+  }
   if (typeof value.linearDamping === "number") {
     base.linearDamping = clamp(value.linearDamping, 0, 0.5);
   }
   if (typeof value.angularDamping === "number") {
     base.angularDamping = clamp(value.angularDamping, 0, 0.5);
+  }
+  if (typeof value.contactFriction === "number") {
+    base.contactFriction = clamp(value.contactFriction, 0.3, 1.1);
+  }
+  if (typeof value.contactRestitution === "number") {
+    base.contactRestitution = clamp(value.contactRestitution, 0, 0.25);
   }
   if (isCameraPresetId(value.cameraPreset)) {
     base.cameraPreset = value.cameraPreset;
@@ -202,6 +273,26 @@ function getCameraLabel(id: CameraPresetId): string {
   }
 }
 
+function getPhysicsPresetLabel(id: PhysicsPresetId): string {
+  switch (id) {
+    case "marble":
+      return "Marble (Default)";
+    case "floaty":
+      return "Floaty";
+    case "heavy":
+      return "Heavy";
+    default:
+      return "Unknown";
+  }
+}
+
+function formatTimeMs(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) {
+    return "--";
+  }
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const resetRef = useRef<() => void>(() => {});
@@ -233,6 +324,20 @@ export function HelloMarble() {
   const [tuning, setTuning] = useState<TuningState>(() => loadTuning());
   const [importJsonText, setImportJsonText] = useState("");
   const [importError, setImportError] = useState("");
+  const [trialState, setTrialState] = useState<TrialState>("idle");
+  const [trialCurrentMs, setTrialCurrentMs] = useState<number | null>(null);
+  const [trialLastMs, setTrialLastMs] = useState<number | null>(null);
+  const [trialBestMs, setTrialBestMs] = useState<number | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    const raw = window.localStorage.getItem(BEST_TIME_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  });
   const [debug, setDebug] = useState<MarbleDebug>({
     fps: 0,
     posX: 0,
@@ -280,6 +385,17 @@ export function HelloMarble() {
   }, [tuning]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (trialBestMs == null) {
+      window.localStorage.removeItem(BEST_TIME_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(BEST_TIME_STORAGE_KEY, String(trialBestMs));
+  }, [trialBestMs]);
+
+  useEffect(() => {
     const mount = mountRef.current;
     if (!mount) {
       return;
@@ -321,8 +437,8 @@ export function HelloMarble() {
     boardBody.material = boardMat;
 
     const contactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
-      friction: 0.85,
-      restitution: 0.0,
+      friction: tuningRef.current.contactFriction,
+      restitution: tuningRef.current.contactRestitution,
       contactEquationStiffness: 1e8,
       contactEquationRelaxation: 3,
       frictionEquationStiffness: 1e8,
@@ -363,9 +479,13 @@ export function HelloMarble() {
       current: { x: 0, y: 0, z: 0 },
     };
     let stopTiltListener: (() => void) | null = null;
-    const filter = makeTiltFilter({ tau: 0.1 });
+    let filter = makeTiltFilter({ tau: tuningRef.current.tiltFilterTau });
+    let lastFilterTau = tuningRef.current.tiltFilterTau;
+    let lastFilteredIntent: TiltSample = { x: 0, y: 0, z: 0 };
     let currentPitch = 0;
     let currentRoll = 0;
+    let trialStartAt: number | null = null;
+    let prevMarbleZ = marbleBody.position.z;
 
     const computeSpawnWorld = (): CANNON.Vec3 => {
       const spawn = track.spawn;
@@ -436,6 +556,10 @@ export function HelloMarble() {
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
+      trialStartAt = null;
+      prevMarbleZ = marbleBody.position.z;
+      setTrialState("idle");
+      setTrialCurrentMs(null);
       if (incrementCounter) {
         setRespawnCount((count) => count + 1);
       }
@@ -545,6 +669,14 @@ export function HelloMarble() {
       world.gravity.set(0, -currentTuning.gravityG, 0);
       marbleBody.linearDamping = currentTuning.linearDamping;
       marbleBody.angularDamping = currentTuning.angularDamping;
+      contactMat.friction = currentTuning.contactFriction;
+      contactMat.restitution = currentTuning.contactRestitution;
+
+      if (Math.abs(currentTuning.tiltFilterTau - lastFilterTau) > 0.0001) {
+        lastFilterTau = currentTuning.tiltFilterTau;
+        filter = makeTiltFilter({ tau: lastFilterTau });
+        filter.reset(lastFilteredIntent);
+      }
 
       let sourceIntent: TiltSample;
       const status = tiltStatusRef.current;
@@ -567,6 +699,7 @@ export function HelloMarble() {
       };
 
       const filteredIntent = filter.push(normalizedIntent, delta);
+      lastFilteredIntent = filteredIntent;
       const maxTiltRad = (currentTuning.maxTiltDeg * Math.PI) / 180;
 
       const desiredPitch =
@@ -627,6 +760,25 @@ export function HelloMarble() {
       if (marbleBody.position.y < track.respawnY) {
         respawnMarble(true);
       }
+
+      const marbleZ = marbleBody.position.z;
+      if (trialStartAt == null && prevMarbleZ <= track.trialStartZ && marbleZ > track.trialStartZ) {
+        trialStartAt = nowMs;
+        setTrialState("running");
+        setTrialCurrentMs(0);
+      } else if (
+        trialStartAt != null &&
+        prevMarbleZ <= track.trialFinishZ &&
+        marbleZ > track.trialFinishZ
+      ) {
+        const elapsed = nowMs - trialStartAt;
+        trialStartAt = null;
+        setTrialState("finished");
+        setTrialCurrentMs(null);
+        setTrialLastMs(elapsed);
+        setTrialBestMs((prevBest) => (prevBest == null ? elapsed : Math.min(prevBest, elapsed)));
+      }
+      prevMarbleZ = marbleZ;
 
       marbleMesh.position.set(
         marbleBody.position.x,
@@ -737,6 +889,9 @@ export function HelloMarble() {
       renderer.render(scene, camera);
 
       if (debugTimer >= 0.1) {
+        if (trialStartAt != null) {
+          setTrialCurrentMs(nowMs - trialStartAt);
+        }
         setDebug((prev) => ({
           ...prev,
           fps: Math.round(1 / Math.max(delta, 0.0001)),
@@ -800,6 +955,15 @@ export function HelloMarble() {
     setTuning((prev) => ({ ...prev, [key]: value }));
   };
 
+  const applyPhysicsPreset = (preset: PhysicsPresetId) => {
+    const values = PHYSICS_PRESETS[preset];
+    setTuning((prev) => ({
+      ...prev,
+      physicsPreset: preset,
+      ...values,
+    }));
+  };
+
   const copySettings = async () => {
     const payload = JSON.stringify(tuning, null, 2);
     setImportJsonText(payload);
@@ -837,6 +1001,21 @@ export function HelloMarble() {
         {activeDebugTab === "tuning" ? (
           <div className="debugSection">
             <p className="tiltMessage">{statusMessage}</p>
+            <label className="controlLabel">
+              Physics Preset
+              <select
+                value={tuning.physicsPreset}
+                onChange={(event) =>
+                  applyPhysicsPreset(event.target.value as PhysicsPresetId)
+                }
+              >
+                {(Object.keys(PHYSICS_PRESETS) as PhysicsPresetId[]).map((preset) => (
+                  <option key={preset} value={preset}>
+                    {getPhysicsPresetLabel(preset)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="controlLabel">
               Max Speed
               <div className="controlRow">
@@ -948,6 +1127,75 @@ export function HelloMarble() {
                   value={tuning.maxBoardAngVel}
                   onChange={(event) =>
                     updateTuning("maxBoardAngVel", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              Contact Friction
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={0.3}
+                  max={1.1}
+                  step={0.01}
+                  value={tuning.contactFriction}
+                  onChange={(event) =>
+                    updateTuning("contactFriction", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.contactFriction}
+                  onChange={(event) =>
+                    updateTuning("contactFriction", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              Contact Restitution
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={0}
+                  max={0.25}
+                  step={0.01}
+                  value={tuning.contactRestitution}
+                  onChange={(event) =>
+                    updateTuning("contactRestitution", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.contactRestitution}
+                  onChange={(event) =>
+                    updateTuning("contactRestitution", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              Tilt Filter Tau
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={0.05}
+                  max={0.25}
+                  step={0.01}
+                  value={tuning.tiltFilterTau}
+                  onChange={(event) =>
+                    updateTuning("tiltFilterTau", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.tiltFilterTau}
+                  onChange={(event) =>
+                    updateTuning("tiltFilterTau", Number(event.target.value))
                   }
                 />
               </div>
@@ -1187,6 +1435,10 @@ export function HelloMarble() {
             </p>
             <p>Speed: {debug.speed.toFixed(2)}</p>
             <p>Respawns: {respawnCount}</p>
+            <p>Trial state: {trialState}</p>
+            <p>Trial current: {formatTimeMs(trialCurrentMs)}</p>
+            <p>Trial last: {formatTimeMs(trialLastMs)}</p>
+            <p>Trial best: {formatTimeMs(trialBestMs)}</p>
             <p>
               Raw Tilt: {debug.rawTiltX.toFixed(2)}, {debug.rawTiltZ.toFixed(2)}
             </p>

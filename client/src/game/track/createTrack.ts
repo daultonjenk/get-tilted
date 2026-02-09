@@ -10,6 +10,8 @@ export type TrackBuildResult = {
   bodies: CANNON.Body[];
   spawn: CANNON.Vec3;
   respawnY: number;
+  trialStartZ: number;
+  trialFinishZ: number;
 };
 
 type SegmentDef = {
@@ -43,6 +45,7 @@ const MARBLE_RADIUS = 0.5;
 const START_LENGTH = 8;
 const FINISH_LENGTH = 10;
 const FINISH_WIDTH = 8;
+const MARKER_THICK = 0.12;
 
 const SEGMENTS: SegmentDef[] = [
   { length: 9, slopeDeg: 0, yawDeg: 0 },
@@ -134,6 +137,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
   const floorMaterial = createCheckerFloorMaterial();
   const railMaterial = new THREE.MeshStandardMaterial({ color: RAIL_COLOR });
+  const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
+  const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
 
   let currentYawDeg = 0;
   let lowestFloorY = 0;
@@ -256,11 +261,37 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     .clone()
     .addScaledVector(startForward, 1.8)
     .add(new THREE.Vector3(0, MARBLE_RADIUS + 0.6, 0));
+  const trialStartZ = spawn.z + 2;
+  const trialFinishZ = pathStartTopPoint.z - 1;
+
+  addVisualPart(group, {
+    size: new THREE.Vector3(TRACK_W + 0.8, MARKER_THICK, 0.45),
+    position: new THREE.Vector3(
+      0,
+      FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01,
+      trialStartZ,
+    ),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: startMarkerMaterial,
+  });
+
+  addVisualPart(group, {
+    size: new THREE.Vector3(FINISH_WIDTH + 1.2, MARKER_THICK, 0.55),
+    position: new THREE.Vector3(
+      0,
+      FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01,
+      trialFinishZ,
+    ),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: finishMarkerMaterial,
+  });
 
   return {
     group,
     bodies: [boardBody],
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
+    trialStartZ,
+    trialFinishZ,
   };
 }
