@@ -245,6 +245,14 @@ function sanitizeJoinHost(value: string): string {
   return hostPattern.test(next) ? next : "";
 }
 
+function normalizeCountdownStartAt(startAtMs: number, stepMs: number): number {
+  const now = Date.now();
+  const remainingMs = startAtMs - now;
+  // Clamp skewed clocks to keep countdown progression reliable across devices.
+  const clampedRemainingMs = clamp(remainingMs, 0, stepMs);
+  return now + clampedRemainingMs;
+}
+
 function isLocalHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
@@ -819,6 +827,17 @@ export function HelloMarble() {
           setRoomCode(message.payload.roomCode);
           setLocalReady(false);
           setNetError(null);
+          {
+            const livePlayerIds = new Set(message.payload.players.map((entry) => entry.playerId));
+            for (const [playerId, ghostState] of ghostPlayers) {
+              if (livePlayerIds.has(playerId) || playerId === message.payload.playerId) {
+                continue;
+              }
+              scene.remove(ghostState.mesh);
+              ghostState.mesh.geometry.dispose();
+              ghostPlayers.delete(playerId);
+            }
+          }
           return;
         case "race:ready:state":
           if (gameModeRef.current !== "multiplayer") {
@@ -831,7 +850,9 @@ export function HelloMarble() {
               : false,
           );
           if (typeof message.payload.countdownStartAtMs === "number") {
-            setCountdownStartAtMs(message.payload.countdownStartAtMs);
+            setCountdownStartAtMs(
+              normalizeCountdownStartAt(message.payload.countdownStartAtMs, 1000),
+            );
             setCountdownStepMs(1000);
             setRacePhase("countdown");
             setControlsLocked(true);
@@ -855,7 +876,9 @@ export function HelloMarble() {
           if (message.payload.roomCode !== raceClient.getRoomCode()) {
             return;
           }
-          setCountdownStartAtMs(message.payload.startAtMs);
+          setCountdownStartAtMs(
+            normalizeCountdownStartAt(message.payload.startAtMs, message.payload.stepMs),
+          );
           setCountdownStepMs(message.payload.stepMs);
           setRacePhase("countdown");
           setControlsLocked(true);
@@ -1227,6 +1250,12 @@ export function HelloMarble() {
             calibrateTiltRef.current();
           }
         } else if (elapsedMs >= stepMs * COUNTDOWN_LABELS.length) {
+          if (!countdownGoHandledRef.current) {
+            countdownGoHandledRef.current = true;
+            setControlsLocked(false);
+            setRacePhase("racing");
+            calibrateTiltRef.current();
+          }
           setCountdownStartAtMs(null);
           setCountdownToken(null);
           countdownIndexRef.current = -1;
