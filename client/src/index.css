@@ -59,3 +59,42 @@ body {
   padding: 0.4rem 0.55rem;
   cursor: pointer;
 }
+
+.netDebug {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 17rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: rgb(4 10 20 / 80%);
+  border: 1px solid rgb(155 206 255 / 35%);
+}
+
+.netDebug p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.netTitle {
+  font-weight: 700;
+}
+
+.netRow {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.netRow button,
+.netRow input {
+  flex: 1;
+  border: 1px solid #9bc6ff;
+  border-radius: 0.35rem;
+  background: #0f2c4d;
+  color: #eaf4ff;
+  padding: 0.35rem 0.5rem;
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@get-tilted/shared-protocol",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "main": "dist/protocol.js",
+  "types": "dist/protocol.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

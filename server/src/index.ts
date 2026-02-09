@@ -1,6 +1,6 @@
 import http from "node:http";
-import type { IncomingMessage } from "node:http";
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocketServer } from "ws";
+import { handleWsConnection } from "./ws/wsRouter.js";
 
 const port = Number(process.env.PORT ?? 3001);
 
@@ -10,16 +10,21 @@ const httpServer = http.createServer((_, res) => {
 });
 
 const wss = new WebSocketServer({
-  server: httpServer,
+  noServer: true,
 });
 
-wss.on("connection", (socket: WebSocket, request: IncomingMessage) => {
-  const remote = request.socket.remoteAddress ?? "unknown";
-  console.log(`[${new Date().toISOString()}] connection ${remote}`);
-  socket.on("close", (code: number, reasonBuffer: Buffer) => {
-    const reason = reasonBuffer.toString() || "no-reason";
-    console.log(`[${new Date().toISOString()}] disconnect ${remote} (${code}:${reason})`);
+httpServer.on("upgrade", (request, socket, head) => {
+  if (request.url !== "/ws") {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit("connection", ws, request);
   });
+});
+
+wss.on("connection", (ws, request) => {
+  handleWsConnection(ws, request);
 });
 
 httpServer.listen(port, () => {

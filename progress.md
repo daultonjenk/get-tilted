@@ -10,3 +10,11 @@ Progress:
 Open items:
 - Manual browser smoke confirmation still requires local interactive check (arrow influence, reset behavior, and visual validation).
 - v0.5+ work: shared typed message protocol between client/dev-server/worker.
+
+v0.1.1 update:
+- Added `shared/` workspace with `encodeMessage`, `safeParseMessage`, message unions, and runtime guards.
+- Added client WS abstraction (`client/src/net/wsClient.ts`) and UI panel (`client/src/ui/NetDebugPanel.tsx`) for connect/ping/create/join.
+- Refactored server into `/ws` upgrade + message router modules and in-memory room tracking with room-state broadcasts.
+- Added `worker/` workspace with Cloudflare Worker + Durable Object WebSocket skeleton using shared protocol.
+- Root scripts now include `shared` and `worker` in lint/typecheck/build and add `dev:worker`.
+- Verified: `npm run lint`, `npm run typecheck`, `npm run build`, and short two-client WS smoke (`ws_smoke_ok`).

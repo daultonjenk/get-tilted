@@ -7,7 +7,6 @@ type MarbleDebug = {
   posX: number;
   posY: number;
   posZ: number;
-  socketState: "connecting" | "connected" | "disconnected";
 };
 
 const SPAWN = new CANNON.Vec3(0, 3, 0);
@@ -23,7 +22,6 @@ export function HelloMarble() {
     posX: 0,
     posY: 0,
     posZ: 0,
-    socketState: "connecting",
   });
 
   useEffect(() => {
@@ -126,15 +124,6 @@ export function HelloMarble() {
     resize();
     window.addEventListener("resize", resize);
 
-    const wsUrl = import.meta.env.VITE_WS_URL ?? "ws://localhost:3001";
-    const socket = new WebSocket(wsUrl);
-    socket.addEventListener("open", () => {
-      setDebug((prev) => ({ ...prev, socketState: "connected" }));
-    });
-    socket.addEventListener("close", () => {
-      setDebug((prev) => ({ ...prev, socketState: "disconnected" }));
-    });
-
     let animationFrame = 0;
     let lastTime = performance.now() / 1000;
     let accumulator = 0;
@@ -193,7 +182,6 @@ export function HelloMarble() {
 
     return () => {
       window.cancelAnimationFrame(animationFrame);
-      socket.close();
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("resize", resize);
@@ -210,7 +198,6 @@ export function HelloMarble() {
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
       <div className="hud">
-        <p>Socket: {debug.socketState}</p>
         <p>FPS: {debug.fps}</p>
         <p>
           Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)},{" "}
