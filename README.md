@@ -85,6 +85,19 @@ Ghost smoothing notes:
 1. Ghost updates remain at ~15 Hz for free-tier bandwidth safety.
 2. Clients now use adaptive interpolation (roughly 55-110 ms), bounded extrapolation, and
    track-local ghost sync with world-space fallback for mixed client versions.
+3. `race:state` now supports optional monotonic `seq` ordering. Clients prefer `seq` for
+   deterministic out-of-order drops and fall back to timestamp ordering for older peers.
+
+Snapshot correctness diagnostics (Network tab):
+
+1. `Ghost snapshot age (avg ms)` and `Latest snapshot age (ms)` track remote snapshot freshness
+   against estimated server time.
+2. `Dropped out-of-order seq`, `Dropped stale timestamp`, and `Dropped too-old packets` split
+   stale/drop reasons for debugging.
+3. `Timestamp corrections` counts cases where a newer `seq` arrives with non-increasing `t`; the
+   enqueue timestamp is normalized to keep strict interpolation order.
+4. `Queue order violations` counts render-loop invariant fixes when snapshot queue ordering is
+   not strictly increasing by timestamp.
 
 Dev LAN notes:
 

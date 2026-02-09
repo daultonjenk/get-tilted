@@ -21,6 +21,7 @@ export type MessagePayloadMap = {
   "race:state": {
     roomCode: string;
     playerId: string;
+    seq?: number;
     t: number;
     pos: [number, number, number];
     quat: [number, number, number, number];
@@ -85,6 +86,10 @@ function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return isNumber(value) && Number.isInteger(value) && value >= 1;
+}
+
 function isOptionalString(value: unknown): value is string | undefined {
   return typeof value === "undefined" || isString(value);
 }
@@ -121,6 +126,10 @@ function isOptionalTuple4(
   value: unknown,
 ): value is [number, number, number, number] | undefined {
   return typeof value === "undefined" || isTuple4(value);
+}
+
+function isOptionalPositiveInteger(value: unknown): value is number | undefined {
+  return typeof value === "undefined" || isPositiveInteger(value);
 }
 
 function isPlayerList(
@@ -247,6 +256,9 @@ export function validatePayload<TType extends MessageType>(
       }
       if (!isString(payload.playerId)) {
         return { ok: false, error: "Expected playerId string" };
+      }
+      if (!isOptionalPositiveInteger(payload.seq)) {
+        return { ok: false, error: "Expected optional positive integer seq" };
       }
       if (!isNumber(payload.t)) {
         return { ok: false, error: "Expected numeric t" };

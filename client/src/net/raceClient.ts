@@ -9,6 +9,7 @@ export type RacePlayer = {
 export type RemoteRaceState = {
   roomCode: string;
   playerId: string;
+  seq?: number;
   t: number;
   pos: [number, number, number];
   quat: [number, number, number, number];
@@ -46,6 +47,8 @@ export class RaceClient {
 
   private pingTimer: number | null = null;
 
+  private nextRaceStateSeq = 1;
+
   constructor(url?: string) {
     this.ws = new WSClient(url);
     this.ws.onStatusChange((status) => {
@@ -55,6 +58,7 @@ export class RaceClient {
       if (status === "disconnected") {
         this.roomCode = "";
         this.playerId = "";
+        this.resetRaceStateSeq();
         this.stopPingLoop();
         this.serverClockOffsetMs = 0;
         this.hasClockSync = false;
@@ -70,6 +74,7 @@ export class RaceClient {
     });
     this.ws.onMessage((message) => {
       if (message.type === "room:created") {
+        this.resetRaceStateSeq();
         this.roomCode = message.payload.roomCode;
         this.sendHello();
       }
@@ -110,11 +115,13 @@ export class RaceClient {
   }
 
   createRoom(): void {
+    this.resetRaceStateSeq();
     this.ws.send("room:create", {});
   }
 
   joinRoom(roomCode: string, name?: string): void {
     const normalized = roomCode.trim().toUpperCase();
+    this.resetRaceStateSeq();
     this.roomCode = normalized;
     this.ws.send("room:join", { roomCode: normalized, name });
     this.sendHello(name, normalized);
@@ -131,13 +138,15 @@ export class RaceClient {
     });
   }
 
-  sendRaceState(state: Omit<RemoteRaceState, "roomCode" | "playerId">): void {
+  sendRaceState(state: Omit<RemoteRaceState, "roomCode" | "playerId" | "seq">): void {
     if (!this.roomCode || !this.playerId) {
       return;
     }
+    const seq = this.consumeRaceStateSeq();
     this.ws.send("race:state", {
       roomCode: this.roomCode,
       playerId: this.playerId,
+      seq,
       t: state.t,
       pos: state.pos,
       quat: state.quat,
@@ -231,5 +240,16 @@ export class RaceClient {
     for (const cb of this.clockSyncListeners) {
       cb(this.serverClockOffsetMs);
     }
+  }
+
+  private resetRaceStateSeq(): void {
+    this.nextRaceStateSeq = 1;
+  }
+
+  private consumeRaceStateSeq(): number {
+    const seq = this.nextRaceStateSeq;
+    this.nextRaceStateSeq =
+      seq >= Number.MAX_SAFE_INTEGER ? 1 : this.nextRaceStateSeq + 1;
+    return seq;
   }
 }

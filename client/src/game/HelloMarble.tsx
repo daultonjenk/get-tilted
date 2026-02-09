@@ -76,6 +76,7 @@ type RacePhase = "waiting" | "countdown" | "racing";
 type GameMode = "solo" | "multiplayer";
 
 type GhostSnapshot = {
+  seq?: number;
   t: number;
   recvAtMs: number;
   pos: THREE.Vector3;
@@ -93,13 +94,22 @@ type GhostRenderState = {
   mesh: THREE.Mesh;
   avgSourceDeltaMs: number;
   jitterMs: number;
+  avgSnapshotAgeMs: number;
+  snapshotAgeJitterMs: number;
+  latestSnapshotAgeMs: number | null;
   interpolationDelayMs: number;
+  lastSourceSeq: number;
   lastSourceT: number;
   lastRecvAtMs: number;
   poseMode: GhostPoseMode | null;
   hasRendered: boolean;
   renderedPos: THREE.Vector3;
   renderedQuat: THREE.Quaternion;
+  droppedOutOfOrderSeqCount: number;
+  droppedStaleTimestampCount: number;
+  droppedTooOldCount: number;
+  timestampCorrectedCount: number;
+  queueOrderViolationCount: number;
   droppedStaleCount: number;
 };
 
@@ -107,10 +117,17 @@ type NetSmoothingDebug = {
   ghostPlayers: number;
   avgDelayMs: number;
   avgJitterMs: number;
+  avgSnapshotAgeMs: number;
+  avgSnapshotAgeJitterMs: number;
   extrapolatingPlayers: number;
   droppedStale: number;
+  droppedOutOfOrderSeq: number;
+  droppedStaleTimestamp: number;
+  droppedTooOld: number;
+  timestampCorrected: number;
+  queueOrderViolations: number;
   snapshotQueueSummary: string;
-  latestRemoteAgeMs: number | null;
+  latestSnapshotAgeMs: number | null;
   serverClockOffsetMs: number;
   inputSourcesSummary: string;
   inputIntentX: number;
@@ -131,6 +148,7 @@ const INTERP_DELAY_MAX_MS = 165;
 const INTERP_DELAY_RISE_BLEND = 0.18;
 const INTERP_DELAY_FALL_BLEND = 0.08;
 const EXTRAPOLATION_MAX_MS = 45;
+const SNAPSHOT_MAX_AGE_MS = 2000;
 const SNAP_DISTANCE_M = 8;
 const MAX_GHOST_STEP_SPEED_MPS = 35;
 const SNAP_ANGLE_RAD = 1.3;
@@ -512,10 +530,17 @@ export function HelloMarble() {
     ghostPlayers: 0,
     avgDelayMs: 0,
     avgJitterMs: 0,
+    avgSnapshotAgeMs: 0,
+    avgSnapshotAgeJitterMs: 0,
     extrapolatingPlayers: 0,
     droppedStale: 0,
+    droppedOutOfOrderSeq: 0,
+    droppedStaleTimestamp: 0,
+    droppedTooOld: 0,
+    timestampCorrected: 0,
+    queueOrderViolations: 0,
     snapshotQueueSummary: "none",
-    latestRemoteAgeMs: null,
+    latestSnapshotAgeMs: null,
     serverClockOffsetMs: 0,
     inputSourcesSummary: "none",
     inputIntentX: 0,
@@ -744,7 +769,12 @@ export function HelloMarble() {
     let trialStartAt: number | null = null;
     let prevMarbleZ = marbleBody.position.z;
     let totalDroppedStale = 0;
-    let latestRemoteRecvAtMs: number | null = null;
+    let totalDroppedOutOfOrderSeq = 0;
+    let totalDroppedStaleTimestamp = 0;
+    let totalDroppedTooOld = 0;
+    let totalTimestampCorrected = 0;
+    let totalQueueOrderViolations = 0;
+    let latestAcceptedSnapshotAgeMs: number | null = null;
     let serverClockOffsetMs = 0;
     let isRaceFinishedLocal = false;
     let inputSourcesSummary = "none";
@@ -767,13 +797,22 @@ export function HelloMarble() {
         mesh,
         avgSourceDeltaMs: SOURCE_RATE_MS,
         jitterMs: 0,
+        avgSnapshotAgeMs: 0,
+        snapshotAgeJitterMs: 0,
+        latestSnapshotAgeMs: null,
         interpolationDelayMs: 75,
+        lastSourceSeq: -1,
         lastSourceT: -1,
         lastRecvAtMs: -1,
         poseMode: null,
         hasRendered: false,
         renderedPos: new THREE.Vector3(),
         renderedQuat: new THREE.Quaternion(),
+        droppedOutOfOrderSeqCount: 0,
+        droppedStaleTimestampCount: 0,
+        droppedTooOldCount: 0,
+        timestampCorrectedCount: 0,
+        queueOrderViolationCount: 0,
         droppedStaleCount: 0,
       };
       ghostPlayers.set(playerId, next);
@@ -783,8 +822,12 @@ export function HelloMarble() {
     const resetGhostSnapshots = (): void => {
       for (const [, playerState] of ghostPlayers) {
         playerState.snapshots.length = 0;
+        playerState.lastSourceSeq = -1;
         playerState.lastSourceT = -1;
         playerState.lastRecvAtMs = -1;
+        playerState.latestSnapshotAgeMs = null;
+        playerState.avgSnapshotAgeMs = 0;
+        playerState.snapshotAgeJitterMs = 0;
         playerState.poseMode = null;
         playerState.hasRendered = false;
         playerState.mesh.visible = false;
@@ -930,7 +973,6 @@ export function HelloMarble() {
             return;
           }
           const recvAtMs = Date.now();
-          latestRemoteRecvAtMs = recvAtMs;
           if (message.payload.playerId === raceClient.getPlayerId()) {
             return;
           }
@@ -945,10 +987,50 @@ export function HelloMarble() {
           if (playerState.poseMode === "trackLocal" && !hasTrackLocalSnapshot) {
             return;
           }
-          if (playerState.lastSourceT >= 0 && message.payload.t <= playerState.lastSourceT) {
+
+          const sourceSeq = message.payload.seq;
+          if (
+            typeof sourceSeq === "number" &&
+            playerState.lastSourceSeq >= 0 &&
+            sourceSeq <= playerState.lastSourceSeq
+          ) {
             playerState.droppedStaleCount += 1;
+            playerState.droppedOutOfOrderSeqCount += 1;
             totalDroppedStale += 1;
+            totalDroppedOutOfOrderSeq += 1;
             return;
+          }
+
+          if (
+            typeof sourceSeq !== "number" &&
+            playerState.lastSourceT >= 0 &&
+            message.payload.t <= playerState.lastSourceT
+          ) {
+            playerState.droppedStaleCount += 1;
+            playerState.droppedStaleTimestampCount += 1;
+            totalDroppedStale += 1;
+            totalDroppedStaleTimestamp += 1;
+            return;
+          }
+
+          const snapshotAgeMs = Math.max(0, raceClient.getServerNowMs() - message.payload.t);
+          if (snapshotAgeMs > SNAPSHOT_MAX_AGE_MS) {
+            playerState.droppedStaleCount += 1;
+            playerState.droppedTooOldCount += 1;
+            totalDroppedStale += 1;
+            totalDroppedTooOld += 1;
+            return;
+          }
+
+          let enqueueT = message.payload.t;
+          if (
+            typeof sourceSeq === "number" &&
+            playerState.lastSourceT >= 0 &&
+            enqueueT <= playerState.lastSourceT
+          ) {
+            enqueueT = playerState.lastSourceT + 1;
+            playerState.timestampCorrectedCount += 1;
+            totalTimestampCorrected += 1;
           }
 
           if (playerState.lastRecvAtMs >= 0) {
@@ -973,11 +1055,28 @@ export function HelloMarble() {
                 (clampedDelay - playerState.interpolationDelayMs) * blend;
             }
           }
-          playerState.lastSourceT = message.payload.t;
+
+          if (playerState.latestSnapshotAgeMs == null) {
+            playerState.avgSnapshotAgeMs = snapshotAgeMs;
+            playerState.snapshotAgeJitterMs = 0;
+          } else {
+            playerState.avgSnapshotAgeMs +=
+              (snapshotAgeMs - playerState.avgSnapshotAgeMs) * 0.16;
+            const ageJitterSample = Math.abs(snapshotAgeMs - playerState.avgSnapshotAgeMs);
+            playerState.snapshotAgeJitterMs +=
+              (ageJitterSample - playerState.snapshotAgeJitterMs) * 0.24;
+          }
+          latestAcceptedSnapshotAgeMs = snapshotAgeMs;
+          playerState.latestSnapshotAgeMs = snapshotAgeMs;
+          if (typeof sourceSeq === "number") {
+            playerState.lastSourceSeq = sourceSeq;
+          }
+          playerState.lastSourceT = enqueueT;
           playerState.lastRecvAtMs = recvAtMs;
 
           playerState.snapshots.push({
-            t: message.payload.t,
+            seq: sourceSeq,
+            t: enqueueT,
             recvAtMs,
             pos: new THREE.Vector3(...message.payload.pos),
             quat: new THREE.Quaternion(...message.payload.quat),
@@ -1546,6 +1645,21 @@ export function HelloMarble() {
         if (snapshots.length === 0) {
           continue;
         }
+        let queueViolationIndex = -1;
+        for (let idx = 1; idx < snapshots.length; idx += 1) {
+          if (snapshots[idx]!.t <= snapshots[idx - 1]!.t) {
+            queueViolationIndex = idx;
+            break;
+          }
+        }
+        if (queueViolationIndex >= 0) {
+          snapshots.splice(queueViolationIndex, 1);
+          playerState.queueOrderViolationCount += 1;
+          totalQueueOrderViolations += 1;
+          if (snapshots.length === 0) {
+            continue;
+          }
+        }
         const poseMode = playerState.poseMode ?? "world";
         const targetInterpTime = interpNowMs - playerState.interpolationDelayMs;
         while (
@@ -1733,16 +1847,26 @@ export function HelloMarble() {
           ghostCount > 0
             ? ghostStateList.reduce((sum, state) => sum + state.jitterMs, 0) / ghostCount
             : 0;
+        const statesWithSnapshotAge = ghostStateList.filter(
+          (state) => state.latestSnapshotAgeMs != null,
+        );
+        const snapshotAgeCount = statesWithSnapshotAge.length;
+        const avgSnapshotAgeMs =
+          snapshotAgeCount > 0
+            ? statesWithSnapshotAge.reduce((sum, state) => sum + state.avgSnapshotAgeMs, 0) /
+              snapshotAgeCount
+            : 0;
+        const avgSnapshotAgeJitterMs =
+          snapshotAgeCount > 0
+            ? statesWithSnapshotAge.reduce((sum, state) => sum + state.snapshotAgeJitterMs, 0) /
+              snapshotAgeCount
+            : 0;
         const snapshotQueueSummary =
           ghostCount > 0
             ? [...ghostPlayers.entries()]
                 .map(([playerId, state]) => `${playerId}:${state.snapshots.length}`)
                 .join(", ")
             : "none";
-        const latestRemoteAgeMs =
-          typeof latestRemoteRecvAtMs === "number"
-            ? Math.max(0, Date.now() - latestRemoteRecvAtMs)
-            : null;
 
         if (trialStartAt != null) {
           setTrialCurrentMs(nowMs - trialStartAt);
@@ -1766,10 +1890,17 @@ export function HelloMarble() {
           ghostPlayers: ghostCount,
           avgDelayMs,
           avgJitterMs,
+          avgSnapshotAgeMs,
+          avgSnapshotAgeJitterMs,
           extrapolatingPlayers,
           droppedStale: totalDroppedStale,
+          droppedOutOfOrderSeq: totalDroppedOutOfOrderSeq,
+          droppedStaleTimestamp: totalDroppedStaleTimestamp,
+          droppedTooOld: totalDroppedTooOld,
+          timestampCorrected: totalTimestampCorrected,
+          queueOrderViolations: totalQueueOrderViolations,
           snapshotQueueSummary,
-          latestRemoteAgeMs,
+          latestSnapshotAgeMs: latestAcceptedSnapshotAgeMs,
           serverClockOffsetMs,
           inputSourcesSummary,
           inputIntentX,
@@ -2579,14 +2710,21 @@ export function HelloMarble() {
             <p>Ghost players: {netSmoothing.ghostPlayers}</p>
             <p>Ghost interp delay (avg ms): {netSmoothing.avgDelayMs.toFixed(1)}</p>
             <p>Ghost jitter (avg ms): {netSmoothing.avgJitterMs.toFixed(1)}</p>
+            <p>Ghost snapshot age (avg ms): {netSmoothing.avgSnapshotAgeMs.toFixed(1)}</p>
+            <p>Ghost snapshot age jitter (avg ms): {netSmoothing.avgSnapshotAgeJitterMs.toFixed(1)}</p>
             <p>Ghost extrapolating: {netSmoothing.extrapolatingPlayers}</p>
             <p>Dropped stale packets: {netSmoothing.droppedStale}</p>
+            <p>Dropped out-of-order seq: {netSmoothing.droppedOutOfOrderSeq}</p>
+            <p>Dropped stale timestamp: {netSmoothing.droppedStaleTimestamp}</p>
+            <p>Dropped too-old packets: {netSmoothing.droppedTooOld}</p>
+            <p>Timestamp corrections: {netSmoothing.timestampCorrected}</p>
+            <p>Queue order violations: {netSmoothing.queueOrderViolations}</p>
             <p>Snapshot queues: {netSmoothing.snapshotQueueSummary}</p>
             <p>
-              Latest remote age (ms):{" "}
-              {netSmoothing.latestRemoteAgeMs == null
+              Latest snapshot age (ms):{" "}
+              {netSmoothing.latestSnapshotAgeMs == null
                 ? "n/a"
-                : netSmoothing.latestRemoteAgeMs.toFixed(1)}
+                : netSmoothing.latestSnapshotAgeMs.toFixed(1)}
             </p>
             <p>Server clock offset (ms): {netSmoothing.serverClockOffsetMs.toFixed(1)}</p>
             <p>Input sources: {netSmoothing.inputSourcesSummary}</p>
