@@ -106,6 +106,9 @@ type NetSmoothingDebug = {
   droppedStale: number;
   snapshotQueueSummary: string;
   latestRemoteAgeMs: number | null;
+  inputSourcesSummary: string;
+  inputIntentX: number;
+  inputIntentZ: number;
 };
 
 const TIMESTEP = 1 / 60;
@@ -513,6 +516,9 @@ export function HelloMarble() {
     droppedStale: 0,
     snapshotQueueSummary: "none",
     latestRemoteAgeMs: null,
+    inputSourcesSummary: "none",
+    inputIntentX: 0,
+    inputIntentZ: 0,
   });
 
   const tiltStatusRef = useRef(tiltStatus);
@@ -737,6 +743,9 @@ export function HelloMarble() {
     let prevMarbleZ = marbleBody.position.z;
     let totalDroppedStale = 0;
     let latestRemoteEpochMs: number | null = null;
+    let inputSourcesSummary = "none";
+    let inputIntentX = 0;
+    let inputIntentZ = 0;
 
     const getOrCreateGhostState = (playerId: string): GhostRenderState => {
       const existing = ghostPlayers.get(playerId);
@@ -1164,17 +1173,9 @@ export function HelloMarble() {
 
     const resolveSnapshotPose = (
       snapshot: GhostSnapshot,
-      boardPos: THREE.Vector3,
-      boardQuat: THREE.Quaternion,
-      useTrackLocal: boolean,
       outPos: THREE.Vector3,
       outQuat: THREE.Quaternion,
     ): void => {
-      if (useTrackLocal && snapshot.trackPos && snapshot.trackQuat) {
-        outPos.copy(snapshot.trackPos).applyQuaternion(boardQuat).add(boardPos);
-        outQuat.copy(boardQuat).multiply(snapshot.trackQuat);
-        return;
-      }
       outPos.copy(snapshot.pos);
       outQuat.copy(snapshot.quat);
     };
@@ -1289,19 +1290,37 @@ export function HelloMarble() {
       let sourceIntent: TiltSample;
       const status = tiltStatusRef.current;
       const touchIntent = touchTiltRef.current;
+      const keyboardIntent = getKeyboardIntent();
+      const tiltEnabled = status.enabled && status.permission === "granted" && status.supported;
+      const touchFallbackEnabled = !status.supported || status.permission === "denied";
+      const keyboardActive = keyboardIntent.x !== 0 || keyboardIntent.z !== 0;
 
       if (controlsLockedRef.current) {
         sourceIntent = { x: 0, y: 0, z: 0 };
-      } else if (status.enabled && status.permission === "granted" && status.supported) {
-        sourceIntent = {
-          x: motionTiltRef.current.x * currentTuning.gyroSensitivity,
-          y: 0,
-          z: motionTiltRef.current.z * currentTuning.gyroSensitivity,
-        };
-      } else if (!status.supported || status.permission === "denied") {
-        sourceIntent = { x: touchIntent.x, y: 0, z: touchIntent.z };
+        inputSourcesSummary = "locked";
       } else {
-        sourceIntent = getKeyboardIntent();
+        let sourceX = keyboardIntent.x;
+        let sourceZ = keyboardIntent.z;
+        const activeInputs: string[] = [];
+        if (keyboardActive) {
+          activeInputs.push("keyboard");
+        }
+        if (tiltEnabled) {
+          sourceX += motionTiltRef.current.x * currentTuning.gyroSensitivity;
+          sourceZ += motionTiltRef.current.z * currentTuning.gyroSensitivity;
+          activeInputs.push("tilt");
+        }
+        if (touchFallbackEnabled) {
+          sourceX += touchIntent.x;
+          sourceZ += touchIntent.z;
+          activeInputs.push("touch");
+        }
+        sourceIntent = {
+          x: sourceX,
+          y: 0,
+          z: sourceZ,
+        };
+        inputSourcesSummary = activeInputs.length > 0 ? activeInputs.join("+") : "none";
       }
 
       const intentX = currentTuning.invertTiltX ? -sourceIntent.x : sourceIntent.x;
@@ -1311,6 +1330,8 @@ export function HelloMarble() {
         y: 0,
         z: clamp(intentZ, -1, 1),
       };
+      inputIntentX = normalizedIntent.x;
+      inputIntentZ = normalizedIntent.z;
 
       const filteredIntent = filter.push(normalizedIntent, delta);
       lastFilteredIntent = filteredIntent;
@@ -1476,11 +1497,8 @@ export function HelloMarble() {
         if (snapshots.length >= 2) {
           const a = snapshots[0]!;
           const b = snapshots[1]!;
-          const useTrackLocal = Boolean(
-            a.trackPos && a.trackQuat && b.trackPos && b.trackQuat,
-          );
-          resolveSnapshotPose(a, boardPosThree, boardQuatThree, useTrackLocal, tempVecA, tempQuatA);
-          resolveSnapshotPose(b, boardPosThree, boardQuatThree, useTrackLocal, tempVecB, tempQuatB);
+          resolveSnapshotPose(a, tempVecA, tempQuatA);
+          resolveSnapshotPose(b, tempVecB, tempQuatB);
           const span = Math.max(b.t - a.t, 1);
           const alpha = clamp((targetInterpTime - a.t) / span, 0, 1);
           tempVecA.lerp(tempVecB, alpha);
@@ -1490,24 +1508,11 @@ export function HelloMarble() {
         }
 
         const latest = snapshots[0]!;
-        const useTrackLocal = Boolean(latest.trackPos && latest.trackQuat);
-        resolveSnapshotPose(
-          latest,
-          boardPosThree,
-          boardQuatThree,
-          useTrackLocal,
-          tempVecA,
-          tempQuatA,
-        );
+        resolveSnapshotPose(latest, tempVecA, tempQuatA);
         const extrapolationMs = targetInterpTime - latest.t;
         if (extrapolationMs > 0 && extrapolationMs <= EXTRAPOLATION_MAX_MS) {
           const dt = extrapolationMs / 1000;
-          if (useTrackLocal && latest.trackPos && latest.trackVel) {
-            tempVecB.copy(latest.trackPos).addScaledVector(latest.trackVel, dt);
-            tempVecA.copy(tempVecB).applyQuaternion(boardQuatThree).add(boardPosThree);
-          } else {
-            tempVecA.addScaledVector(latest.vel, dt);
-          }
+          tempVecA.addScaledVector(latest.vel, dt);
           extrapolatingPlayers += 1;
         }
         applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
@@ -1660,6 +1665,9 @@ export function HelloMarble() {
           droppedStale: totalDroppedStale,
           snapshotQueueSummary,
           latestRemoteAgeMs,
+          inputSourcesSummary,
+          inputIntentX,
+          inputIntentZ,
         });
         debugTimer = 0;
       }
@@ -2473,6 +2481,11 @@ export function HelloMarble() {
               {netSmoothing.latestRemoteAgeMs == null
                 ? "n/a"
                 : netSmoothing.latestRemoteAgeMs.toFixed(1)}
+            </p>
+            <p>Input sources: {netSmoothing.inputSourcesSummary}</p>
+            <p>
+              Input intent: {netSmoothing.inputIntentX.toFixed(2)},{" "}
+              {netSmoothing.inputIntentZ.toFixed(2)}
             </p>
             {netError ? <p className="errorText">{netError}</p> : null}
             <div className="debugButtonRow">
