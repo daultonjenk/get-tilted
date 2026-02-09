@@ -60,6 +60,45 @@ body {
   cursor: pointer;
 }
 
+.hudRow {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.hudRow button {
+  flex: 1;
+}
+
+.tiltStatus {
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.tiltMessage {
+  font-size: 0.8rem;
+  color: #b6d4f1;
+}
+
+.tiltFallback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.25rem;
+}
+
+.tiltFallback p {
+  font-weight: 600;
+}
+
+.tiltFallback label {
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+.tiltFallback input[type="range"] {
+  width: 100%;
+}
+
 .netDebug {
   position: absolute;
   top: 0.75rem;

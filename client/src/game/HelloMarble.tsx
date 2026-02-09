@@ -2,28 +2,69 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { createTrack } from "./track/createTrack";
+import {
+  calibrateCurrent,
+  isTiltSupported,
+  makeTiltFilter,
+  requestTiltPermissionIfNeeded,
+  startTiltListener,
+  type TiltSample,
+  type TiltState,
+} from "./input/tilt";
 
 type MarbleDebug = {
   fps: number;
   posX: number;
   posY: number;
   posZ: number;
+  tiltX: number;
+  tiltZ: number;
+  gravX: number;
+  gravY: number;
+  gravZ: number;
 };
 
-const INPUT_FORCE = 12;
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
+const BASE_G = 9.82;
+const MAX_TILT_DEG = 15;
 
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const resetRef = useRef<() => void>(() => {});
+  const enableTiltRef = useRef<() => Promise<void>>(async () => {});
+  const calibrateTiltRef = useRef<() => void>(() => {});
+
   const [respawnCount, setRespawnCount] = useState(0);
+  const [tiltStatus, setTiltStatus] = useState<TiltState>({
+    enabled: false,
+    supported: isTiltSupported(),
+    permission: "unknown",
+  });
+  const [statusMessage, setStatusMessage] = useState("Tilt disabled. Using fallback controls.");
+  const [touchTilt, setTouchTilt] = useState({ x: 0, z: 0 });
   const [debug, setDebug] = useState<MarbleDebug>({
     fps: 0,
     posX: 0,
     posY: 0,
     posZ: 0,
+    tiltX: 0,
+    tiltZ: 0,
+    gravX: 0,
+    gravY: -BASE_G,
+    gravZ: 0,
   });
+
+  const tiltStatusRef = useRef(tiltStatus);
+  const touchTiltRef = useRef(touchTilt);
+
+  useEffect(() => {
+    tiltStatusRef.current = tiltStatus;
+  }, [tiltStatus]);
+
+  useEffect(() => {
+    touchTiltRef.current = touchTilt;
+  }, [touchTilt]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -53,7 +94,7 @@ export function HelloMarble() {
     scene.add(track.group);
 
     const world = new CANNON.World();
-    world.gravity.set(0, -9.82, 0);
+    world.gravity.set(0, -BASE_G, 0);
     for (const body of track.bodies) {
       world.addBody(body);
     }
@@ -75,18 +116,32 @@ export function HelloMarble() {
     scene.add(marbleMesh);
 
     const pressedKeys = new Set<string>();
-    const force = new CANNON.Vec3();
     const cameraOffset = new THREE.Vector3(0, 4.5, 8);
     const lookOffset = new THREE.Vector3(0, 0.6, 0);
     const cameraTarget = new THREE.Vector3();
     const lookTarget = new THREE.Vector3();
+
+    const motionTiltRef: { current: TiltSample } = {
+      current: { x: 0, y: 0, z: 0 },
+    };
+    let stopTiltListener: (() => void) | null = null;
+    const filter = makeTiltFilter({ tau: 0.15 });
+    const maxTiltRad = (MAX_TILT_DEG * Math.PI) / 180;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
         event.key === "ArrowUp" ||
         event.key === "ArrowDown" ||
         event.key === "ArrowLeft" ||
-        event.key === "ArrowRight"
+        event.key === "ArrowRight" ||
+        event.key === "w" ||
+        event.key === "a" ||
+        event.key === "s" ||
+        event.key === "d" ||
+        event.key === "W" ||
+        event.key === "A" ||
+        event.key === "S" ||
+        event.key === "D"
       ) {
         event.preventDefault();
         pressedKeys.add(event.key);
@@ -105,12 +160,88 @@ export function HelloMarble() {
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
-      force.set(0, 0, 0);
       if (incrementCounter) {
         setRespawnCount((count) => count + 1);
       }
     };
     resetRef.current = () => respawnMarble(false);
+
+    const getKeyboardIntent = (): TiltSample => {
+      let x = 0;
+      let z = 0;
+      if (
+        pressedKeys.has("ArrowUp") ||
+        pressedKeys.has("w") ||
+        pressedKeys.has("W")
+      ) {
+        z -= 1;
+      }
+      if (
+        pressedKeys.has("ArrowDown") ||
+        pressedKeys.has("s") ||
+        pressedKeys.has("S")
+      ) {
+        z += 1;
+      }
+      if (
+        pressedKeys.has("ArrowLeft") ||
+        pressedKeys.has("a") ||
+        pressedKeys.has("A")
+      ) {
+        x -= 1;
+      }
+      if (
+        pressedKeys.has("ArrowRight") ||
+        pressedKeys.has("d") ||
+        pressedKeys.has("D")
+      ) {
+        x += 1;
+      }
+      return { x, y: 0, z };
+    };
+
+    enableTiltRef.current = async () => {
+      if (!tiltStatusRef.current.supported) {
+        setTiltStatus((prev) => ({
+          ...prev,
+          enabled: false,
+          permission: "denied",
+        }));
+        setStatusMessage("Motion sensors are unavailable. Using fallback controls.");
+        return;
+      }
+
+      const permission = await requestTiltPermissionIfNeeded();
+
+      if (permission === "denied") {
+        setTiltStatus((prev) => ({
+          ...prev,
+          enabled: false,
+          permission: "denied",
+        }));
+        setStatusMessage("Tilt permission denied. Using fallback controls.");
+        return;
+      }
+
+      if (!stopTiltListener) {
+        stopTiltListener = startTiltListener((sample) => {
+          motionTiltRef.current = sample;
+        });
+      }
+
+      setTiltStatus((prev) => ({
+        ...prev,
+        enabled: true,
+        permission: "granted",
+      }));
+      setStatusMessage("Tilt controls enabled.");
+    };
+
+    calibrateTiltRef.current = () => {
+      calibrateCurrent(motionTiltRef.current);
+      filter.reset({ x: 0, y: 0, z: 0 });
+      setStatusMessage("Tilt calibrated.");
+    };
 
     const resize = () => {
       const width = mount.clientWidth;
@@ -134,14 +265,24 @@ export function HelloMarble() {
       accumulator += delta;
       debugTimer += delta;
 
-      force.set(0, 0, 0);
-      if (pressedKeys.has("ArrowUp")) force.z -= INPUT_FORCE;
-      if (pressedKeys.has("ArrowDown")) force.z += INPUT_FORCE;
-      if (pressedKeys.has("ArrowLeft")) force.x -= INPUT_FORCE;
-      if (pressedKeys.has("ArrowRight")) force.x += INPUT_FORCE;
-      if (force.lengthSquared() > 0) {
-        marbleBody.applyForce(force, marbleBody.position);
+      let targetIntent: TiltSample;
+      const status = tiltStatusRef.current;
+      const touchIntent = touchTiltRef.current;
+
+      if (status.enabled && status.permission === "granted" && status.supported) {
+        targetIntent = motionTiltRef.current;
+      } else if (!status.supported || status.permission === "denied") {
+        targetIntent = { x: touchIntent.x, y: 0, z: touchIntent.z };
+      } else {
+        targetIntent = getKeyboardIntent();
       }
+
+      const filteredIntent = filter.push(targetIntent, delta);
+
+      const gx = BASE_G * filteredIntent.x * Math.sin(maxTiltRad);
+      const gz = BASE_G * filteredIntent.z * Math.sin(maxTiltRad);
+      const gy = -Math.sqrt(Math.max(BASE_G * BASE_G - gx * gx - gz * gz, 0.1));
+      world.gravity.set(gx, gy, gz);
 
       while (accumulator >= TIMESTEP) {
         world.step(TIMESTEP);
@@ -187,6 +328,11 @@ export function HelloMarble() {
           posX: marbleBody.position.x,
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
+          tiltX: filteredIntent.x,
+          tiltZ: filteredIntent.z,
+          gravX: gx,
+          gravY: gy,
+          gravZ: gz,
         }));
         debugTimer = 0;
       }
@@ -201,6 +347,7 @@ export function HelloMarble() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("resize", resize);
+      stopTiltListener?.();
       mount.removeChild(renderer.domElement);
       renderer.dispose();
       scene.remove(track.group);
@@ -225,16 +372,92 @@ export function HelloMarble() {
     };
   }, []);
 
+  const showTouchFallback =
+    !tiltStatus.supported || tiltStatus.permission === "denied";
+
   return (
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
       <div className="hud">
         <p>FPS: {debug.fps}</p>
         <p>
-          Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)},{" "}
+          Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {" "}
           {debug.posZ.toFixed(2)}
         </p>
         <p>Respawns: {respawnCount}</p>
+        <p>
+          Tilt: {debug.tiltX.toFixed(2)}, {debug.tiltZ.toFixed(2)}
+        </p>
+        <p>
+          Gravity: {debug.gravX.toFixed(2)}, {debug.gravY.toFixed(2)}, {" "}
+          {debug.gravZ.toFixed(2)}
+        </p>
+        <p className="tiltStatus">
+          Tilt state: {tiltStatus.enabled ? "enabled" : "disabled"} | permission:{" "}
+          {tiltStatus.permission}
+        </p>
+        <p className="tiltMessage">{statusMessage}</p>
+        <div className="hudRow">
+          <button type="button" onClick={() => void enableTiltRef.current()}>
+            Enable Tilt Controls
+          </button>
+          <button type="button" onClick={() => calibrateTiltRef.current()}>
+            Calibrate
+          </button>
+        </div>
+        {showTouchFallback ? (
+          <div className="tiltFallback">
+            <p>Touch fallback</p>
+            <label htmlFor="tiltX">Horizontal</label>
+            <input
+              id="tiltX"
+              type="range"
+              min={-1}
+              max={1}
+              step={0.01}
+              value={touchTilt.x}
+              onChange={(event) => {
+                const x = Number(event.target.value);
+                setTouchTilt((prev) => {
+                  const next = { ...prev, x };
+                  touchTiltRef.current = next;
+                  return next;
+                });
+              }}
+              onPointerUp={() => {
+                setTouchTilt((prev) => {
+                  const next = { ...prev, x: 0 };
+                  touchTiltRef.current = next;
+                  return next;
+                });
+              }}
+            />
+            <label htmlFor="tiltZ">Vertical</label>
+            <input
+              id="tiltZ"
+              type="range"
+              min={-1}
+              max={1}
+              step={0.01}
+              value={touchTilt.z}
+              onChange={(event) => {
+                const z = Number(event.target.value);
+                setTouchTilt((prev) => {
+                  const next = { ...prev, z };
+                  touchTiltRef.current = next;
+                  return next;
+                });
+              }}
+              onPointerUp={() => {
+                setTouchTilt((prev) => {
+                  const next = { ...prev, z: 0 };
+                  touchTiltRef.current = next;
+                  return next;
+                });
+              }}
+            />
+          </div>
+        ) : null}
         <button type="button" onClick={() => resetRef.current()}>
           Reset Marble
         </button>
