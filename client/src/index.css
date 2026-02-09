@@ -101,6 +101,33 @@ body {
   width: 100%;
 }
 
+.devTools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgb(155 206 255 / 25%);
+  background: rgb(6 18 31 / 85%);
+}
+
+.devTools label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+}
+
+.devTools input,
+.devTools select {
+  border: 1px solid #9bc6ff;
+  border-radius: 0.35rem;
+  background: #0f2c4d;
+  color: #eaf4ff;
+  padding: 0.25rem 0.4rem;
+}
+
 .tiltIndicatorWrap {
   display: flex;
   flex-direction: column;
@@ -233,5 +260,10 @@ body {
     max-height: 40vh;
     overflow: auto;
     min-width: 0;
+  }
+
+  .devTools {
+    max-height: 34vh;
+    overflow: auto;
   }
 }

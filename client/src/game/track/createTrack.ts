@@ -28,6 +28,7 @@ type PartSpec = {
   position: THREE.Vector3;
   rotation: THREE.Euler;
   material: THREE.Material;
+  uvScale?: [number, number];
 };
 
 const TRACK_W = 6;
@@ -56,12 +57,48 @@ function degToRad(value: number): number {
   return (value * Math.PI) / 180;
 }
 
+function createCheckerFloorMaterial(): THREE.MeshStandardMaterial {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return new THREE.MeshStandardMaterial({ color: FLOOR_COLOR });
+  }
+
+  const checks = 8;
+  const tile = canvas.width / checks;
+  for (let y = 0; y < checks; y += 1) {
+    for (let x = 0; x < checks; x += 1) {
+      const even = (x + y) % 2 === 0;
+      ctx.fillStyle = even ? "#2f6b39" : "#3f7c49";
+      ctx.fillRect(x * tile, y * tile, tile, tile);
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+
+  return new THREE.MeshStandardMaterial({ map: texture });
+}
+
 function addVisualPart(group: THREE.Group, spec: PartSpec): void {
-  const { size, position, rotation, material } = spec;
+  const { size, position, rotation, material, uvScale } = spec;
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
     material,
   );
+  if (uvScale) {
+    const geom = mesh.geometry;
+    const uv = geom.getAttribute("uv");
+    for (let i = 0; i < uv.count; i += 1) {
+      uv.setXY(i, uv.getX(i) * uvScale[0], uv.getY(i) * uvScale[1]);
+    }
+    uv.needsUpdate = true;
+  }
   mesh.position.copy(position);
   mesh.rotation.set(rotation.x, rotation.y, rotation.z);
   mesh.castShadow = false;
@@ -95,7 +132,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   boardBody.position.set(0, 0, 0);
   boardBody.quaternion.set(0, 0, 0, 1);
 
-  const floorMaterial = new THREE.MeshStandardMaterial({ color: FLOOR_COLOR });
+  const floorMaterial = createCheckerFloorMaterial();
   const railMaterial = new THREE.MeshStandardMaterial({ color: RAIL_COLOR });
 
   let currentYawDeg = 0;
@@ -143,6 +180,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       position: floorCenter,
       rotation,
       material: floorMaterial,
+      uvScale: [width, length],
     });
 
     lowestFloorY = Math.min(lowestFloorY, floorCenter.y);

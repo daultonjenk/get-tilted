@@ -24,7 +24,26 @@ type MarbleDebug = {
   gravZ: number;
 };
 
-type CameraMode = "chase" | "topdown" | "isometric" | "topdownForward";
+type CameraPresetId =
+  | "chaseCentered"
+  | "chaseRight"
+  | "chaseLeft"
+  | "isoStandard"
+  | "isoFlatter"
+  | "topdownPure"
+  | "topdownForward"
+  | "broadcast";
+
+type TuningState = {
+  gravityG: number;
+  tiltStrength: number;
+  maxSpeed: number;
+  maxTiltDeg: number;
+  maxBoardAngVel: number;
+  linearDamping: number;
+  angularDamping: number;
+  cameraPreset: CameraPresetId;
+};
 
 type HelloMarbleProps = {
   panelOpen: boolean;
@@ -32,26 +51,79 @@ type HelloMarbleProps = {
 
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
-const BASE_G = 14.0;
-const MAX_TILT_DEG = 15;
-const FOLLOW_DIST = 10;
-const CAM_HEIGHT = 7.5;
 const LOOK_HEIGHT = 1.2;
 const LOOK_AHEAD = 16;
 const TOPDOWN_HEIGHT = 16;
 const TOPDOWN_Z_OFFSET = 2;
-const TOPDOWN_LOOK_AHEAD = 4;
 const BOARD_TILT_SMOOTH = 12;
-const ISO_X_OFFSET = 4;
-const ISO_HEIGHT = 14;
-const ISO_Z_OFFSET = 8;
 const PIVOT_SMOOTH = 10;
-const MAX_BOARD_ANG_VEL = 4.0;
 const ENABLE_EXTRA_DOWNFORCE = false;
 const EXTRA_DOWN_FORCE = 4;
+const TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
+
+const DEFAULT_TUNING: TuningState = {
+  gravityG: 14,
+  tiltStrength: 1,
+  maxSpeed: 10,
+  maxTiltDeg: 14,
+  maxBoardAngVel: 4,
+  linearDamping: 0.18,
+  angularDamping: 0.18,
+  cameraPreset: "chaseCentered",
+};
+
+const CAMERA_PRESETS: CameraPresetId[] = [
+  "chaseCentered",
+  "chaseRight",
+  "chaseLeft",
+  "isoStandard",
+  "isoFlatter",
+  "topdownPure",
+  "topdownForward",
+  "broadcast",
+];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function loadTuning(): TuningState {
+  if (typeof window === "undefined") {
+    return DEFAULT_TUNING;
+  }
+  try {
+    const raw = window.localStorage.getItem(TUNING_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_TUNING;
+    }
+    const parsed = JSON.parse(raw) as Partial<TuningState>;
+    return { ...DEFAULT_TUNING, ...parsed };
+  } catch {
+    return DEFAULT_TUNING;
+  }
+}
+
+function getCameraLabel(id: CameraPresetId): string {
+  switch (id) {
+    case "chaseCentered":
+      return "Chase Centered";
+    case "chaseRight":
+      return "Chase Off-Right";
+    case "chaseLeft":
+      return "Chase Off-Left";
+    case "isoStandard":
+      return "Isometric Standard";
+    case "isoFlatter":
+      return "Isometric Flatter";
+    case "topdownPure":
+      return "Top-down Pure";
+    case "topdownForward":
+      return "Top-down Forward";
+    case "broadcast":
+      return "Broadcast";
+    default:
+      return "Unknown";
+  }
 }
 
 export function HelloMarble({ panelOpen }: HelloMarbleProps) {
@@ -69,8 +141,9 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
   const [statusMessage, setStatusMessage] = useState(
     "Tilt disabled. Using fallback controls.",
   );
-  const [cameraMode, setCameraMode] = useState<CameraMode>("chase");
   const [touchTilt, setTouchTilt] = useState({ x: 0, z: 0 });
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [tuning, setTuning] = useState<TuningState>(() => loadTuning());
   const [debug, setDebug] = useState<MarbleDebug>({
     fps: 0,
     posX: 0,
@@ -79,13 +152,13 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
     tiltX: 0,
     tiltZ: 0,
     gravX: 0,
-    gravY: -BASE_G,
+    gravY: -DEFAULT_TUNING.gravityG,
     gravZ: 0,
   });
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
-  const cameraModeRef = useRef(cameraMode);
+  const tuningRef = useRef(tuning);
 
   useEffect(() => {
     tiltStatusRef.current = tiltStatus;
@@ -96,8 +169,9 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
   }, [touchTilt]);
 
   useEffect(() => {
-    cameraModeRef.current = cameraMode;
-  }, [cameraMode]);
+    tuningRef.current = tuning;
+    window.localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(tuning));
+  }, [tuning]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -108,8 +182,8 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b1320);
 
-    const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 200);
-    camera.position.set(0, CAM_HEIGHT, 0);
+    const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 240);
+    camera.position.set(0, 7.5, 0);
     camera.lookAt(0, LOOK_HEIGHT, LOOK_AHEAD);
     camera.up.set(0, 1, 0);
 
@@ -133,7 +207,7 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
     }
 
     const world = new CANNON.World();
-    world.gravity.set(0, -BASE_G, 0);
+    world.gravity.set(0, -tuningRef.current.gravityG, 0);
     world.addBody(boardBody);
 
     const boardMat = new CANNON.Material("board");
@@ -155,8 +229,8 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
       mass: 1,
       shape: new CANNON.Sphere(marbleRadius),
       position: track.spawn.clone(),
-      linearDamping: 0.18,
-      angularDamping: 0.18,
+      linearDamping: tuningRef.current.linearDamping,
+      angularDamping: tuningRef.current.angularDamping,
       material: marbleMat,
     });
     world.addBody(marbleBody);
@@ -184,7 +258,6 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
     };
     let stopTiltListener: (() => void) | null = null;
     const filter = makeTiltFilter({ tau: 0.1 });
-    const maxTiltRad = (MAX_TILT_DEG * Math.PI) / 180;
     let currentPitch = 0;
     let currentRoll = 0;
 
@@ -362,6 +435,11 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
       accumulator += delta;
       debugTimer += delta;
 
+      const currentTuning = tuningRef.current;
+      world.gravity.set(0, -currentTuning.gravityG, 0);
+      marbleBody.linearDamping = currentTuning.linearDamping;
+      marbleBody.angularDamping = currentTuning.angularDamping;
+
       let targetIntent: TiltSample;
       const status = tiltStatusRef.current;
       const touchIntent = touchTiltRef.current;
@@ -375,10 +453,13 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
       }
 
       const filteredIntent = filter.push(targetIntent, delta);
+      const maxTiltRad = (currentTuning.maxTiltDeg * Math.PI) / 180;
 
-      const desiredPitch = filteredIntent.z * maxTiltRad;
-      const desiredRoll = -filteredIntent.x * maxTiltRad;
-      const maxStep = MAX_BOARD_ANG_VEL * delta;
+      const desiredPitch =
+        filteredIntent.z * currentTuning.tiltStrength * maxTiltRad;
+      const desiredRoll =
+        -filteredIntent.x * currentTuning.tiltStrength * maxTiltRad;
+      const maxStep = currentTuning.maxBoardAngVel * delta;
       currentPitch += clamp(desiredPitch - currentPitch, -maxStep, maxStep);
       currentRoll += clamp(desiredRoll - currentRoll, -maxStep, maxStep);
 
@@ -422,6 +503,12 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
         accumulator -= TIMESTEP;
       }
 
+      const speed = marbleBody.velocity.length();
+      if (speed > currentTuning.maxSpeed && speed > 0) {
+        const scale = currentTuning.maxSpeed / speed;
+        marbleBody.velocity.scale(scale, marbleBody.velocity);
+      }
+
       if (marbleBody.position.y < track.respawnY) {
         respawnMarble(true);
       }
@@ -439,38 +526,64 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
       );
 
       const cameraAlpha = 1 - Math.exp(-8 * delta);
-      if (cameraModeRef.current === "chase") {
-        const desiredCamZ = marbleBody.position.z - FOLLOW_DIST;
-        cameraTarget.set(0, CAM_HEIGHT, desiredCamZ);
-        camera.position.lerp(cameraTarget, cameraAlpha);
-        camera.position.x = 0;
-        camera.position.y = CAM_HEIGHT;
-        lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
-      } else if (cameraModeRef.current === "topdown") {
-        const desiredTopX = marbleBody.position.x;
-        const desiredTopZ = marbleBody.position.z - TOPDOWN_Z_OFFSET;
-        cameraTarget.set(desiredTopX, TOPDOWN_HEIGHT, desiredTopZ);
-        camera.position.lerp(cameraTarget, cameraAlpha);
-        camera.position.y = TOPDOWN_HEIGHT;
-        lookTarget.set(
-          camera.position.x,
-          0,
-          marbleBody.position.z + TOPDOWN_LOOK_AHEAD,
-        );
-      } else if (cameraModeRef.current === "isometric") {
-        const desiredIsoX = marbleBody.position.x + ISO_X_OFFSET;
-        const desiredIsoZ = marbleBody.position.z - ISO_Z_OFFSET;
-        cameraTarget.set(desiredIsoX, ISO_HEIGHT, desiredIsoZ);
-        camera.position.lerp(cameraTarget, cameraAlpha);
-        camera.position.y = ISO_HEIGHT;
-        lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + LOOK_AHEAD);
-      } else {
-        const desiredTopX = marbleBody.position.x;
-        const desiredTopZ = marbleBody.position.z - TOPDOWN_Z_OFFSET;
-        cameraTarget.set(desiredTopX, TOPDOWN_HEIGHT, desiredTopZ);
-        camera.position.lerp(cameraTarget, cameraAlpha);
-        camera.position.y = TOPDOWN_HEIGHT;
-        lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + 6);
+      switch (currentTuning.cameraPreset) {
+        case "chaseCentered": {
+          cameraTarget.set(0, 7.5, marbleBody.position.z - 10);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.x = 0;
+          camera.position.y = 7.5;
+          lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          break;
+        }
+        case "chaseRight": {
+          cameraTarget.set(4, 7.5, marbleBody.position.z - 10);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.y = 7.5;
+          lookTarget.set(4, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          break;
+        }
+        case "chaseLeft": {
+          cameraTarget.set(-4, 7.5, marbleBody.position.z - 10);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.y = 7.5;
+          lookTarget.set(-4, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          break;
+        }
+        case "isoStandard": {
+          cameraTarget.set(marbleBody.position.x + 4, 14, marbleBody.position.z - 8);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.y = 14;
+          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + LOOK_AHEAD);
+          break;
+        }
+        case "isoFlatter": {
+          cameraTarget.set(marbleBody.position.x + 4, 11, marbleBody.position.z - 10);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.y = 11;
+          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + LOOK_AHEAD + 4);
+          break;
+        }
+        case "topdownPure": {
+          cameraTarget.set(marbleBody.position.x, TOPDOWN_HEIGHT, marbleBody.position.z - TOPDOWN_Z_OFFSET);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.y = TOPDOWN_HEIGHT;
+          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z);
+          break;
+        }
+        case "topdownForward": {
+          cameraTarget.set(marbleBody.position.x, TOPDOWN_HEIGHT, marbleBody.position.z - TOPDOWN_Z_OFFSET);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.y = TOPDOWN_HEIGHT;
+          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + 6);
+          break;
+        }
+        case "broadcast": {
+          cameraTarget.set(marbleBody.position.x + 6, 18, marbleBody.position.z - 12);
+          camera.position.lerp(cameraTarget, cameraAlpha);
+          camera.position.y = 18;
+          lookTarget.set(marbleBody.position.x + 1, 0, marbleBody.position.z + LOOK_AHEAD);
+          break;
+        }
       }
 
       camera.lookAt(lookTarget);
@@ -531,127 +644,300 @@ export function HelloMarble({ panelOpen }: HelloMarbleProps) {
   const showTouchFallback =
     !tiltStatus.supported || tiltStatus.permission === "denied";
 
+  const updateTuning = <K extends keyof TuningState>(
+    key: K,
+    value: TuningState[K],
+  ) => {
+    setTuning((prev) => ({ ...prev, [key]: value }));
+  };
+
   return (
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
-      {panelOpen ? <div className="hud">
-        <p>FPS: {debug.fps}</p>
-        <p>
-          Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {" "}
-          {debug.posZ.toFixed(2)}
-        </p>
-        <p>Respawns: {respawnCount}</p>
-        <p>
-          Tilt: {debug.tiltX.toFixed(2)}, {debug.tiltZ.toFixed(2)}
-        </p>
-        <div className="tiltIndicatorWrap">
-          <p>Tilt Indicator</p>
-          <div className="tiltIndicator">
-            <span className="tiltCrosshair tiltCrosshairX" />
-            <span className="tiltCrosshair tiltCrosshairY" />
-            <span
-              className="tiltDot"
-              style={{
-                left: `${50 + clamp(debug.tiltX, -1, 1) * 40}%`,
-                top: `${50 + clamp(debug.tiltZ, -1, 1) * 40}%`,
-              }}
-            />
+      {panelOpen ? (
+        <div className="hud">
+          <p>FPS: {debug.fps}</p>
+          <p>
+            Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {" "}
+            {debug.posZ.toFixed(2)}
+          </p>
+          <p>Respawns: {respawnCount}</p>
+          <p>
+            Tilt: {debug.tiltX.toFixed(2)}, {debug.tiltZ.toFixed(2)}
+          </p>
+          <div className="tiltIndicatorWrap">
+            <p>Tilt Indicator</p>
+            <div className="tiltIndicator">
+              <span className="tiltCrosshair tiltCrosshairX" />
+              <span className="tiltCrosshair tiltCrosshairY" />
+              <span
+                className="tiltDot"
+                style={{
+                  left: `${50 + clamp(debug.tiltX, -1, 1) * 40}%`,
+                  top: `${50 + clamp(debug.tiltZ, -1, 1) * 40}%`,
+                }}
+              />
+            </div>
           </div>
-        </div>
-        <p>
-          Gravity: {debug.gravX.toFixed(2)}, {debug.gravY.toFixed(2)}, {" "}
-          {debug.gravZ.toFixed(2)}
-        </p>
-        <p className="tiltStatus">
-          Tilt state: {tiltStatus.enabled ? "enabled" : "disabled"} | permission:{" "}
-          {tiltStatus.permission}
-        </p>
-        <p className="tiltMessage">{statusMessage}</p>
-        <div className="hudRow">
-          <button type="button" onClick={() => void enableTiltRef.current()}>
-            Enable Tilt Controls
-          </button>
-          <button type="button" onClick={() => calibrateTiltRef.current()}>
-            Calibrate
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCameraMode((mode) => {
-                if (mode === "chase") return "topdown";
-                if (mode === "topdown") return "isometric";
-                if (mode === "isometric") return "topdownForward";
-                return "chase";
-              });
-            }}
-          >
-            Camera:{" "}
-            {cameraMode === "chase"
-              ? "Chase"
-              : cameraMode === "topdown"
-                ? "Top-down"
-                : cameraMode === "isometric"
-                  ? "Isometric"
-                  : "Top-down (Forward)"}
-          </button>
-        </div>
-        {showTouchFallback ? (
-          <div className="tiltFallback">
-            <p>Touch fallback</p>
-            <label htmlFor="tiltX">Horizontal</label>
-            <input
-              id="tiltX"
-              type="range"
-              min={-1}
-              max={1}
-              step={0.01}
-              value={touchTilt.x}
-              onChange={(event) => {
-                const x = Number(event.target.value);
-                setTouchTilt((prev) => {
-                  const next = { ...prev, x };
-                  touchTiltRef.current = next;
-                  return next;
-                });
-              }}
-              onPointerUp={() => {
-                setTouchTilt((prev) => {
-                  const next = { ...prev, x: 0 };
-                  touchTiltRef.current = next;
-                  return next;
-                });
-              }}
-            />
-            <label htmlFor="tiltZ">Vertical</label>
-            <input
-              id="tiltZ"
-              type="range"
-              min={-1}
-              max={1}
-              step={0.01}
-              value={touchTilt.z}
-              onChange={(event) => {
-                const z = Number(event.target.value);
-                setTouchTilt((prev) => {
-                  const next = { ...prev, z };
-                  touchTiltRef.current = next;
-                  return next;
-                });
-              }}
-              onPointerUp={() => {
-                setTouchTilt((prev) => {
-                  const next = { ...prev, z: 0 };
-                  touchTiltRef.current = next;
-                  return next;
-                });
-              }}
-            />
+          <p>
+            Gravity: {debug.gravX.toFixed(2)}, {debug.gravY.toFixed(2)}, {" "}
+            {debug.gravZ.toFixed(2)}
+          </p>
+          <p className="tiltStatus">
+            Tilt state: {tiltStatus.enabled ? "enabled" : "disabled"} | permission:{" "}
+            {tiltStatus.permission}
+          </p>
+          <p className="tiltMessage">{statusMessage}</p>
+          <div className="hudRow">
+            <button type="button" onClick={() => void enableTiltRef.current()}>
+              Enable Tilt Controls
+            </button>
+            <button type="button" onClick={() => calibrateTiltRef.current()}>
+              Calibrate
+            </button>
+            <button type="button" onClick={() => setDevToolsOpen((open) => !open)}>
+              Dev Tools {devToolsOpen ? "Hide" : "Show"}
+            </button>
           </div>
-        ) : null}
-        <button type="button" onClick={() => resetRef.current()}>
-          Reset Marble
-        </button>
-      </div> : null}
+          {devToolsOpen ? (
+            <div className="devTools">
+              <label>
+                Camera Preset
+                <select
+                  value={tuning.cameraPreset}
+                  onChange={(event) =>
+                    updateTuning("cameraPreset", event.target.value as CameraPresetId)
+                  }
+                >
+                  {CAMERA_PRESETS.map((preset) => (
+                    <option key={preset} value={preset}>
+                      {getCameraLabel(preset)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Max Speed
+                <input
+                  type="range"
+                  min={4}
+                  max={20}
+                  step={0.1}
+                  value={tuning.maxSpeed}
+                  onChange={(event) =>
+                    updateTuning("maxSpeed", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.1}
+                  value={tuning.maxSpeed}
+                  onChange={(event) =>
+                    updateTuning("maxSpeed", Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Tilt Strength
+                <input
+                  type="range"
+                  min={0.5}
+                  max={2}
+                  step={0.01}
+                  value={tuning.tiltStrength}
+                  onChange={(event) =>
+                    updateTuning("tiltStrength", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.tiltStrength}
+                  onChange={(event) =>
+                    updateTuning("tiltStrength", Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Gravity G
+                <input
+                  type="range"
+                  min={8}
+                  max={24}
+                  step={0.1}
+                  value={tuning.gravityG}
+                  onChange={(event) =>
+                    updateTuning("gravityG", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.1}
+                  value={tuning.gravityG}
+                  onChange={(event) =>
+                    updateTuning("gravityG", Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Max Tilt Deg
+                <input
+                  type="range"
+                  min={6}
+                  max={25}
+                  step={0.1}
+                  value={tuning.maxTiltDeg}
+                  onChange={(event) =>
+                    updateTuning("maxTiltDeg", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.1}
+                  value={tuning.maxTiltDeg}
+                  onChange={(event) =>
+                    updateTuning("maxTiltDeg", Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Max Board Angular Velocity
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  step={0.1}
+                  value={tuning.maxBoardAngVel}
+                  onChange={(event) =>
+                    updateTuning("maxBoardAngVel", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.1}
+                  value={tuning.maxBoardAngVel}
+                  onChange={(event) =>
+                    updateTuning("maxBoardAngVel", Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Linear Damping
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                  value={tuning.linearDamping}
+                  onChange={(event) =>
+                    updateTuning("linearDamping", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.linearDamping}
+                  onChange={(event) =>
+                    updateTuning("linearDamping", Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Angular Damping
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                  value={tuning.angularDamping}
+                  onChange={(event) =>
+                    updateTuning("angularDamping", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.angularDamping}
+                  onChange={(event) =>
+                    updateTuning("angularDamping", Number(event.target.value))
+                  }
+                />
+              </label>
+              <div className="hudRow">
+                <button type="button" onClick={() => setTuning(DEFAULT_TUNING)}>
+                  Reset to Defaults
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.clipboard) {
+                      void navigator.clipboard.writeText(JSON.stringify(tuning));
+                    }
+                  }}
+                >
+                  Copy JSON
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {showTouchFallback ? (
+            <div className="tiltFallback">
+              <p>Touch fallback</p>
+              <label htmlFor="tiltX">Horizontal</label>
+              <input
+                id="tiltX"
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={touchTilt.x}
+                onChange={(event) => {
+                  const x = Number(event.target.value);
+                  setTouchTilt((prev) => {
+                    const next = { ...prev, x };
+                    touchTiltRef.current = next;
+                    return next;
+                  });
+                }}
+                onPointerUp={() => {
+                  setTouchTilt((prev) => {
+                    const next = { ...prev, x: 0 };
+                    touchTiltRef.current = next;
+                    return next;
+                  });
+                }}
+              />
+              <label htmlFor="tiltZ">Vertical</label>
+              <input
+                id="tiltZ"
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={touchTilt.z}
+                onChange={(event) => {
+                  const z = Number(event.target.value);
+                  setTouchTilt((prev) => {
+                    const next = { ...prev, z };
+                    touchTiltRef.current = next;
+                    return next;
+                  });
+                }}
+                onPointerUp={() => {
+                  setTouchTilt((prev) => {
+                    const next = { ...prev, z: 0 };
+                    touchTiltRef.current = next;
+                    return next;
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+          <button type="button" onClick={() => resetRef.current()}>
+            Reset Marble
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
