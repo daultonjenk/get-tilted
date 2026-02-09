@@ -178,6 +178,14 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         if (!playerId || playerId !== parsed.msg.payload.playerId) {
           return;
         }
+        if (roomStore.hasCountdown(roomCode)) {
+          send(ws as SendableSocket, "error", {
+            code: "RACE_LOCKED",
+            message: "Ready state is locked once countdown has started",
+          });
+          broadcastReadyState(roomCode);
+          return;
+        }
         const updated = roomStore.setReady(roomCode, playerId, parsed.msg.payload.ready);
         if (!updated) {
           return;

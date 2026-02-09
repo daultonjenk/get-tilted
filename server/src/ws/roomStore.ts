@@ -145,6 +145,10 @@ export class RoomStore {
     return this.countdownStartByRoom.get(roomCode);
   }
 
+  hasCountdown(roomCode: string): boolean {
+    return this.countdownStartByRoom.has(roomCode);
+  }
+
   clearCountdownStart(roomCode: string): void {
     this.countdownStartByRoom.delete(roomCode);
   }
