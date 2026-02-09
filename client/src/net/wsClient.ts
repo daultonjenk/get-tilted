@@ -12,6 +12,31 @@ type MessageCallback = (message: TypedMessage) => void;
 type ErrorCallback = (error: string) => void;
 type StatusCallback = (status: WSStatus) => void;
 
+function getWsPort(): string {
+  return String(import.meta.env.VITE_WS_PORT ?? "3001");
+}
+
+function getWsProtocol(): "ws" | "wss" {
+  if (typeof window !== "undefined" && window.location.protocol === "https:") {
+    return "wss";
+  }
+  return "ws";
+}
+
+export function resolveWsUrlForHost(hostname: string): string {
+  return `${getWsProtocol()}://${hostname}:${getWsPort()}/ws`;
+}
+
+export function resolveDefaultWsUrl(): string {
+  if (import.meta.env.VITE_WS_URL) {
+    return import.meta.env.VITE_WS_URL;
+  }
+  if (typeof window !== "undefined" && window.location.hostname) {
+    return resolveWsUrlForHost(window.location.hostname);
+  }
+  return `ws://localhost:${getWsPort()}/ws`;
+}
+
 export class WSClient {
   private socket: WebSocket | null = null;
 
@@ -25,7 +50,7 @@ export class WSClient {
 
   private readonly statusListeners = new Set<StatusCallback>();
 
-  constructor(url = import.meta.env.VITE_WS_URL ?? "ws://localhost:3001/ws") {
+  constructor(url = resolveDefaultWsUrl()) {
     this.url = url;
   }
 

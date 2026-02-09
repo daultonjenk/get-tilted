@@ -73,6 +73,17 @@ Current v0.5 flow:
 3. Joiner scans QR or opens the shown URL (`?room=ROOMCODE`) and clicks `Join`.
 4. Both players can see a real-time ghost marble representation of the opponent.
 
+Dev LAN notes:
+
+1. Run with host exposure so phone can reach the client:
+   - `npm run dev -- --host`
+2. Keep server reachable on LAN (`ws://<PC_IPV4>:3001/ws`).
+3. In `Network` tab, set `Dev Join Host (LAN IPv4)` when host browser is on `localhost`.
+   - Example: `192.168.1.42:5173`
+4. QR should then encode `http://<PC_IPV4>:5173/?room=ROOMCODE`.
+5. If phone shows WebSocket errors, compare:
+   - `Resolved WS URL (this device)` and `Expected join WS URL` in `Network` tab.
+
 ## Deploy notes (Pages + Durable Objects)
 
 Production deploy is planned for v0.7:

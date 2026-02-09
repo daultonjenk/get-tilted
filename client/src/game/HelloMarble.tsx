@@ -14,7 +14,11 @@ import {
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
 import { RaceClient } from "../net/raceClient";
 import type { TypedMessage } from "@get-tilted/shared-protocol";
-import type { WSStatus } from "../net/wsClient";
+import {
+  resolveDefaultWsUrl,
+  resolveWsUrlForHost,
+  type WSStatus,
+} from "../net/wsClient";
 
 type MarbleDebug = {
   fps: number;
@@ -63,6 +67,8 @@ type TuningState = {
   invertCameraSide: boolean;
   enableExtraDownforce: boolean;
   extraDownForce: number;
+  renderScaleMobile: number;
+  debugUpdateHzMobile: number;
 };
 
 type TrialState = "idle" | "running" | "finished";
@@ -84,6 +90,7 @@ const PIVOT_SMOOTH = 10;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const LEGACY_TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
+const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 
 const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
@@ -105,6 +112,8 @@ const DEFAULT_TUNING: TuningState = {
   invertCameraSide: false,
   enableExtraDownforce: false,
   extraDownForce: 2.4,
+  renderScaleMobile: 1.2,
+  debugUpdateHzMobile: 5,
 };
 
 const CAMERA_PRESETS: CameraPresetId[] = [
@@ -131,6 +140,8 @@ const PHYSICS_PRESETS: Record<
     | "contactRestitution"
     | "maxBoardAngVel"
     | "tiltFilterTau"
+    | "renderScaleMobile"
+    | "debugUpdateHzMobile"
   >
 > = {
   marble: {
@@ -143,6 +154,8 @@ const PHYSICS_PRESETS: Record<
     contactRestitution: 0.1,
     maxBoardAngVel: 5,
     tiltFilterTau: 0.1,
+    renderScaleMobile: 1.2,
+    debugUpdateHzMobile: 5,
   },
   floaty: {
     gravityG: 14,
@@ -154,6 +167,8 @@ const PHYSICS_PRESETS: Record<
     contactRestitution: 0.03,
     maxBoardAngVel: 3.5,
     tiltFilterTau: 0.15,
+    renderScaleMobile: 1.2,
+    debugUpdateHzMobile: 5,
   },
   heavy: {
     gravityG: 20,
@@ -165,6 +180,8 @@ const PHYSICS_PRESETS: Record<
     contactRestitution: 0.08,
     maxBoardAngVel: 6,
     tiltFilterTau: 0.08,
+    renderScaleMobile: 1.2,
+    debugUpdateHzMobile: 5,
   },
 };
 
@@ -177,6 +194,27 @@ const DRAWER_TABS: { id: DebugTabId; label: string }[] = [
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function sanitizeJoinHost(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  let next = trimmed.replace(/^https?:\/\//i, "");
+  next = next.split("/")[0] ?? "";
+  next = next.trim();
+  if (!next) return "";
+
+  const hostPattern = /^[A-Za-z0-9.-]+(?::\d+)?$/;
+  return hostPattern.test(next) ? next : "";
+}
+
+function isLocalHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function extractHostname(host: string): string {
+  return host.replace(/:\d+$/, "");
 }
 
 function isCameraPresetId(value: unknown): value is CameraPresetId {
@@ -249,6 +287,12 @@ function sanitizeTuning(input: unknown): TuningState {
   }
   if (typeof value.extraDownForce === "number") {
     base.extraDownForce = clamp(value.extraDownForce, 0, 12);
+  }
+  if (typeof value.renderScaleMobile === "number") {
+    base.renderScaleMobile = clamp(value.renderScaleMobile, 0.75, 1.5);
+  }
+  if (typeof value.debugUpdateHzMobile === "number") {
+    base.debugUpdateHzMobile = clamp(value.debugUpdateHzMobile, 2, 15);
   }
 
   return base;
@@ -399,6 +443,10 @@ export function HelloMarble() {
     [],
   );
   const [showQr, setShowQr] = useState(false);
+  const [devJoinHost, setDevJoinHost] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return sanitizeJoinHost(window.localStorage.getItem(DEV_JOIN_HOST_KEY) ?? "");
+  });
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
@@ -433,6 +481,16 @@ export function HelloMarble() {
   }, [tuning]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sanitized = sanitizeJoinHost(devJoinHost);
+    if (!sanitized) {
+      window.localStorage.removeItem(DEV_JOIN_HOST_KEY);
+      return;
+    }
+    window.localStorage.setItem(DEV_JOIN_HOST_KEY, sanitized);
+  }, [devJoinHost]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -457,8 +515,11 @@ export function HelloMarble() {
     camera.lookAt(0, LOOK_HEIGHT, LOOK_AHEAD);
     camera.up.set(0, 1, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const mobileMode = window.matchMedia("(max-width: 700px)").matches;
+    const renderer = new THREE.WebGLRenderer({ antialias: !mobileMode });
+    renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, mobileMode ? tuningRef.current.renderScaleMobile : 2),
+    );
     mount.appendChild(renderer.domElement);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -517,8 +578,10 @@ export function HelloMarble() {
     marbleBodyWithCcd.ccdIterations = 10;
     world.addBody(marbleBody);
 
+    const marbleSegments = mobileMode ? 20 : 32;
+    const ghostSegments = mobileMode ? 16 : 24;
     const marbleMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(marbleRadius, 32, 32),
+      new THREE.SphereGeometry(marbleRadius, marbleSegments, marbleSegments),
       new THREE.MeshStandardMaterial({ color: 0x4fc3f7 }),
     );
     scene.add(marbleMesh);
@@ -596,7 +659,7 @@ export function HelloMarble() {
           ghostBuffers.set(message.payload.playerId, snapshots);
           if (!ghostMeshes.has(message.payload.playerId)) {
             const ghostMesh = new THREE.Mesh(
-              new THREE.SphereGeometry(marbleRadius, 24, 24),
+              new THREE.SphereGeometry(marbleRadius, ghostSegments, ghostSegments),
               ghostMaterial,
             );
             scene.add(ghostMesh);
@@ -795,6 +858,7 @@ export function HelloMarble() {
     let lastTime = performance.now() / 1000;
     let accumulator = 0;
     let debugTimer = 0;
+    let lastRenderScale = tuningRef.current.renderScaleMobile;
 
     const tick = (nowMs: number) => {
       const now = nowMs / 1000;
@@ -804,6 +868,10 @@ export function HelloMarble() {
       debugTimer += delta;
 
       const currentTuning = tuningRef.current;
+      if (mobileMode && Math.abs(currentTuning.renderScaleMobile - lastRenderScale) > 0.001) {
+        lastRenderScale = currentTuning.renderScaleMobile;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
+      }
       world.gravity.set(0, -currentTuning.gravityG, 0);
       marbleBody.linearDamping = currentTuning.linearDamping;
       marbleBody.angularDamping = currentTuning.angularDamping;
@@ -1067,7 +1135,10 @@ export function HelloMarble() {
 
       renderer.render(scene, camera);
 
-      if (debugTimer >= 0.1) {
+      const debugInterval = mobileMode
+        ? 1 / Math.max(currentTuning.debugUpdateHzMobile, 1)
+        : 0.1;
+      if (debugTimer >= debugInterval) {
         if (trialStartAt != null) {
           setTrialCurrentMs(nowMs - trialStartAt);
         }
@@ -1222,10 +1293,33 @@ export function HelloMarble() {
     raceClientRef.current?.sendHello(undefined, roomCode);
   };
 
+  const resolvedWsUrl = resolveDefaultWsUrl();
+  const joinHostWarning =
+    typeof window !== "undefined" && roomCode
+      ? (() => {
+          const currentHost = window.location.hostname;
+          const sanitizedOverride = sanitizeJoinHost(devJoinHost);
+          if (!sanitizedOverride && isLocalHost(currentHost)) {
+            return "Set Dev Join Host (LAN IPv4) to avoid localhost QR links.";
+          }
+          return "";
+        })()
+      : "";
   const joinUrl =
     typeof window !== "undefined" && roomCode
-      ? `${window.location.origin}${window.location.pathname}?room=${roomCode}`
+      ? (() => {
+          const protocol = window.location.protocol;
+          const path = window.location.pathname;
+          const override = sanitizeJoinHost(devJoinHost);
+          const currentHost = window.location.host;
+          const currentHostname = window.location.hostname;
+          const host = override || (!isLocalHost(currentHostname) ? currentHost : "");
+          return host ? `${protocol}//${host}${path}?room=${roomCode}` : "";
+        })()
       : "";
+  const joinWsUrl = joinUrl
+    ? resolveWsUrlForHost(extractHostname(new URL(joinUrl).host))
+    : "";
   const qrImageUrl = joinUrl
     ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(joinUrl)}`
     : "";
@@ -1461,6 +1555,52 @@ export function HelloMarble() {
                   value={tuning.tiltFilterTau}
                   onChange={(event) =>
                     updateTuning("tiltFilterTau", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              Mobile Render Scale
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={0.75}
+                  max={1.5}
+                  step={0.01}
+                  value={tuning.renderScaleMobile}
+                  onChange={(event) =>
+                    updateTuning("renderScaleMobile", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.renderScaleMobile}
+                  onChange={(event) =>
+                    updateTuning("renderScaleMobile", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              Mobile Debug Hz
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={2}
+                  max={15}
+                  step={1}
+                  value={tuning.debugUpdateHzMobile}
+                  onChange={(event) =>
+                    updateTuning("debugUpdateHzMobile", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={1}
+                  value={tuning.debugUpdateHzMobile}
+                  onChange={(event) =>
+                    updateTuning("debugUpdateHzMobile", Number(event.target.value))
                   }
                 />
               </div>
@@ -1723,6 +1863,18 @@ export function HelloMarble() {
                 Join
               </button>
             </div>
+            <label className="controlLabel" htmlFor="devJoinHost">
+              Dev Join Host (LAN IPv4)
+            </label>
+            <input
+              id="devJoinHost"
+              value={devJoinHost}
+              onChange={(event) => setDevJoinHost(event.target.value)}
+              placeholder="192.168.x.x or host:port"
+            />
+            <p>Resolved WS URL (this device): {resolvedWsUrl}</p>
+            {joinWsUrl ? <p>Expected join WS URL: {joinWsUrl}</p> : null}
+            {joinHostWarning ? <p className="errorText">{joinHostWarning}</p> : null}
             <label className="controlCheck">
               <input
                 type="checkbox"
