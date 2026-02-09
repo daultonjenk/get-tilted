@@ -3,10 +3,14 @@ import type { TypedMessage } from "@get-tilted/shared-protocol";
 import { WSClient, type WSStatus } from "../net/wsClient";
 
 type NetDebugPanelProps = {
-  panelOpen: boolean;
+  panelOpen?: boolean;
+  variant?: "overlay" | "embedded";
 };
 
-export function NetDebugPanel({ panelOpen }: NetDebugPanelProps) {
+export function NetDebugPanel({
+  panelOpen = true,
+  variant = "embedded",
+}: NetDebugPanelProps) {
   const client = useMemo(() => new WSClient(), []);
   const [status, setStatus] = useState<WSStatus>(client.getStatus());
   const [roomCode, setRoomCode] = useState("");
@@ -55,7 +59,7 @@ export function NetDebugPanel({ panelOpen }: NetDebugPanelProps) {
   }
 
   return (
-    <div className="netDebug">
+    <div className={variant === "overlay" ? "netDebug" : "netDebugEmbedded"}>
       <p className="netTitle">Network Debug</p>
       <p>Status: {status}</p>
       <div className="netRow">
