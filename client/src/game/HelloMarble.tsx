@@ -111,6 +111,8 @@ type GhostRenderState = {
   timestampCorrectedCount: number;
   queueOrderViolationCount: number;
   droppedStaleCount: number;
+  trackLocalMismatchStreak: number;
+  forcedWorldFallback: boolean;
 };
 
 type NetSmoothingDebug = {
@@ -127,6 +129,8 @@ type NetSmoothingDebug = {
   timestampCorrected: number;
   queueOrderViolations: number;
   snapshotQueueSummary: string;
+  forcedWorldFallbacks: number;
+  poseModeSummary: string;
   latestSnapshotAgeMs: number | null;
   serverClockOffsetMs: number;
   inputSourcesSummary: string;
@@ -153,6 +157,8 @@ const SNAP_DISTANCE_M = 8;
 const MAX_GHOST_STEP_SPEED_MPS = 35;
 const SNAP_ANGLE_RAD = 1.3;
 const MAX_GHOST_ANGULAR_RAD_PER_SEC = 8;
+const TRACK_LOCAL_DIVERGENCE_M = 12;
+const TRACK_LOCAL_DIVERGENCE_STREAK = 4;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const LEGACY_TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
@@ -540,6 +546,8 @@ export function HelloMarble() {
     timestampCorrected: 0,
     queueOrderViolations: 0,
     snapshotQueueSummary: "none",
+    forcedWorldFallbacks: 0,
+    poseModeSummary: "none",
     latestSnapshotAgeMs: null,
     serverClockOffsetMs: 0,
     inputSourcesSummary: "none",
@@ -750,6 +758,7 @@ export function HelloMarble() {
     const boardPosThree = new THREE.Vector3();
     const boardQuatThree = new THREE.Quaternion();
     const boardQuatInvThree = new THREE.Quaternion();
+    const trackLocalWorldPosThree = new THREE.Vector3();
     const marblePosThree = new THREE.Vector3();
     const marbleVelThree = new THREE.Vector3();
     const marbleQuatThree = new THREE.Quaternion();
@@ -774,6 +783,7 @@ export function HelloMarble() {
     let totalDroppedTooOld = 0;
     let totalTimestampCorrected = 0;
     let totalQueueOrderViolations = 0;
+    let totalForcedWorldFallbacks = 0;
     let latestAcceptedSnapshotAgeMs: number | null = null;
     let serverClockOffsetMs = 0;
     let isRaceFinishedLocal = false;
@@ -814,6 +824,8 @@ export function HelloMarble() {
         timestampCorrectedCount: 0,
         queueOrderViolationCount: 0,
         droppedStaleCount: 0,
+        trackLocalMismatchStreak: 0,
+        forcedWorldFallback: false,
       };
       ghostPlayers.set(playerId, next);
       return next;
@@ -829,6 +841,8 @@ export function HelloMarble() {
         playerState.avgSnapshotAgeMs = 0;
         playerState.snapshotAgeJitterMs = 0;
         playerState.poseMode = null;
+        playerState.trackLocalMismatchStreak = 0;
+        playerState.forcedWorldFallback = false;
         playerState.hasRendered = false;
         playerState.mesh.visible = false;
       }
@@ -1660,6 +1674,39 @@ export function HelloMarble() {
             continue;
           }
         }
+
+        if (playerState.poseMode === "trackLocal" && !playerState.forcedWorldFallback) {
+          const latestSample = snapshots[snapshots.length - 1]!;
+          if (latestSample.trackPos && latestSample.trackQuat) {
+            trackLocalWorldPosThree
+              .copy(latestSample.trackPos)
+              .applyQuaternion(boardQuatThree)
+              .add(boardPosThree);
+            const divergenceM = trackLocalWorldPosThree.distanceTo(latestSample.pos);
+            if (divergenceM > TRACK_LOCAL_DIVERGENCE_M) {
+              playerState.trackLocalMismatchStreak += 1;
+              if (playerState.trackLocalMismatchStreak >= TRACK_LOCAL_DIVERGENCE_STREAK) {
+                playerState.poseMode = "world";
+                playerState.forcedWorldFallback = true;
+                playerState.trackLocalMismatchStreak = 0;
+                playerState.hasRendered = false;
+                totalForcedWorldFallbacks += 1;
+                if (snapshots.length > 1) {
+                  const latestSafe = snapshots[snapshots.length - 1]!;
+                  snapshots.length = 0;
+                  snapshots.push(latestSafe);
+                }
+              }
+            } else {
+              playerState.trackLocalMismatchStreak = 0;
+            }
+          } else {
+            playerState.trackLocalMismatchStreak = 0;
+          }
+        } else {
+          playerState.trackLocalMismatchStreak = 0;
+        }
+
         const poseMode = playerState.poseMode ?? "world";
         const targetInterpTime = interpNowMs - playerState.interpolationDelayMs;
         while (
@@ -1867,6 +1914,14 @@ export function HelloMarble() {
                 .map(([playerId, state]) => `${playerId}:${state.snapshots.length}`)
                 .join(", ")
             : "none";
+        const poseModeSummary =
+          ghostCount > 0
+            ? [...ghostPlayers.entries()]
+                .map(([playerId, state]) =>
+                  `${playerId}:${state.poseMode === "trackLocal" ? "trackLocal" : "world"}`,
+                )
+                .join(", ")
+            : "none";
 
         if (trialStartAt != null) {
           setTrialCurrentMs(nowMs - trialStartAt);
@@ -1900,6 +1955,8 @@ export function HelloMarble() {
           timestampCorrected: totalTimestampCorrected,
           queueOrderViolations: totalQueueOrderViolations,
           snapshotQueueSummary,
+          forcedWorldFallbacks: totalForcedWorldFallbacks,
+          poseModeSummary,
           latestSnapshotAgeMs: latestAcceptedSnapshotAgeMs,
           serverClockOffsetMs,
           inputSourcesSummary,
@@ -2719,7 +2776,9 @@ export function HelloMarble() {
             <p>Dropped too-old packets: {netSmoothing.droppedTooOld}</p>
             <p>Timestamp corrections: {netSmoothing.timestampCorrected}</p>
             <p>Queue order violations: {netSmoothing.queueOrderViolations}</p>
+            <p>Forced world fallbacks: {netSmoothing.forcedWorldFallbacks}</p>
             <p>Snapshot queues: {netSmoothing.snapshotQueueSummary}</p>
+            <p>Ghost pose modes: {netSmoothing.poseModeSummary}</p>
             <p>
               Latest snapshot age (ms):{" "}
               {netSmoothing.latestSnapshotAgeMs == null
