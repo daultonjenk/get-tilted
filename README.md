@@ -64,13 +64,14 @@ Tilt permissions are introduced in v0.3. iOS Safari requires a user gesture befo
 
 ## Host/join race note
 
-Host/join via QR is planned for v0.5 and is not implemented in v0.1.
+Host/join via QR is available in the debug drawer `Network` tab.
 
-Expected v0.5 flow:
+Current v0.5 flow:
 
-1. Host creates a room and sees a share URL + QR code.
-2. Joiner opens/scans the URL.
-3. Both players enter the same room and receive synchronized race start messages.
+1. Open `Network` tab and click `Connect`.
+2. Host clicks `Create Room`, then toggles `Show QR`.
+3. Joiner scans QR or opens the shown URL (`?room=ROOMCODE`) and clicks `Join`.
+4. Both players can see a real-time ghost marble representation of the opponent.
 
 ## Deploy notes (Pages + Durable Objects)
 

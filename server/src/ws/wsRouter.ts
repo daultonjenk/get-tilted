@@ -35,6 +35,21 @@ function broadcastRoomState(roomCode: string): void {
   }
 }
 
+function broadcastToOthers<TType extends keyof MessagePayloadMap>(
+  roomCode: string,
+  sender: WebSocket,
+  type: TType,
+  payload: MessagePayloadMap[TType],
+): void {
+  const clients = roomStore.getClients(roomCode);
+  for (const client of clients) {
+    if (client === sender) {
+      continue;
+    }
+    send(client as SendableSocket, type, payload);
+  }
+}
+
 export function handleWsConnection(ws: WebSocket, request: IncomingMessage): void {
   const remote = request.socket.remoteAddress ?? "unknown";
   console.log(`[${new Date().toISOString()}] connection ${remote}`);
@@ -64,7 +79,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         return;
       }
       case "room:join": {
-        const { roomCode } = parsed.msg.payload;
+        const { roomCode, name } = parsed.msg.payload;
         if (!roomStore.exists(roomCode)) {
           send(ws as SendableSocket, "error", {
             code: "ROOM_NOT_FOUND",
@@ -72,8 +87,51 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
           });
           return;
         }
-        roomStore.join(roomCode, ws);
+        const joinResult = roomStore.join(roomCode, ws, name);
+        if (!joinResult) {
+          send(ws as SendableSocket, "error", {
+            code: "ROOM_FULL",
+            message: `Room is full: ${roomCode}`,
+          });
+          return;
+        }
         broadcastRoomState(roomCode);
+        return;
+      }
+      case "race:hello": {
+        const roomCode = roomStore.getRoomCode(ws);
+        if (!roomCode || roomCode !== parsed.msg.payload.roomCode) {
+          send(ws as SendableSocket, "error", {
+            code: "NOT_IN_ROOM",
+            message: "Client must join room before race:hello",
+          });
+          return;
+        }
+        const playerId = roomStore.getPlayerId(ws);
+        if (!playerId) {
+          send(ws as SendableSocket, "error", {
+            code: "NO_PLAYER_ID",
+            message: "Player identity not found for socket",
+          });
+          return;
+        }
+        send(ws as SendableSocket, "race:hello:ack", {
+          roomCode,
+          playerId,
+          players: roomStore.getPlayers(roomCode),
+        });
+        return;
+      }
+      case "race:state": {
+        const roomCode = roomStore.getRoomCode(ws);
+        if (!roomCode || roomCode !== parsed.msg.payload.roomCode) {
+          return;
+        }
+        const playerId = roomStore.getPlayerId(ws);
+        if (!playerId || playerId !== parsed.msg.payload.playerId) {
+          return;
+        }
+        broadcastToOthers(roomCode, ws, "race:state", parsed.msg.payload);
         return;
       }
       default:
@@ -86,10 +144,15 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
 
   ws.on("close", (code, reasonBuffer) => {
     const reason = reasonBuffer.toString() || "no-reason";
-    const roomCode = roomStore.getRoomCode(ws);
-    roomStore.leave(ws);
-    if (roomCode) {
-      broadcastRoomState(roomCode);
+    const leaveResult = roomStore.leave(ws);
+    if (leaveResult.roomCode) {
+      broadcastRoomState(leaveResult.roomCode);
+      if (leaveResult.playerId) {
+        broadcastToOthers(leaveResult.roomCode, ws, "race:left", {
+          roomCode: leaveResult.roomCode,
+          playerId: leaveResult.playerId,
+        });
+      }
     }
     console.log(`[${new Date().toISOString()}] disconnect ${remote} (${code}:${reason})`);
   });

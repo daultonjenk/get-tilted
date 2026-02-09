@@ -5,6 +5,21 @@ export type MessagePayloadMap = {
   "room:created": { roomCode: string };
   "room:join": { roomCode: string; name?: string };
   "room:state": { roomCode: string; clients: number };
+  "race:hello": { roomCode: string; playerId?: string; name?: string };
+  "race:hello:ack": {
+    roomCode: string;
+    playerId: string;
+    players: Array<{ playerId: string; name?: string }>;
+  };
+  "race:state": {
+    roomCode: string;
+    playerId: string;
+    t: number;
+    pos: [number, number, number];
+    quat: [number, number, number, number];
+    vel: [number, number, number];
+  };
+  "race:left": { roomCode: string; playerId: string };
   error: { code: string; message: string };
 };
 
@@ -38,6 +53,10 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "room:created",
   "room:join",
   "room:state",
+  "race:hello",
+  "race:hello:ack",
+  "race:state",
+  "race:left",
   "error",
 ]);
 
@@ -59,6 +78,36 @@ function isOptionalString(value: unknown): value is string | undefined {
 
 function hasNoOwnKeys(value: Record<string, unknown>): boolean {
   return Object.keys(value).length === 0;
+}
+
+function isTuple3(value: unknown): value is [number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((entry) => isNumber(entry))
+  );
+}
+
+function isTuple4(value: unknown): value is [number, number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every((entry) => isNumber(entry))
+  );
+}
+
+function isPlayerList(
+  value: unknown,
+): value is Array<{ playerId: string; name?: string }> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        isObject(entry) &&
+        isString(entry.playerId) &&
+        isOptionalString(entry.name),
+    )
+  );
 }
 
 export function isMessageType(value: string): value is MessageType {
@@ -101,6 +150,52 @@ export function validatePayload<TType extends MessageType>(
       return isNumber(payload.clients)
         ? { ok: true }
         : { ok: false, error: "Expected clients number" };
+    case "race:hello":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isOptionalString(payload.playerId)) {
+        return { ok: false, error: "Expected optional playerId string" };
+      }
+      return isOptionalString(payload.name)
+        ? { ok: true }
+        : { ok: false, error: "Expected optional name string" };
+    case "race:hello:ack":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isString(payload.playerId)) {
+        return { ok: false, error: "Expected playerId string" };
+      }
+      return isPlayerList(payload.players)
+        ? { ok: true }
+        : { ok: false, error: "Expected players array" };
+    case "race:state":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isString(payload.playerId)) {
+        return { ok: false, error: "Expected playerId string" };
+      }
+      if (!isNumber(payload.t)) {
+        return { ok: false, error: "Expected numeric t" };
+      }
+      if (!isTuple3(payload.pos)) {
+        return { ok: false, error: "Expected numeric pos tuple" };
+      }
+      if (!isTuple4(payload.quat)) {
+        return { ok: false, error: "Expected numeric quat tuple" };
+      }
+      return isTuple3(payload.vel)
+        ? { ok: true }
+        : { ok: false, error: "Expected numeric vel tuple" };
+    case "race:left":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      return isString(payload.playerId)
+        ? { ok: true }
+        : { ok: false, error: "Expected playerId string" };
     case "error":
       if (!isString(payload.code)) {
         return { ok: false, error: "Expected code string" };

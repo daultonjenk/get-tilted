@@ -199,6 +199,19 @@ textarea {
   resize: vertical;
 }
 
+.joinUrl {
+  word-break: break-all;
+  font-size: 0.78rem;
+  color: #b6d4f1;
+}
+
+.qrPreview {
+  width: min(220px, 100%);
+  border-radius: 0.45rem;
+  border: 1px solid rgb(155 206 255 / 35%);
+  background: #fff;
+}
+
 .errorText {
   color: #ffb2b2;
 }
