@@ -62,11 +62,13 @@ body {
 
 .hudRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
 }
 
 .hudRow button {
   flex: 1;
+  min-width: 7.5rem;
 }
 
 .tiltStatus {

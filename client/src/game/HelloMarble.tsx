@@ -24,15 +24,23 @@ type MarbleDebug = {
   gravZ: number;
 };
 
+type CameraMode = "chase" | "topdown";
+
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
-const BASE_G = 9.82;
+const BASE_G = 12.0;
 const MAX_TILT_DEG = 15;
 const FOLLOW_DIST = 10;
 const CAM_HEIGHT = 7.5;
 const LOOK_HEIGHT = 1.2;
 const LOOK_AHEAD = 16;
+const TOPDOWN_HEIGHT = 16;
+const TOPDOWN_Z_OFFSET = 2;
+const TOPDOWN_LOOK_AHEAD = 4;
 const BOARD_TILT_SMOOTH = 10;
+const MAX_BOARD_ANG_VEL = 2.5;
+const ENABLE_EXTRA_DOWNFORCE = false;
+const EXTRA_DOWN_FORCE = 4;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -53,6 +61,7 @@ export function HelloMarble() {
   const [statusMessage, setStatusMessage] = useState(
     "Tilt disabled. Using fallback controls.",
   );
+  const [cameraMode, setCameraMode] = useState<CameraMode>("chase");
   const [touchTilt, setTouchTilt] = useState({ x: 0, z: 0 });
   const [debug, setDebug] = useState<MarbleDebug>({
     fps: 0,
@@ -68,6 +77,7 @@ export function HelloMarble() {
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
+  const cameraModeRef = useRef(cameraMode);
 
   useEffect(() => {
     tiltStatusRef.current = tiltStatus;
@@ -76,6 +86,10 @@ export function HelloMarble() {
   useEffect(() => {
     touchTiltRef.current = touchTilt;
   }, [touchTilt]);
+
+  useEffect(() => {
+    cameraModeRef.current = cameraMode;
+  }, [cameraMode]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -89,6 +103,7 @@ export function HelloMarble() {
     const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 200);
     camera.position.set(0, CAM_HEIGHT, 0);
     camera.lookAt(0, LOOK_HEIGHT, LOOK_AHEAD);
+    camera.up.set(0, 1, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -118,8 +133,12 @@ export function HelloMarble() {
     boardBody.material = boardMat;
 
     const contactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
-      friction: 0.75,
+      friction: 0.85,
       restitution: 0.0,
+      contactEquationStiffness: 1e8,
+      contactEquationRelaxation: 3,
+      frictionEquationStiffness: 1e8,
+      frictionEquationRelaxation: 3,
     });
     world.addContactMaterial(contactMat);
 
@@ -128,8 +147,8 @@ export function HelloMarble() {
       mass: 1,
       shape: new CANNON.Sphere(marbleRadius),
       position: track.spawn.clone(),
-      linearDamping: 0.22,
-      angularDamping: 0.22,
+      linearDamping: 0.2,
+      angularDamping: 0.2,
       material: marbleMat,
     });
     world.addBody(marbleBody);
@@ -145,6 +164,7 @@ export function HelloMarble() {
     const lookTarget = new THREE.Vector3();
     const visualTiltTargetEuler = new THREE.Euler(0, 0, 0, "XYZ");
     const visualTiltTargetQuat = new THREE.Quaternion();
+    const extraDownForceVec = new CANNON.Vec3(0, -EXTRA_DOWN_FORCE, 0);
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -152,6 +172,8 @@ export function HelloMarble() {
     let stopTiltListener: (() => void) | null = null;
     const filter = makeTiltFilter({ tau: 0.15 });
     const maxTiltRad = (MAX_TILT_DEG * Math.PI) / 180;
+    let currentPitch = 0;
+    let currentRoll = 0;
 
     const computeSpawnWorld = (): CANNON.Vec3 => {
       const spawn = track.spawn;
@@ -341,11 +363,13 @@ export function HelloMarble() {
 
       const filteredIntent = filter.push(targetIntent, delta);
 
-      visualTiltTargetEuler.set(
-        filteredIntent.z * maxTiltRad,
-        0,
-        -filteredIntent.x * maxTiltRad,
-      );
+      const desiredPitch = filteredIntent.z * maxTiltRad;
+      const desiredRoll = -filteredIntent.x * maxTiltRad;
+      const maxStep = MAX_BOARD_ANG_VEL * delta;
+      currentPitch += clamp(desiredPitch - currentPitch, -maxStep, maxStep);
+      currentRoll += clamp(desiredRoll - currentRoll, -maxStep, maxStep);
+
+      visualTiltTargetEuler.set(currentPitch, 0, currentRoll);
       visualTiltTargetQuat.setFromEuler(visualTiltTargetEuler);
       const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * delta);
       track.group.quaternion.slerp(visualTiltTargetQuat, boardTiltAlpha);
@@ -358,6 +382,10 @@ export function HelloMarble() {
       );
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
+
+      if (ENABLE_EXTRA_DOWNFORCE) {
+        marbleBody.applyForce(extraDownForceVec, marbleBody.position);
+      }
 
       while (accumulator >= TIMESTEP) {
         world.step(TIMESTEP);
@@ -380,14 +408,27 @@ export function HelloMarble() {
         marbleBody.quaternion.w,
       );
 
-      const desiredCamZ = marbleBody.position.z - FOLLOW_DIST;
       const cameraAlpha = 1 - Math.exp(-8 * delta);
-      cameraTarget.set(0, CAM_HEIGHT, desiredCamZ);
-      camera.position.lerp(cameraTarget, cameraAlpha);
-      camera.position.x = 0;
-      camera.position.y = CAM_HEIGHT;
+      if (cameraModeRef.current === "chase") {
+        const desiredCamZ = marbleBody.position.z - FOLLOW_DIST;
+        cameraTarget.set(0, CAM_HEIGHT, desiredCamZ);
+        camera.position.lerp(cameraTarget, cameraAlpha);
+        camera.position.x = 0;
+        camera.position.y = CAM_HEIGHT;
+        lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+      } else {
+        const desiredTopX = marbleBody.position.x;
+        const desiredTopZ = marbleBody.position.z - TOPDOWN_Z_OFFSET;
+        cameraTarget.set(desiredTopX, TOPDOWN_HEIGHT, desiredTopZ);
+        camera.position.lerp(cameraTarget, cameraAlpha);
+        camera.position.y = TOPDOWN_HEIGHT;
+        lookTarget.set(
+          camera.position.x,
+          0,
+          marbleBody.position.z + TOPDOWN_LOOK_AHEAD,
+        );
+      }
 
-      lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
       camera.lookAt(lookTarget);
 
       renderer.render(scene, camera);
@@ -488,6 +529,14 @@ export function HelloMarble() {
           </button>
           <button type="button" onClick={() => calibrateTiltRef.current()}>
             Calibrate
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setCameraMode((mode) => (mode === "chase" ? "topdown" : "chase"))
+            }
+          >
+            Camera: {cameraMode === "chase" ? "Chase" : "Top-down"}
           </button>
         </div>
         {showTouchFallback ? (
