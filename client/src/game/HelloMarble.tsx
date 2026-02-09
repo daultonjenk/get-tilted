@@ -126,9 +126,11 @@ const TOPDOWN_Z_OFFSET = 2;
 const BOARD_TILT_SMOOTH = 12;
 const PIVOT_SMOOTH = 10;
 const SOURCE_RATE_MS = 1000 / 15;
-const INTERP_DELAY_MIN_MS = 35;
-const INTERP_DELAY_MAX_MS = 80;
-const EXTRAPOLATION_MAX_MS = 80;
+const INTERP_DELAY_MIN_MS = 120;
+const INTERP_DELAY_MAX_MS = 165;
+const INTERP_DELAY_RISE_BLEND = 0.18;
+const INTERP_DELAY_FALL_BLEND = 0.08;
+const EXTRAPOLATION_MAX_MS = 45;
 const SNAP_DISTANCE_M = 8;
 const MAX_GHOST_STEP_SPEED_MPS = 35;
 const SNAP_ANGLE_RAD = 1.3;
@@ -703,6 +705,7 @@ export function HelloMarble() {
     });
     const ghostPlayers = new Map<string, GhostRenderState>();
     let lastRaceSendAt = 0;
+    let lastSentRaceStateT = 0;
 
     const pressedKeys = new Set<string>();
     const cameraTarget = new THREE.Vector3();
@@ -934,8 +937,7 @@ export function HelloMarble() {
           const playerState = getOrCreateGhostState(message.payload.playerId);
           const hasTrackLocalSnapshot = Boolean(
             message.payload.trackPos &&
-              message.payload.trackQuat &&
-              message.payload.trackVel,
+              message.payload.trackQuat,
           );
           if (playerState.poseMode === null) {
             playerState.poseMode = hasTrackLocalSnapshot ? "trackLocal" : "world";
@@ -957,12 +959,18 @@ export function HelloMarble() {
               const jitterSample = Math.abs(sourceDelta - playerState.avgSourceDeltaMs);
               playerState.jitterMs += (jitterSample - playerState.jitterMs) * 0.24;
               const adaptiveDelay =
-                playerState.avgSourceDeltaMs * 0.75 + playerState.jitterMs * 1.5 + 20;
-              playerState.interpolationDelayMs = clamp(
+                playerState.avgSourceDeltaMs * 1.25 + playerState.jitterMs * 1.8 + 35;
+              const clampedDelay = clamp(
                 adaptiveDelay,
                 INTERP_DELAY_MIN_MS,
                 INTERP_DELAY_MAX_MS,
               );
+              const blend =
+                clampedDelay > playerState.interpolationDelayMs
+                  ? INTERP_DELAY_RISE_BLEND
+                  : INTERP_DELAY_FALL_BLEND;
+              playerState.interpolationDelayMs +=
+                (clampedDelay - playerState.interpolationDelayMs) * blend;
             }
           }
           playerState.lastSourceT = message.payload.t;
@@ -1453,9 +1461,12 @@ export function HelloMarble() {
         marbleLocalPosThree.copy(marblePosThree).sub(boardPosThree).applyQuaternion(boardQuatInvThree);
         marbleLocalVelThree.copy(marbleVelThree).applyQuaternion(boardQuatInvThree);
         marbleLocalQuatThree.copy(boardQuatInvThree).multiply(marbleQuatThree);
+        const candidateT = raceClient.getServerNowMs();
+        const monotonicT = Math.max(candidateT, lastSentRaceStateT + 1);
+        lastSentRaceStateT = monotonicT;
 
         raceClient.sendRaceState({
-          t: Date.now(),
+          t: monotonicT,
           pos: [marbleBody.position.x, marbleBody.position.y, marbleBody.position.z],
           quat: [
             marbleBody.quaternion.x,
@@ -1529,7 +1540,7 @@ export function HelloMarble() {
       );
 
       let extrapolatingPlayers = 0;
-      const interpNowMs = Date.now();
+      const interpNowMs = raceClient.getServerNowMs();
       for (const [, playerState] of ghostPlayers) {
         const snapshots = playerState.snapshots;
         if (snapshots.length === 0) {
@@ -1538,8 +1549,8 @@ export function HelloMarble() {
         const poseMode = playerState.poseMode ?? "world";
         const targetInterpTime = interpNowMs - playerState.interpolationDelayMs;
         while (
-          snapshots.length >= 2 &&
-          snapshots[1]!.recvAtMs <= targetInterpTime
+          snapshots.length >= 3 &&
+          snapshots[1]!.t <= targetInterpTime
         ) {
           snapshots.shift();
         }
@@ -1562,11 +1573,41 @@ export function HelloMarble() {
             tempVecB,
             tempQuatB,
           );
-          const span = Math.max(b.recvAtMs - a.recvAtMs, 1);
-          const alpha = clamp((targetInterpTime - a.recvAtMs) / span, 0, 1);
-          tempVecA.lerp(tempVecB, alpha);
-          tempQuatA.slerp(tempQuatB, alpha);
-          applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
+          const rawSpanMs = b.t - a.t;
+          const spanMs = Math.max(rawSpanMs, 1);
+          if (targetInterpTime <= b.t) {
+            const alpha = clamp((targetInterpTime - a.t) / spanMs, 0, 1);
+            tempVecA.lerp(tempVecB, alpha);
+            tempQuatA.slerp(tempQuatB, alpha);
+            applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
+            continue;
+          }
+
+          const extrapolationMs = clamp(targetInterpTime - b.t, 0, EXTRAPOLATION_MAX_MS);
+          if (extrapolationMs > 0) {
+            const dt = extrapolationMs / 1000;
+            if (
+              poseMode === "trackLocal" &&
+              a.trackPos &&
+              b.trackPos
+            ) {
+              tempVecA.copy(b.trackPos);
+              tempVecB.copy(b.trackPos).sub(a.trackPos).multiplyScalar(1000 / spanMs);
+              tempVecA.addScaledVector(tempVecB, dt).applyQuaternion(boardQuatThree).add(boardPosThree);
+            } else {
+              tempVecA.copy(b.pos);
+              if (rawSpanMs > 0) {
+                tempVecB.copy(b.pos).sub(a.pos).multiplyScalar(1000 / rawSpanMs);
+              } else {
+                tempVecB.copy(b.vel);
+              }
+              tempVecA.addScaledVector(tempVecB, dt);
+            }
+            extrapolatingPlayers += 1;
+          } else {
+            tempVecA.copy(tempVecB);
+          }
+          applyGhostMotionSmoothing(playerState, tempVecA, tempQuatB, delta);
           continue;
         }
 
@@ -1579,21 +1620,6 @@ export function HelloMarble() {
           tempVecA,
           tempQuatA,
         );
-        const extrapolationMs = targetInterpTime - latest.recvAtMs;
-        if (extrapolationMs > 0 && extrapolationMs <= EXTRAPOLATION_MAX_MS) {
-          const dt = extrapolationMs / 1000;
-          if (
-            poseMode === "trackLocal" &&
-            latest.trackPos &&
-            latest.trackVel
-          ) {
-            tempVecB.copy(latest.trackPos).addScaledVector(latest.trackVel, dt);
-            tempVecA.copy(tempVecB).applyQuaternion(boardQuatThree).add(boardPosThree);
-          } else {
-            tempVecA.addScaledVector(latest.vel, dt);
-          }
-          extrapolatingPlayers += 1;
-        }
         applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
       }
 
