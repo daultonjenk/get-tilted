@@ -82,6 +82,8 @@ type GhostSnapshot = {
   pos: THREE.Vector3;
   quat: THREE.Quaternion;
   vel: THREE.Vector3;
+  trackPos?: THREE.Vector3;
+  trackQuat?: THREE.Quaternion;
 };
 
 type GhostRenderState = {
@@ -143,10 +145,6 @@ const INTERP_DELAY_RISE_BLEND = 0.18;
 const INTERP_DELAY_FALL_BLEND = 0.08;
 const EXTRAPOLATION_MAX_MS = 45;
 const SNAPSHOT_MAX_AGE_MS = 2000;
-const SNAP_DISTANCE_M = 8;
-const MAX_GHOST_STEP_SPEED_MPS = 35;
-const SNAP_ANGLE_RAD = 1.3;
-const MAX_GHOST_ANGULAR_RAD_PER_SEC = 8;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const LEGACY_TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
@@ -155,26 +153,26 @@ const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 
 const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
-  gravityG: 21.9,
-  tiltStrength: 1.56,
+  gravityG: 19.7,
+  tiltStrength: 1.63,
   gyroSensitivity: 1.35,
   maxSpeed: 20,
   maxTiltDeg: 14,
-  maxBoardAngVel: 8.7,
+  maxBoardAngVel: 5,
   tiltFilterTau: 0.1,
-  linearDamping: 0.02,
-  angularDamping: 0.04,
-  cameraPreset: "chaseRight",
-  bounce: 0.1,
-  contactFriction: 0.88,
-  contactRestitution: 0.1,
+  linearDamping: 0.01,
+  angularDamping: 0.01,
+  cameraPreset: "chaseLeft",
+  bounce: 0.99,
+  contactFriction: 0,
+  contactRestitution: 0.99,
   invertTiltX: false,
   invertTiltZ: false,
   invertCameraSide: false,
   enableExtraDownforce: false,
   extraDownForce: 2.4,
   renderScaleMobile: 1.2,
-  debugUpdateHzMobile: 5,
+  debugUpdateHzMobile: 2,
 };
 
 const CAMERA_PRESETS: CameraPresetId[] = [
@@ -321,18 +319,18 @@ function sanitizeTuning(input: unknown): TuningState {
     base.angularDamping = clamp(value.angularDamping, 0, 0.5);
   }
   if (typeof value.bounce === "number") {
-    const nextBounce = clamp(value.bounce, 0, 0.35);
+    const nextBounce = clamp(value.bounce, 0, 0.99);
     base.bounce = nextBounce;
     base.contactRestitution = nextBounce;
   }
   if (typeof value.contactFriction === "number") {
-    base.contactFriction = clamp(value.contactFriction, 0.3, 1.1);
+    base.contactFriction = clamp(value.contactFriction, 0, 1.1);
   }
   if (typeof value.contactRestitution === "number") {
-    const nextRestitution = clamp(value.contactRestitution, 0, 0.25);
+    const nextRestitution = clamp(value.contactRestitution, 0, 0.99);
     base.contactRestitution = nextRestitution;
     if (typeof value.bounce !== "number") {
-      base.bounce = clamp(nextRestitution, 0, 0.35);
+      base.bounce = clamp(nextRestitution, 0, 0.99);
     }
   }
   if (isCameraPresetId(value.cameraPreset)) {
@@ -739,13 +737,14 @@ export function HelloMarble() {
     const qFinalCannon = new CANNON.Quaternion();
     const tempVecA = new THREE.Vector3();
     const tempVecB = new THREE.Vector3();
+    const tempVecC = new THREE.Vector3();
+    const tempVecD = new THREE.Vector3();
     const tempQuatA = new THREE.Quaternion();
     const tempQuatB = new THREE.Quaternion();
+    const tempQuatC = new THREE.Quaternion();
+    const tempQuatD = new THREE.Quaternion();
     const boardPosThree = new THREE.Vector3();
     const boardQuatThree = new THREE.Quaternion();
-    const marblePosThree = new THREE.Vector3();
-    const marbleVelThree = new THREE.Vector3();
-    const marbleQuatThree = new THREE.Quaternion();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -1059,6 +1058,12 @@ export function HelloMarble() {
             pos: new THREE.Vector3(...message.payload.pos),
             quat: new THREE.Quaternion(...message.payload.quat),
             vel: new THREE.Vector3(...message.payload.vel),
+            trackPos: message.payload.trackPos
+              ? new THREE.Vector3(...message.payload.trackPos)
+              : undefined,
+            trackQuat: message.payload.trackQuat
+              ? new THREE.Quaternion(...message.payload.trackQuat)
+              : undefined,
           });
           while (playerState.snapshots.length > 64) {
             playerState.snapshots.shift();
@@ -1279,48 +1284,56 @@ export function HelloMarble() {
       outQuat.copy(snapshot.quat);
     };
 
-    const applyGhostMotionSmoothing = (
-      state: GhostRenderState,
-      targetPos: THREE.Vector3,
-      targetQuat: THREE.Quaternion,
-      deltaSec: number,
+    const resolveSnapshotTrackPose = (
+      snapshot: GhostSnapshot,
+      outPos: THREE.Vector3,
+      outQuat: THREE.Quaternion,
+    ): boolean => {
+      if (!snapshot.trackPos || !snapshot.trackQuat) {
+        return false;
+      }
+      outPos.copy(snapshot.trackPos);
+      outQuat.copy(snapshot.trackQuat);
+      return true;
+    };
+
+    const rebaseGhostPoseToLocalBoard = (
+      senderPos: THREE.Vector3,
+      senderQuat: THREE.Quaternion,
+      senderTrackPos: THREE.Vector3 | undefined,
+      senderTrackQuat: THREE.Quaternion | undefined,
+      localTrackPos: THREE.Vector3,
+      localTrackQuat: THREE.Quaternion,
+      outPos: THREE.Vector3,
+      outQuat: THREE.Quaternion,
     ): void => {
-      if (!state.hasRendered) {
-        state.renderedPos.copy(targetPos);
-        state.renderedQuat.copy(targetQuat);
-        state.hasRendered = true;
-        state.mesh.visible = true;
-        state.mesh.position.copy(state.renderedPos);
-        state.mesh.quaternion.copy(state.renderedQuat);
+      if (!senderTrackPos || !senderTrackQuat) {
+        outPos.copy(senderPos);
+        outQuat.copy(senderQuat);
         return;
       }
 
-      tempVecA.copy(targetPos).sub(state.renderedPos);
-      const jumpDistance = tempVecA.length();
-      if (jumpDistance > SNAP_DISTANCE_M) {
-        state.renderedPos.copy(targetPos);
-      } else if (jumpDistance > 0) {
-        const maxStep = Math.max(1.2, MAX_GHOST_STEP_SPEED_MPS * deltaSec);
-        if (jumpDistance > maxStep) {
-          tempVecA.multiplyScalar(maxStep / jumpDistance);
-          state.renderedPos.add(tempVecA);
-        } else {
-          state.renderedPos.copy(targetPos);
-        }
-      }
+      tempQuatC.copy(senderTrackQuat).invert();
+      outPos
+        .copy(senderPos)
+        .sub(senderTrackPos)
+        .applyQuaternion(tempQuatC)
+        .applyQuaternion(localTrackQuat)
+        .add(localTrackPos);
+      outQuat.copy(tempQuatC).multiply(senderQuat).premultiply(localTrackQuat).normalize();
+    };
 
-      const quatDot = Math.min(1, Math.max(-1, state.renderedQuat.dot(targetQuat)));
-      const angle = 2 * Math.acos(Math.abs(quatDot));
-      if (angle > SNAP_ANGLE_RAD) {
-        state.renderedQuat.copy(targetQuat);
-      } else if (angle > 0.0001) {
-        const maxAngularStep = Math.max(0.25, MAX_GHOST_ANGULAR_RAD_PER_SEC * deltaSec);
-        const t = clamp(maxAngularStep / angle, 0, 1);
-        state.renderedQuat.slerp(targetQuat, t);
-      }
-
-      state.mesh.position.copy(state.renderedPos);
-      state.mesh.quaternion.copy(state.renderedQuat);
+    const applyGhostPose = (
+      state: GhostRenderState,
+      worldPos: THREE.Vector3,
+      worldQuat: THREE.Quaternion,
+    ): void => {
+      state.renderedPos.copy(worldPos);
+      state.renderedQuat.copy(worldQuat);
+      state.hasRendered = true;
+      state.mesh.visible = true;
+      state.mesh.position.copy(worldPos);
+      state.mesh.quaternion.copy(worldQuat);
     };
 
     let animationFrame = 0;
@@ -1345,7 +1358,7 @@ export function HelloMarble() {
       marbleBody.linearDamping = currentTuning.linearDamping;
       marbleBody.angularDamping = currentTuning.angularDamping;
       contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
-      contactMat.restitution = clamp(currentTuning.bounce, 0, 0.2);
+      contactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
 
       if (Math.abs(currentTuning.tiltFilterTau - lastFilterTau) > 0.0001) {
         lastFilterTau = currentTuning.tiltFilterTau;
@@ -1505,14 +1518,6 @@ export function HelloMarble() {
           boardBody.quaternion.z,
           boardBody.quaternion.w,
         );
-        marblePosThree.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
-        marbleVelThree.set(marbleBody.velocity.x, marbleBody.velocity.y, marbleBody.velocity.z);
-        marbleQuatThree.set(
-          marbleBody.quaternion.x,
-          marbleBody.quaternion.y,
-          marbleBody.quaternion.z,
-          marbleBody.quaternion.w,
-        );
         const candidateT = raceClient.getServerNowMs();
         const monotonicT = Math.max(candidateT, lastSentRaceStateT + 1);
         lastSentRaceStateT = monotonicT;
@@ -1527,6 +1532,13 @@ export function HelloMarble() {
             marbleBody.quaternion.w,
           ],
           vel: [marbleBody.velocity.x, marbleBody.velocity.y, marbleBody.velocity.z],
+          trackPos: [boardBody.position.x, boardBody.position.y, boardBody.position.z],
+          trackQuat: [
+            boardBody.quaternion.x,
+            boardBody.quaternion.y,
+            boardBody.quaternion.z,
+            boardBody.quaternion.w,
+          ],
         });
         lastRaceSendAt = nowMs;
       }
@@ -1631,7 +1643,23 @@ export function HelloMarble() {
             const alpha = clamp((targetInterpTime - a.t) / spanMs, 0, 1);
             tempVecA.lerp(tempVecB, alpha);
             tempQuatA.slerp(tempQuatB, alpha);
-            applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
+            const canRebaseA = resolveSnapshotTrackPose(a, tempVecC, tempQuatC);
+            const canRebaseB = resolveSnapshotTrackPose(b, tempVecD, tempQuatD);
+            if (canRebaseA && canRebaseB) {
+              tempVecC.lerp(tempVecD, alpha);
+              tempQuatC.slerp(tempQuatD, alpha);
+              rebaseGhostPoseToLocalBoard(
+                tempVecA,
+                tempQuatA,
+                tempVecC,
+                tempQuatC,
+                boardPosThree,
+                boardQuatThree,
+                tempVecA,
+                tempQuatA,
+              );
+            }
+            applyGhostPose(playerState, tempVecA, tempQuatA);
             continue;
           }
 
@@ -1649,7 +1677,20 @@ export function HelloMarble() {
           } else {
             tempVecA.copy(tempVecB);
           }
-          applyGhostMotionSmoothing(playerState, tempVecA, tempQuatB, delta);
+          const canRebaseB = resolveSnapshotTrackPose(b, tempVecC, tempQuatC);
+          if (canRebaseB) {
+            rebaseGhostPoseToLocalBoard(
+              tempVecA,
+              tempQuatA,
+              tempVecC,
+              tempQuatC,
+              boardPosThree,
+              boardQuatThree,
+              tempVecA,
+              tempQuatA,
+            );
+          }
+          applyGhostPose(playerState, tempVecA, tempQuatA);
           continue;
         }
 
@@ -1659,7 +1700,20 @@ export function HelloMarble() {
           tempVecA,
           tempQuatA,
         );
-        applyGhostMotionSmoothing(playerState, tempVecA, tempQuatA, delta);
+        const canRebaseLatest = resolveSnapshotTrackPose(latest, tempVecC, tempQuatC);
+        if (canRebaseLatest) {
+          rebaseGhostPoseToLocalBoard(
+            tempVecA,
+            tempQuatA,
+            tempVecC,
+            tempQuatC,
+            boardPosThree,
+            boardQuatThree,
+            tempVecA,
+            tempQuatA,
+          );
+        }
+        applyGhostPose(playerState, tempVecA, tempQuatA);
       }
 
       const cameraAlpha = 1 - Math.exp(-8 * delta);
@@ -1904,7 +1958,7 @@ export function HelloMarble() {
         return {
           ...prev,
           contactRestitution: value as TuningState["contactRestitution"],
-          bounce: clamp(value as number, 0, 0.35),
+          bounce: clamp(value as number, 0, 0.99),
         };
       }
       return { ...prev, [key]: value };
@@ -2292,7 +2346,7 @@ export function HelloMarble() {
               <div className="controlRow">
                 <input
                   type="range"
-                  min={0.3}
+                  min={0}
                   max={1.1}
                   step={0.01}
                   value={tuning.contactFriction}
@@ -2316,7 +2370,7 @@ export function HelloMarble() {
                 <input
                   type="range"
                   min={0}
-                  max={0.35}
+                  max={0.99}
                   step={0.01}
                   value={tuning.bounce}
                   onChange={(event) =>
