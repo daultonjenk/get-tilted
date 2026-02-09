@@ -73,6 +73,7 @@ type TuningState = {
 
 type TrialState = "idle" | "running" | "finished";
 type RacePhase = "waiting" | "countdown" | "racing";
+type GameMode = "solo" | "multiplayer";
 
 type GhostSnapshot = {
   t: number;
@@ -472,6 +473,8 @@ export function HelloMarble() {
     const room = new URLSearchParams(window.location.search).get("room");
     return room ? room.toUpperCase() : "";
   });
+  const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "solo";
+  const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
   const [roomCode, setRoomCode] = useState("");
   const [joinRoomCode, setJoinRoomCode] = useState(autoJoinRoomCode);
   const [localPlayerId, setLocalPlayerId] = useState("");
@@ -480,8 +483,10 @@ export function HelloMarble() {
   );
   const [readyPlayerIds, setReadyPlayerIds] = useState<string[]>([]);
   const [localReady, setLocalReady] = useState(false);
-  const [racePhase, setRacePhase] = useState<RacePhase>("waiting");
-  const [controlsLocked, setControlsLocked] = useState(false);
+  const [racePhase, setRacePhase] = useState<RacePhase>(
+    initialGameMode === "solo" ? "racing" : "waiting",
+  );
+  const [controlsLocked, setControlsLocked] = useState(initialGameMode !== "solo");
   const [countdownStartAtMs, setCountdownStartAtMs] = useState<number | null>(null);
   const [countdownStepMs, setCountdownStepMs] = useState(1000);
   const [countdownToken, setCountdownToken] = useState<string | null>(null);
@@ -504,6 +509,7 @@ export function HelloMarble() {
   const raceClientRef = useRef<RaceClient | null>(null);
   const localPlayerIdRef = useRef(localPlayerId);
   const autoJoinRoomCodeRef = useRef(autoJoinRoomCode);
+  const gameModeRef = useRef(gameMode);
   const racePhaseRef = useRef(racePhase);
   const controlsLockedRef = useRef(controlsLocked);
   const countdownStartAtRef = useRef<number | null>(countdownStartAtMs);
@@ -537,6 +543,10 @@ export function HelloMarble() {
   useEffect(() => {
     localPlayerIdRef.current = localPlayerId;
   }, [localPlayerId]);
+
+  useEffect(() => {
+    gameModeRef.current = gameMode;
+  }, [gameMode]);
 
   useEffect(() => {
     tuningRef.current = tuning;
@@ -743,7 +753,10 @@ export function HelloMarble() {
       if (status === "disconnected") {
         setReadyPlayerIds([]);
         setLocalReady(false);
-        if (racePhaseRef.current !== "racing") {
+        if (
+          gameModeRef.current === "multiplayer" &&
+          racePhaseRef.current !== "racing"
+        ) {
           setRacePhase("waiting");
           setControlsLocked(true);
         }
@@ -755,6 +768,7 @@ export function HelloMarble() {
       }
       if (
         status === "connected" &&
+        gameModeRef.current === "multiplayer" &&
         autoJoinRoomCodeRef.current &&
         !autoJoinAttemptedRef.current
       ) {
@@ -769,6 +783,9 @@ export function HelloMarble() {
     raceClient.onMessage((message: TypedMessage) => {
       switch (message.type) {
         case "room:created":
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
           setRoomCode(message.payload.roomCode);
           setJoinRoomCode(message.payload.roomCode);
           setShowQr(true);
@@ -783,6 +800,9 @@ export function HelloMarble() {
           countdownGoHandledRef.current = false;
           return;
         case "room:state":
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
           setRoomCode(message.payload.roomCode);
           setNetError(null);
           if (racePhaseRef.current !== "racing") {
@@ -790,6 +810,9 @@ export function HelloMarble() {
           }
           return;
         case "race:hello:ack":
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
           localPlayerIdRef.current = message.payload.playerId;
           setLocalPlayerId(message.payload.playerId);
           setPlayersInRoom(message.payload.players);
@@ -798,6 +821,9 @@ export function HelloMarble() {
           setNetError(null);
           return;
         case "race:ready:state":
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
           setReadyPlayerIds(message.payload.readyPlayerIds);
           setLocalReady(
             localPlayerIdRef.current
@@ -823,6 +849,9 @@ export function HelloMarble() {
           }
           return;
         case "race:countdown:start":
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
           if (message.payload.roomCode !== raceClient.getRoomCode()) {
             return;
           }
@@ -836,6 +865,9 @@ export function HelloMarble() {
           resetRef.current();
           return;
         case "race:state": {
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
           if (message.payload.playerId === raceClient.getPlayerId()) {
             return;
           }
@@ -885,6 +917,9 @@ export function HelloMarble() {
           return;
         }
         case "race:left": {
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
           const ghostState = ghostPlayers.get(message.payload.playerId);
           if (ghostState) {
             scene.remove(ghostState.mesh);
@@ -1174,7 +1209,7 @@ export function HelloMarble() {
       const countdownStart = countdownStartAtRef.current;
       if (countdownStart != null) {
         const stepMs = countdownStepMsRef.current;
-        const elapsedMs = nowMs - countdownStart;
+        const elapsedMs = Date.now() - countdownStart;
         if (elapsedMs >= 0 && elapsedMs < stepMs * COUNTDOWN_LABELS.length) {
           const nextIndex = clamp(
             Math.floor(elapsedMs / stepMs),
@@ -1602,8 +1637,11 @@ export function HelloMarble() {
 
   const showTouchFallback =
     !tiltStatus.supported || tiltStatus.permission === "denied";
-  const waitingForPlayers = playersInRoom.length < 2;
-  const waitingForReady = playersInRoom.length === 2 && readyPlayerIds.length < 2;
+  const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
+  const waitingForReady =
+    gameMode === "multiplayer" &&
+    playersInRoom.length === 2 &&
+    readyPlayerIds.length < 2;
 
   const updateTuning = <K extends keyof TuningState>(
     key: K,
@@ -1686,6 +1724,10 @@ export function HelloMarble() {
   };
 
   const toggleReady = async () => {
+    if (gameMode !== "multiplayer") {
+      setNetError("Switch to Multiplayer mode to use READY.");
+      return;
+    }
     if (!roomCode || !localPlayerId) {
       setNetError("Join a room before setting READY.");
       return;
@@ -1695,6 +1737,26 @@ export function HelloMarble() {
       await enableTiltRef.current();
     }
     raceClientRef.current?.sendReady(!localReady);
+  };
+
+  const switchGameMode = (nextMode: GameMode) => {
+    if (nextMode === gameMode) {
+      return;
+    }
+    setGameMode(nextMode);
+    setCountdownStartAtMs(null);
+    setCountdownToken(null);
+    setReadyPlayerIds([]);
+    setLocalReady(false);
+    countdownIndexRef.current = -1;
+    countdownGoHandledRef.current = false;
+    if (nextMode === "solo") {
+      setRacePhase("racing");
+      setControlsLocked(false);
+      return;
+    }
+    setRacePhase("waiting");
+    setControlsLocked(true);
   };
 
   const resolvedWsUrl = resolveDefaultWsUrl();
@@ -1734,12 +1796,32 @@ export function HelloMarble() {
       <div className="raceOverlay">
         <div className="raceOverlayCard">
           <p className="raceOverlayTitle">Race Lobby</p>
+          <div className="modeSwitch" role="group" aria-label="Game mode">
+            <button
+              type="button"
+              className={`modeButton ${gameMode === "solo" ? "active" : ""}`}
+              onClick={() => switchGameMode("solo")}
+            >
+              Solo
+            </button>
+            <button
+              type="button"
+              className={`modeButton ${gameMode === "multiplayer" ? "active" : ""}`}
+              onClick={() => switchGameMode("multiplayer")}
+            >
+              Multiplayer
+            </button>
+          </div>
           <p>
-            {roomCode ? `Room ${roomCode}` : "Create or join a room from Network tab"}
+            {gameMode === "solo"
+              ? "Solo run active."
+              : roomCode
+                ? `Room ${roomCode}`
+                : "Create or join a room from Network tab"}
           </p>
-          <p>Status: {netStatus}</p>
-          <p>Players: {playersInRoom.length}/2</p>
-          {playersInRoom.length > 0 ? (
+          <p>Status: {gameMode === "solo" ? "solo-local" : netStatus}</p>
+          {gameMode === "multiplayer" ? <p>Players: {playersInRoom.length}/2</p> : null}
+          {gameMode === "multiplayer" && playersInRoom.length > 0 ? (
             <div className="racePlayers">
               {playersInRoom.map((player) => {
                 const isReady = readyPlayerIds.includes(player.playerId);
@@ -1753,25 +1835,32 @@ export function HelloMarble() {
               })}
             </div>
           ) : null}
-          {racePhase === "countdown" ? <p className="raceHint">Countdown started...</p> : null}
+          {gameMode === "multiplayer" && racePhase === "countdown" ? (
+            <p className="raceHint">Countdown started...</p>
+          ) : null}
           {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
           {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
+          {gameMode === "solo" ? (
+            <p className="raceHint">Solo mode skips room ready checks and starts immediately.</p>
+          ) : null}
           {!tiltStatus.supported ? (
             <p className="raceHint">Tilt unavailable on this device. Fallback controls enabled.</p>
           ) : null}
-          <button
-            type="button"
-            className={`readyButton ${localReady ? "ready" : ""}`}
-            onClick={() => void toggleReady()}
-            disabled={
-              netStatus !== "connected" ||
-              !roomCode ||
-              !localPlayerId ||
-              racePhase === "countdown"
-            }
-          >
-            {localReady ? "UNREADY" : "READY"}
-          </button>
+          {gameMode === "multiplayer" ? (
+            <button
+              type="button"
+              className={`readyButton ${localReady ? "ready" : ""}`}
+              onClick={() => void toggleReady()}
+              disabled={
+                netStatus !== "connected" ||
+                !roomCode ||
+                !localPlayerId ||
+                racePhase === "countdown"
+              }
+            >
+              {localReady ? "UNREADY" : "READY"}
+            </button>
+          ) : null}
         </div>
       </div>
       {countdownToken ? (

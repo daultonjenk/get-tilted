@@ -66,6 +66,30 @@ textarea {
   text-transform: uppercase;
 }
 
+.modeSwitch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.modeButton {
+  border: 1px solid #8aa8c7;
+  border-radius: 0.45rem;
+  min-height: 40px;
+  background: linear-gradient(145deg, #1f3043, #112033);
+  color: #d9ecff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.modeButton.active {
+  border-color: #8fffad;
+  background: linear-gradient(145deg, #1f9f4d, #0d6631);
+  color: #effff4;
+}
+
 .racePlayers {
   display: flex;
   flex-direction: column;

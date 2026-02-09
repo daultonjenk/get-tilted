@@ -75,6 +75,11 @@ Current v0.5.1 flow:
 5. Once both are ready, a synced `3 / 2 / 1 / GO!` countdown starts and controls unlock at `GO!`.
 6. Both players can see a real-time ghost marble representation of the opponent.
 
+Solo mode notes:
+
+1. App now defaults to `Solo` mode and starts playable immediately.
+2. Use the race overlay mode switch (`Solo` / `Multiplayer`) to opt into rooms and ready flow.
+
 Ghost smoothing notes:
 
 1. Ghost updates remain at ~15 Hz for free-tier bandwidth safety.
