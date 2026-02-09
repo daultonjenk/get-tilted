@@ -45,10 +45,10 @@ const FINISH_WIDTH = 8;
 
 const SEGMENTS: SegmentDef[] = [
   { length: 9, slopeDeg: 0, yawDeg: 0 },
-  { length: 10, slopeDeg: 0, yawDeg: 8 },
-  { length: 8, slopeDeg: 0, yawDeg: -10, landingLength: 3 },
-  { length: 10, slopeDeg: 0, yawDeg: 10 },
-  { length: 9, slopeDeg: 0, yawDeg: -8 },
+  { length: 10, slopeDeg: 0, yawDeg: 0 },
+  { length: 8, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
+  { length: 10, slopeDeg: 0, yawDeg: 0 },
+  { length: 9, slopeDeg: 0, yawDeg: 0 },
   { length: 8, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
 ];
 
@@ -56,9 +56,8 @@ function degToRad(value: number): number {
   return (value * Math.PI) / 180;
 }
 
-function createPart(spec: PartSpec): { mesh: THREE.Mesh; body: CANNON.Body } {
+function addVisualPart(group: THREE.Group, spec: PartSpec): void {
   const { size, position, rotation, material } = spec;
-
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
     material,
@@ -67,26 +66,34 @@ function createPart(spec: PartSpec): { mesh: THREE.Mesh; body: CANNON.Body } {
   mesh.rotation.set(rotation.x, rotation.y, rotation.z);
   mesh.castShadow = false;
   mesh.receiveShadow = true;
+  group.add(mesh);
+}
 
-  const body = new CANNON.Body({
-    mass: 0,
-    shape: new CANNON.Box(
-      new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2),
-    ),
-    position: new CANNON.Vec3(position.x, position.y, position.z),
-  });
-  body.quaternion.setFromEuler(rotation.x, rotation.y, rotation.z, "XYZ");
+function addCompoundPart(boardBody: CANNON.Body, spec: PartSpec): void {
+  const shape = new CANNON.Box(
+    new CANNON.Vec3(spec.size.x / 2, spec.size.y / 2, spec.size.z / 2),
+  );
+  const offset = new CANNON.Vec3(spec.position.x, spec.position.y, spec.position.z);
+  const orientation = new CANNON.Quaternion();
+  orientation.setFromEuler(spec.rotation.x, spec.rotation.y, spec.rotation.z, "XYZ");
+  boardBody.addShape(shape, offset, orientation);
+}
 
-  return { mesh, body };
+function addPart(group: THREE.Group, boardBody: CANNON.Body, spec: PartSpec): void {
+  addVisualPart(group, spec);
+  addCompoundPart(boardBody, spec);
 }
 
 export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
-  // Accepted for v0.8 seeded generation; ignored in v0.2.x fixed authored track.
+  // Accepted for v0.8 seeded generation; ignored in v0.3.x fixed authored track.
   void opts?.seed;
 
   const group = new THREE.Group();
   group.name = "track";
-  const bodies: CANNON.Body[] = [];
+
+  const boardBody = new CANNON.Body({ mass: 0 });
+  boardBody.position.set(0, 0, 0);
+  boardBody.quaternion.set(0, 0, 0, 1);
 
   const floorMaterial = new THREE.MeshStandardMaterial({ color: FLOOR_COLOR });
   const railMaterial = new THREE.MeshStandardMaterial({ color: RAIL_COLOR });
@@ -131,14 +138,12 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       .multiplyScalar(0.5);
     const floorCenter = topCenter.clone().addScaledVector(up, -FLOOR_THICK / 2);
 
-    const floor = createPart({
+    addPart(group, boardBody, {
       size: new THREE.Vector3(width, FLOOR_THICK, length),
       position: floorCenter,
       rotation,
       material: floorMaterial,
     });
-    group.add(floor.mesh);
-    bodies.push(floor.body);
 
     lowestFloorY = Math.min(lowestFloorY, floorCenter.y);
 
@@ -151,14 +156,12 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
         .addScaledVector(right, sideOffset * direction)
         .addScaledVector(up, verticalOffset);
 
-      const rail = createPart({
+      addPart(group, boardBody, {
         size: new THREE.Vector3(RAIL_THICK, RAIL_H, length),
         position: railCenter,
         rotation,
         material: railMaterial,
       });
-      group.add(rail.mesh);
-      bodies.push(rail.body);
     };
 
     if (railLeft) addRail(-1);
@@ -208,6 +211,9 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     railRight: true,
   });
 
+  boardBody.aabbNeedsUpdate = true;
+  boardBody.updateAABB();
+
   const spawn = startTopBackPoint
     .clone()
     .addScaledVector(startForward, 1.8)
@@ -215,7 +221,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
   return {
     group,
-    bodies,
+    bodies: [boardBody],
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
   };

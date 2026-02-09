@@ -28,12 +28,11 @@ const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
 const BASE_G = 9.82;
 const MAX_TILT_DEG = 15;
-const FOLLOW_DIST = 8;
-const CAM_HEIGHT = 4.5;
-const LOOK_HEIGHT = 0.8;
-const VEL_EPS = 0.25;
-const MAX_VISUAL_TILT_DEG = 11;
-const VISUAL_TILT_SMOOTH = 10;
+const FOLLOW_DIST = 10;
+const CAM_HEIGHT = 7.5;
+const LOOK_HEIGHT = 1.2;
+const LOOK_AHEAD = 16;
+const BOARD_TILT_SMOOTH = 10;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -51,7 +50,9 @@ export function HelloMarble() {
     supported: isTiltSupported(),
     permission: "unknown",
   });
-  const [statusMessage, setStatusMessage] = useState("Tilt disabled. Using fallback controls.");
+  const [statusMessage, setStatusMessage] = useState(
+    "Tilt disabled. Using fallback controls.",
+  );
   const [touchTilt, setTouchTilt] = useState({ x: 0, z: 0 });
   const [debug, setDebug] = useState<MarbleDebug>({
     fps: 0,
@@ -85,9 +86,9 @@ export function HelloMarble() {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b1320);
 
-    const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 100);
-    camera.position.set(0, 6, 10);
-    camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 200);
+    camera.position.set(0, CAM_HEIGHT, 0);
+    camera.lookAt(0, LOOK_HEIGHT, LOOK_AHEAD);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -103,19 +104,33 @@ export function HelloMarble() {
     const track = createTrack();
     scene.add(track.group);
 
+    const boardBody = track.bodies[0];
+    if (!boardBody) {
+      throw new Error("Track did not provide board physics body");
+    }
+
     const world = new CANNON.World();
     world.gravity.set(0, -BASE_G, 0);
-    for (const body of track.bodies) {
-      world.addBody(body);
-    }
+    world.addBody(boardBody);
+
+    const boardMat = new CANNON.Material("board");
+    const marbleMat = new CANNON.Material("marble");
+    boardBody.material = boardMat;
+
+    const contactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
+      friction: 0.75,
+      restitution: 0.0,
+    });
+    world.addContactMaterial(contactMat);
 
     const marbleRadius = 0.5;
     const marbleBody = new CANNON.Body({
       mass: 1,
       shape: new CANNON.Sphere(marbleRadius),
       position: track.spawn.clone(),
-      linearDamping: 0.2,
-      angularDamping: 0.2,
+      linearDamping: 0.22,
+      angularDamping: 0.22,
+      material: marbleMat,
     });
     world.addBody(marbleBody);
 
@@ -128,8 +143,6 @@ export function HelloMarble() {
     const pressedKeys = new Set<string>();
     const cameraTarget = new THREE.Vector3();
     const lookTarget = new THREE.Vector3();
-    const velXZ = new THREE.Vector2();
-    const lastForwardXZ = new THREE.Vector2(0, 1);
     const visualTiltTargetEuler = new THREE.Euler(0, 0, 0, "XYZ");
     const visualTiltTargetQuat = new THREE.Quaternion();
 
@@ -139,7 +152,43 @@ export function HelloMarble() {
     let stopTiltListener: (() => void) | null = null;
     const filter = makeTiltFilter({ tau: 0.15 });
     const maxTiltRad = (MAX_TILT_DEG * Math.PI) / 180;
-    const maxVisualTiltRad = (MAX_VISUAL_TILT_DEG * Math.PI) / 180;
+
+    const computeSpawnWorld = (): CANNON.Vec3 => {
+      const spawn = track.spawn;
+      const q = boardBody.quaternion;
+
+      const x2 = q.x + q.x;
+      const y2 = q.y + q.y;
+      const z2 = q.z + q.z;
+      const xx = q.x * x2;
+      const xy = q.x * y2;
+      const xz = q.x * z2;
+      const yy = q.y * y2;
+      const yz = q.y * z2;
+      const zz = q.z * z2;
+      const wx = q.w * x2;
+      const wy = q.w * y2;
+      const wz = q.w * z2;
+
+      const rx =
+        (1 - (yy + zz)) * spawn.x +
+        (xy - wz) * spawn.y +
+        (xz + wy) * spawn.z;
+      const ry =
+        (xy + wz) * spawn.x +
+        (1 - (xx + zz)) * spawn.y +
+        (yz - wx) * spawn.z;
+      const rz =
+        (xz - wy) * spawn.x +
+        (yz + wx) * spawn.y +
+        (1 - (xx + yy)) * spawn.z;
+
+      return new CANNON.Vec3(
+        boardBody.position.x + rx,
+        boardBody.position.y + ry,
+        boardBody.position.z + rz,
+      );
+    };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -169,7 +218,7 @@ export function HelloMarble() {
     window.addEventListener("keyup", handleKeyUp);
 
     const respawnMarble = (incrementCounter: boolean) => {
-      marbleBody.position.copy(track.spawn);
+      marbleBody.position.copy(computeSpawnWorld());
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
@@ -292,19 +341,23 @@ export function HelloMarble() {
 
       const filteredIntent = filter.push(targetIntent, delta);
 
-      const gx = BASE_G * filteredIntent.x * Math.sin(maxTiltRad);
-      const gz = BASE_G * filteredIntent.z * Math.sin(maxTiltRad);
-      const gy = -Math.sqrt(Math.max(BASE_G * BASE_G - gx * gx - gz * gz, 0.1));
-      world.gravity.set(gx, gy, gz);
-
       visualTiltTargetEuler.set(
-        filteredIntent.z * maxVisualTiltRad,
+        filteredIntent.z * maxTiltRad,
         0,
-        -filteredIntent.x * maxVisualTiltRad,
+        -filteredIntent.x * maxTiltRad,
       );
       visualTiltTargetQuat.setFromEuler(visualTiltTargetEuler);
-      const visualTiltAlpha = 1 - Math.exp(-VISUAL_TILT_SMOOTH * delta);
-      track.group.quaternion.slerp(visualTiltTargetQuat, visualTiltAlpha);
+      const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * delta);
+      track.group.quaternion.slerp(visualTiltTargetQuat, boardTiltAlpha);
+
+      boardBody.quaternion.set(
+        track.group.quaternion.x,
+        track.group.quaternion.y,
+        track.group.quaternion.z,
+        track.group.quaternion.w,
+      );
+      boardBody.aabbNeedsUpdate = true;
+      boardBody.updateAABB();
 
       while (accumulator >= TIMESTEP) {
         world.step(TIMESTEP);
@@ -327,24 +380,14 @@ export function HelloMarble() {
         marbleBody.quaternion.w,
       );
 
-      velXZ.set(marbleBody.velocity.x, marbleBody.velocity.z);
-      if (velXZ.length() > VEL_EPS) {
-        velXZ.normalize();
-        lastForwardXZ.copy(velXZ);
-      }
-
-      cameraTarget.set(
-        marbleBody.position.x - lastForwardXZ.x * FOLLOW_DIST,
-        marbleBody.position.y + CAM_HEIGHT,
-        marbleBody.position.z - lastForwardXZ.y * FOLLOW_DIST,
-      );
+      const desiredCamZ = marbleBody.position.z - FOLLOW_DIST;
       const cameraAlpha = 1 - Math.exp(-8 * delta);
+      cameraTarget.set(0, CAM_HEIGHT, desiredCamZ);
       camera.position.lerp(cameraTarget, cameraAlpha);
-      lookTarget.set(
-        marbleBody.position.x,
-        marbleBody.position.y + LOOK_HEIGHT,
-        marbleBody.position.z,
-      );
+      camera.position.x = 0;
+      camera.position.y = CAM_HEIGHT;
+
+      lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
       camera.lookAt(lookTarget);
 
       renderer.render(scene, camera);
@@ -358,9 +401,9 @@ export function HelloMarble() {
           posZ: marbleBody.position.z,
           tiltX: filteredIntent.x,
           tiltZ: filteredIntent.z,
-          gravX: gx,
-          gravY: gy,
-          gravZ: gz,
+          gravX: world.gravity.x,
+          gravY: world.gravity.y,
+          gravZ: world.gravity.z,
         }));
         debugTimer = 0;
       }
