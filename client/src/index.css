@@ -99,6 +99,52 @@ body {
   width: 100%;
 }
 
+.tiltIndicatorWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.tiltIndicator {
+  position: relative;
+  width: 4.5rem;
+  height: 4.5rem;
+  border: 1px solid rgb(155 206 255 / 45%);
+  border-radius: 0.4rem;
+  background: rgb(10 27 47 / 80%);
+}
+
+.tiltCrosshair {
+  position: absolute;
+  background: rgb(155 206 255 / 35%);
+}
+
+.tiltCrosshairX {
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  transform: translateX(-0.5px);
+}
+
+.tiltCrosshairY {
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+
+.tiltDot {
+  position: absolute;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #eaf4ff;
+  border: 1px solid #4fc3f7;
+  transform: translate(-50%, -50%);
+}
+
 .netDebug {
   position: absolute;
   top: 0.75rem;

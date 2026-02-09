@@ -44,12 +44,12 @@ const FINISH_LENGTH = 10;
 const FINISH_WIDTH = 8;
 
 const SEGMENTS: SegmentDef[] = [
-  { length: 9, slopeDeg: 7, yawDeg: 0 },
-  { length: 10, slopeDeg: 10, yawDeg: 8 },
-  { length: 8, slopeDeg: 12, yawDeg: -10, landingLength: 3 },
-  { length: 10, slopeDeg: 9, yawDeg: 10 },
-  { length: 9, slopeDeg: 11, yawDeg: -8 },
-  { length: 8, slopeDeg: 7, yawDeg: 0, landingLength: 3 },
+  { length: 9, slopeDeg: 0, yawDeg: 0 },
+  { length: 10, slopeDeg: 0, yawDeg: 8 },
+  { length: 8, slopeDeg: 0, yawDeg: -10, landingLength: 3 },
+  { length: 10, slopeDeg: 0, yawDeg: 10 },
+  { length: 9, slopeDeg: 0, yawDeg: -8 },
+  { length: 8, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
 ];
 
 function degToRad(value: number): number {

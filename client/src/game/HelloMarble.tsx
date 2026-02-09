@@ -28,6 +28,16 @@ const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
 const BASE_G = 9.82;
 const MAX_TILT_DEG = 15;
+const FOLLOW_DIST = 8;
+const CAM_HEIGHT = 4.5;
+const LOOK_HEIGHT = 0.8;
+const VEL_EPS = 0.25;
+const MAX_VISUAL_TILT_DEG = 11;
+const VISUAL_TILT_SMOOTH = 10;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -116,10 +126,12 @@ export function HelloMarble() {
     scene.add(marbleMesh);
 
     const pressedKeys = new Set<string>();
-    const cameraOffset = new THREE.Vector3(0, 4.5, 8);
-    const lookOffset = new THREE.Vector3(0, 0.6, 0);
     const cameraTarget = new THREE.Vector3();
     const lookTarget = new THREE.Vector3();
+    const velXZ = new THREE.Vector2();
+    const lastForwardXZ = new THREE.Vector2(0, 1);
+    const visualTiltTargetEuler = new THREE.Euler(0, 0, 0, "XYZ");
+    const visualTiltTargetQuat = new THREE.Quaternion();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -127,6 +139,7 @@ export function HelloMarble() {
     let stopTiltListener: (() => void) | null = null;
     const filter = makeTiltFilter({ tau: 0.15 });
     const maxTiltRad = (MAX_TILT_DEG * Math.PI) / 180;
+    const maxVisualTiltRad = (MAX_VISUAL_TILT_DEG * Math.PI) / 180;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -284,6 +297,15 @@ export function HelloMarble() {
       const gy = -Math.sqrt(Math.max(BASE_G * BASE_G - gx * gx - gz * gz, 0.1));
       world.gravity.set(gx, gy, gz);
 
+      visualTiltTargetEuler.set(
+        filteredIntent.z * maxVisualTiltRad,
+        0,
+        -filteredIntent.x * maxVisualTiltRad,
+      );
+      visualTiltTargetQuat.setFromEuler(visualTiltTargetEuler);
+      const visualTiltAlpha = 1 - Math.exp(-VISUAL_TILT_SMOOTH * delta);
+      track.group.quaternion.slerp(visualTiltTargetQuat, visualTiltAlpha);
+
       while (accumulator >= TIMESTEP) {
         world.step(TIMESTEP);
         accumulator -= TIMESTEP;
@@ -305,17 +327,23 @@ export function HelloMarble() {
         marbleBody.quaternion.w,
       );
 
+      velXZ.set(marbleBody.velocity.x, marbleBody.velocity.z);
+      if (velXZ.length() > VEL_EPS) {
+        velXZ.normalize();
+        lastForwardXZ.copy(velXZ);
+      }
+
       cameraTarget.set(
-        marbleBody.position.x + cameraOffset.x,
-        marbleBody.position.y + cameraOffset.y,
-        marbleBody.position.z + cameraOffset.z,
+        marbleBody.position.x - lastForwardXZ.x * FOLLOW_DIST,
+        marbleBody.position.y + CAM_HEIGHT,
+        marbleBody.position.z - lastForwardXZ.y * FOLLOW_DIST,
       );
       const cameraAlpha = 1 - Math.exp(-8 * delta);
       camera.position.lerp(cameraTarget, cameraAlpha);
       lookTarget.set(
-        marbleBody.position.x + lookOffset.x,
-        marbleBody.position.y + lookOffset.y,
-        marbleBody.position.z + lookOffset.z,
+        marbleBody.position.x,
+        marbleBody.position.y + LOOK_HEIGHT,
+        marbleBody.position.z,
       );
       camera.lookAt(lookTarget);
 
@@ -388,6 +416,20 @@ export function HelloMarble() {
         <p>
           Tilt: {debug.tiltX.toFixed(2)}, {debug.tiltZ.toFixed(2)}
         </p>
+        <div className="tiltIndicatorWrap">
+          <p>Tilt Indicator</p>
+          <div className="tiltIndicator">
+            <span className="tiltCrosshair tiltCrosshairX" />
+            <span className="tiltCrosshair tiltCrosshairY" />
+            <span
+              className="tiltDot"
+              style={{
+                left: `${50 + clamp(debug.tiltX, -1, 1) * 40}%`,
+                top: `${50 + clamp(debug.tiltZ, -1, 1) * 40}%`,
+              }}
+            />
+          </div>
+        </div>
         <p>
           Gravity: {debug.gravX.toFixed(2)}, {debug.gravY.toFixed(2)}, {" "}
           {debug.gravZ.toFixed(2)}
