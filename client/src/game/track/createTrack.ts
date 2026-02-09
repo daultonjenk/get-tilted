@@ -140,7 +140,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   boardBody.quaternion.set(0, 0, 0, 1);
 
   const floorMaterial = createCheckerFloorMaterial();
-  const railMaterial = new THREE.MeshStandardMaterial({ color: RAIL_COLOR });
+  const railMaterial = new THREE.MeshStandardMaterial({
+    color: RAIL_COLOR,
+    transparent: true,
+    opacity: 0.35,
+  });
   const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
   const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
   const obstacleMaterial = new THREE.MeshStandardMaterial({ color: 0x536dfe });

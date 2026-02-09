@@ -12,7 +12,9 @@ import {
   type TiltState,
 } from "./input/tilt";
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
-import { NetDebugPanel } from "../ui/NetDebugPanel";
+import { RaceClient } from "../net/raceClient";
+import type { TypedMessage } from "@get-tilted/shared-protocol";
+import type { WSStatus } from "../net/wsClient";
 
 type MarbleDebug = {
   fps: number;
@@ -52,6 +54,7 @@ type TuningState = {
   linearDamping: number;
   angularDamping: number;
   cameraPreset: CameraPresetId;
+  bounce: number;
   contactFriction: number;
   contactRestitution: number;
   invertTiltX: boolean;
@@ -62,6 +65,12 @@ type TuningState = {
 };
 
 type TrialState = "idle" | "running" | "finished";
+
+type GhostSnapshot = {
+  t: number;
+  pos: THREE.Vector3;
+  quat: THREE.Quaternion;
+};
 
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
@@ -86,6 +95,7 @@ const DEFAULT_TUNING: TuningState = {
   linearDamping: 0.02,
   angularDamping: 0.04,
   cameraPreset: "chaseRight",
+  bounce: 0.1,
   contactFriction: 0.99,
   contactRestitution: 0.1,
   invertTiltX: false,
@@ -113,6 +123,7 @@ const PHYSICS_PRESETS: Record<
     | "gravityG"
     | "linearDamping"
     | "angularDamping"
+    | "bounce"
     | "contactFriction"
     | "contactRestitution"
     | "maxBoardAngVel"
@@ -123,6 +134,7 @@ const PHYSICS_PRESETS: Record<
     gravityG: 18,
     linearDamping: 0.08,
     angularDamping: 0.08,
+    bounce: 0.1,
     contactFriction: 0.75,
     contactRestitution: 0.1,
     maxBoardAngVel: 5,
@@ -132,6 +144,7 @@ const PHYSICS_PRESETS: Record<
     gravityG: 14,
     linearDamping: 0.18,
     angularDamping: 0.18,
+    bounce: 0.03,
     contactFriction: 0.85,
     contactRestitution: 0.03,
     maxBoardAngVel: 3.5,
@@ -141,6 +154,7 @@ const PHYSICS_PRESETS: Record<
     gravityG: 20,
     linearDamping: 0.06,
     angularDamping: 0.06,
+    bounce: 0.08,
     contactFriction: 0.7,
     contactRestitution: 0.08,
     maxBoardAngVel: 6,
@@ -198,11 +212,20 @@ function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.angularDamping === "number") {
     base.angularDamping = clamp(value.angularDamping, 0, 0.5);
   }
+  if (typeof value.bounce === "number") {
+    const nextBounce = clamp(value.bounce, 0, 0.35);
+    base.bounce = nextBounce;
+    base.contactRestitution = nextBounce;
+  }
   if (typeof value.contactFriction === "number") {
     base.contactFriction = clamp(value.contactFriction, 0.3, 1.1);
   }
   if (typeof value.contactRestitution === "number") {
-    base.contactRestitution = clamp(value.contactRestitution, 0, 0.25);
+    const nextRestitution = clamp(value.contactRestitution, 0, 0.25);
+    base.contactRestitution = nextRestitution;
+    if (typeof value.bounce !== "number") {
+      base.bounce = clamp(nextRestitution, 0, 0.35);
+    }
   }
   if (isCameraPresetId(value.cameraPreset)) {
     base.cameraPreset = value.cameraPreset;
@@ -352,10 +375,26 @@ export function HelloMarble() {
     gravY: -DEFAULT_TUNING.gravityG,
     gravZ: 0,
   });
+  const [netStatus, setNetStatus] = useState<WSStatus>("disconnected");
+  const [netError, setNetError] = useState<string | null>(null);
+  const [roomCode, setRoomCode] = useState("");
+  const [joinRoomCode, setJoinRoomCode] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    const room = new URLSearchParams(window.location.search).get("room");
+    return room ? room.toUpperCase() : "";
+  });
+  const [localPlayerId, setLocalPlayerId] = useState("");
+  const [playersInRoom, setPlayersInRoom] = useState<Array<{ playerId: string; name?: string }>>(
+    [],
+  );
+  const [showQr, setShowQr] = useState(false);
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
   const tuningRef = useRef(tuning);
+  const raceClientRef = useRef<RaceClient | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -474,6 +513,15 @@ export function HelloMarble() {
       new THREE.MeshStandardMaterial({ color: 0x4fc3f7 }),
     );
     scene.add(marbleMesh);
+    const ghostMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff9e80,
+      transparent: true,
+      opacity: 0.6,
+    });
+    const ghostMeshes = new Map<string, THREE.Mesh>();
+    const ghostBuffers = new Map<string, GhostSnapshot[]>();
+    const interpolationDelayMs = 120;
+    let lastRaceSendAt = 0;
 
     const pressedKeys = new Set<string>();
     const cameraTarget = new THREE.Vector3();
@@ -498,6 +546,75 @@ export function HelloMarble() {
     let currentRoll = 0;
     let trialStartAt: number | null = null;
     let prevMarbleZ = marbleBody.position.z;
+
+    const raceClient = new RaceClient();
+    raceClientRef.current = raceClient;
+    raceClient.onStatusChange(setNetStatus);
+    raceClient.onError((error) => {
+      setNetError(error);
+    });
+    raceClient.onMessage((message: TypedMessage) => {
+      switch (message.type) {
+        case "room:created":
+          setRoomCode(message.payload.roomCode);
+          setJoinRoomCode(message.payload.roomCode);
+          setShowQr(true);
+          setNetError(null);
+          return;
+        case "room:state":
+          setRoomCode(message.payload.roomCode);
+          setNetError(null);
+          return;
+        case "race:hello:ack":
+          setLocalPlayerId(message.payload.playerId);
+          setPlayersInRoom(message.payload.players);
+          setRoomCode(message.payload.roomCode);
+          setNetError(null);
+          return;
+        case "race:state": {
+          if (message.payload.playerId === raceClient.getPlayerId()) {
+            return;
+          }
+          const snapshots = ghostBuffers.get(message.payload.playerId) ?? [];
+          snapshots.push({
+            t: message.payload.t,
+            pos: new THREE.Vector3(...message.payload.pos),
+            quat: new THREE.Quaternion(...message.payload.quat),
+          });
+          while (snapshots.length > 50) {
+            snapshots.shift();
+          }
+          ghostBuffers.set(message.payload.playerId, snapshots);
+          if (!ghostMeshes.has(message.payload.playerId)) {
+            const ghostMesh = new THREE.Mesh(
+              new THREE.SphereGeometry(marbleRadius, 24, 24),
+              ghostMaterial,
+            );
+            scene.add(ghostMesh);
+            ghostMeshes.set(message.payload.playerId, ghostMesh);
+          }
+          return;
+        }
+        case "race:left": {
+          const ghostMesh = ghostMeshes.get(message.payload.playerId);
+          if (ghostMesh) {
+            scene.remove(ghostMesh);
+            ghostMesh.geometry.dispose();
+            ghostMeshes.delete(message.payload.playerId);
+          }
+          ghostBuffers.delete(message.payload.playerId);
+          setPlayersInRoom((prev) =>
+            prev.filter((entry) => entry.playerId !== message.payload.playerId),
+          );
+          return;
+        }
+        case "error":
+          setNetError(`${message.payload.code}: ${message.payload.message}`);
+          return;
+        default:
+          return;
+      }
+    });
 
     const computeSpawnWorld = (): CANNON.Vec3 => {
       const spawn = track.spawn;
@@ -682,7 +799,7 @@ export function HelloMarble() {
       marbleBody.linearDamping = currentTuning.linearDamping;
       marbleBody.angularDamping = currentTuning.angularDamping;
       contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
-      contactMat.restitution = clamp(currentTuning.contactRestitution, 0, 0.2);
+      contactMat.restitution = clamp(currentTuning.bounce, 0, 0.2);
 
       if (Math.abs(currentTuning.tiltFilterTau - lastFilterTau) > 0.0001) {
         lastFilterTau = currentTuning.tiltFilterTau;
@@ -769,6 +886,21 @@ export function HelloMarble() {
         marbleBody.velocity.scale(scale, marbleBody.velocity);
       }
 
+      if (nowMs - lastRaceSendAt >= 1000 / 15) {
+        raceClient.sendRaceState({
+          t: nowMs,
+          pos: [marbleBody.position.x, marbleBody.position.y, marbleBody.position.z],
+          quat: [
+            marbleBody.quaternion.x,
+            marbleBody.quaternion.y,
+            marbleBody.quaternion.z,
+            marbleBody.quaternion.w,
+          ],
+          vel: [marbleBody.velocity.x, marbleBody.velocity.y, marbleBody.velocity.z],
+        });
+        lastRaceSendAt = nowMs;
+      }
+
       if (marbleBody.position.y < track.respawnY) {
         respawnMarble(true);
       }
@@ -803,6 +935,28 @@ export function HelloMarble() {
         marbleBody.quaternion.z,
         marbleBody.quaternion.w,
       );
+
+      const targetInterpTime = nowMs - interpolationDelayMs;
+      for (const [playerId, snapshots] of ghostBuffers) {
+        const mesh = ghostMeshes.get(playerId);
+        if (!mesh || snapshots.length === 0) {
+          continue;
+        }
+        while (snapshots.length >= 2 && snapshots[1]!.t <= targetInterpTime) {
+          snapshots.shift();
+        }
+        if (snapshots.length === 1) {
+          mesh.position.copy(snapshots[0]!.pos);
+          mesh.quaternion.copy(snapshots[0]!.quat);
+          continue;
+        }
+        const a = snapshots[0]!;
+        const b = snapshots[1]!;
+        const span = Math.max(b.t - a.t, 1);
+        const alpha = clamp((targetInterpTime - a.t) / span, 0, 1);
+        mesh.position.copy(a.pos).lerp(b.pos, alpha);
+        mesh.quaternion.copy(a.quat).slerp(b.quat, alpha);
+      }
 
       const cameraAlpha = 1 - Math.exp(-8 * delta);
       const sideSign = currentTuning.invertCameraSide ? -1 : 1;
@@ -933,6 +1087,8 @@ export function HelloMarble() {
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("resize", resize);
       stopTiltListener?.();
+      raceClient.disconnect();
+      raceClientRef.current = null;
       mount.removeChild(renderer.domElement);
       renderer.dispose();
       scene.remove(track.group);
@@ -948,6 +1104,11 @@ export function HelloMarble() {
           }
         }
       }
+      for (const ghostMesh of ghostMeshes.values()) {
+        scene.remove(ghostMesh);
+        ghostMesh.geometry.dispose();
+      }
+      ghostMaterial.dispose();
       for (const body of track.bodies) {
         world.removeBody(body);
       }
@@ -964,7 +1125,23 @@ export function HelloMarble() {
     key: K,
     value: TuningState[K],
   ) => {
-    setTuning((prev) => ({ ...prev, [key]: value }));
+    setTuning((prev) => {
+      if (key === "bounce") {
+        return {
+          ...prev,
+          bounce: value as TuningState["bounce"],
+          contactRestitution: value as TuningState["bounce"],
+        };
+      }
+      if (key === "contactRestitution") {
+        return {
+          ...prev,
+          contactRestitution: value as TuningState["contactRestitution"],
+          bounce: clamp(value as number, 0, 0.35),
+        };
+      }
+      return { ...prev, [key]: value };
+    });
   };
 
   const applyPhysicsPreset = (preset: PhysicsPresetId) => {
@@ -973,6 +1150,7 @@ export function HelloMarble() {
       ...prev,
       physicsPreset: preset,
       ...values,
+      contactRestitution: values.bounce,
     }));
   };
 
@@ -999,6 +1177,45 @@ export function HelloMarble() {
       setImportError("Invalid JSON. Check syntax and try again.");
     }
   };
+
+  const connectMultiplayer = () => {
+    raceClientRef.current?.connect();
+  };
+
+  const disconnectMultiplayer = () => {
+    raceClientRef.current?.disconnect();
+  };
+
+  const createRoom = () => {
+    setNetError(null);
+    raceClientRef.current?.createRoom();
+  };
+
+  const joinRoom = () => {
+    const code = joinRoomCode.trim().toUpperCase();
+    if (!code) {
+      setNetError("Join room code is empty.");
+      return;
+    }
+    setNetError(null);
+    raceClientRef.current?.joinRoom(code);
+  };
+
+  const sendRaceHello = () => {
+    if (!roomCode) {
+      setNetError("No room available for hello.");
+      return;
+    }
+    raceClientRef.current?.sendHello(undefined, roomCode);
+  };
+
+  const joinUrl =
+    typeof window !== "undefined" && roomCode
+      ? `${window.location.origin}${window.location.pathname}?room=${roomCode}`
+      : "";
+  const qrImageUrl = joinUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(joinUrl)}`
+    : "";
 
   return (
     <div className="appShell">
@@ -1167,24 +1384,24 @@ export function HelloMarble() {
               </div>
             </label>
             <label className="controlLabel">
-              Contact Restitution
+              Bounce
               <div className="controlRow">
                 <input
                   type="range"
                   min={0}
-                  max={0.25}
+                  max={0.35}
                   step={0.01}
-                  value={tuning.contactRestitution}
+                  value={tuning.bounce}
                   onChange={(event) =>
-                    updateTuning("contactRestitution", Number(event.target.value))
+                    updateTuning("bounce", Number(event.target.value))
                   }
                 />
                 <input
                   type="number"
                   step={0.01}
-                  value={tuning.contactRestitution}
+                  value={tuning.bounce}
                   onChange={(event) =>
-                    updateTuning("contactRestitution", Number(event.target.value))
+                    updateTuning("bounce", Number(event.target.value))
                   }
                 />
               </div>
@@ -1435,7 +1652,54 @@ export function HelloMarble() {
 
         {activeDebugTab === "network" ? (
           <div className="debugSection">
-            <NetDebugPanel variant="embedded" />
+            <p>Status: {netStatus}</p>
+            <p>Room: {roomCode || "n/a"}</p>
+            <p>Player ID: {localPlayerId || "n/a"}</p>
+            <p>Players: {playersInRoom.length}</p>
+            {netError ? <p className="errorText">{netError}</p> : null}
+            <div className="debugButtonRow">
+              <button type="button" onClick={connectMultiplayer}>
+                Connect
+              </button>
+              <button type="button" onClick={disconnectMultiplayer}>
+                Disconnect
+              </button>
+            </div>
+            <div className="debugButtonRow">
+              <button type="button" onClick={createRoom}>
+                Create Room
+              </button>
+              <button type="button" onClick={sendRaceHello}>
+                Race Hello
+              </button>
+            </div>
+            <label className="controlLabel" htmlFor="joinRoomCode">
+              Join Room
+            </label>
+            <div className="controlRow">
+              <input
+                id="joinRoomCode"
+                value={joinRoomCode}
+                onChange={(event) => setJoinRoomCode(event.target.value.toUpperCase())}
+                placeholder="ROOMCODE"
+              />
+              <button type="button" onClick={joinRoom}>
+                Join
+              </button>
+            </div>
+            <label className="controlCheck">
+              <input
+                type="checkbox"
+                checked={showQr}
+                onChange={(event) => setShowQr(event.target.checked)}
+                disabled={!roomCode}
+              />
+              Show QR
+            </label>
+            {joinUrl ? <p className="joinUrl">{joinUrl}</p> : null}
+            {showQr && qrImageUrl ? (
+              <img className="qrPreview" src={qrImageUrl} alt="Join room QR code" />
+            ) : null}
           </div>
         ) : null}
 
