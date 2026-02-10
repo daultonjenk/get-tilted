@@ -146,7 +146,6 @@ const INTERP_DELAY_FALL_BLEND = 0.08;
 const EXTRAPOLATION_MAX_MS = 45;
 const SNAPSHOT_MAX_AGE_MS = 2000;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
-const LEGACY_TUNING_STORAGE_KEY = "get-tilted:v0.3.6:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
@@ -162,15 +161,15 @@ const DEFAULT_TUNING: TuningState = {
   tiltFilterTau: 0.1,
   linearDamping: 0.01,
   angularDamping: 0.01,
-  cameraPreset: "chaseLeft",
-  bounce: 0.99,
+  cameraPreset: "chaseCentered",
+  bounce: 0.25,
   contactFriction: 0,
-  contactRestitution: 0.99,
+  contactRestitution: 0.25,
   invertTiltX: false,
   invertTiltZ: false,
   invertCameraSide: false,
   enableExtraDownforce: false,
-  extraDownForce: 2.4,
+  extraDownForce: 0.7,
   renderScaleMobile: 1.2,
   debugUpdateHzMobile: 2,
 };
@@ -362,27 +361,10 @@ function loadTuning(): TuningState {
     return { ...DEFAULT_TUNING };
   }
 
-  const read = (key: string) => {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  };
-
-  const next = read(TUNING_STORAGE_KEY);
-  if (next) {
-    return sanitizeTuning(next);
-  }
-
-  const legacy = read(LEGACY_TUNING_STORAGE_KEY);
-  if (legacy) {
-    return sanitizeTuning(legacy);
-  }
-
-  return { ...DEFAULT_TUNING };
+  const defaultTuning = { ...DEFAULT_TUNING };
+  // Each fresh app launch starts from canonical defaults, regardless of prior dev tuning.
+  window.localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(defaultTuning));
+  return defaultTuning;
 }
 
 function getCameraLabel(id: CameraPresetId): string {
