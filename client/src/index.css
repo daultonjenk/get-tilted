@@ -133,6 +133,40 @@ textarea {
   cursor: not-allowed;
 }
 
+.raceResultCard {
+  border-color: rgb(155 206 255 / 45%);
+}
+
+.raceResultHeadline {
+  margin: 0.1rem 0 0.2rem;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff3bf;
+}
+
+.raceResultsTable {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.raceResultRow {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 1px solid rgb(155 206 255 / 28%);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  background: rgb(15 35 58 / 55%);
+}
+
+.raceResultRow.local {
+  border-color: rgb(151 255 127 / 45%);
+  background: rgb(24 62 43 / 55%);
+}
+
 .countdownOverlay {
   position: absolute;
   inset: 0;

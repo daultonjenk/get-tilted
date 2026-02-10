@@ -67,6 +67,20 @@ function broadcastHelloAck(roomCode: string): void {
   }
 }
 
+function broadcastRaceResult(roomCode: string): void {
+  const payload = roomStore.finalizeRaceResultWithCurrentPlayers(roomCode);
+  if (!payload) {
+    return;
+  }
+  const clients = roomStore.getClients(roomCode);
+  for (const client of clients) {
+    send(client as SendableSocket, "race:result", payload);
+  }
+  roomStore.clearReady(roomCode);
+  roomStore.clearCountdownStart(roomCode);
+  broadcastReadyState(roomCode);
+}
+
 function broadcastToOthers<TType extends keyof MessagePayloadMap>(
   roomCode: string,
   sender: WebSocket,
@@ -212,6 +226,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
           typeof roomStore.getCountdownStart(roomCode) !== "number"
         ) {
           const startAtMs = now + COUNTDOWN_PREROLL_MS;
+          roomStore.beginRace(roomCode);
           roomStore.setCountdownStart(roomCode, startAtMs);
           const clients = roomStore.getClients(roomCode);
           for (const client of clients) {
@@ -226,6 +241,30 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         broadcastReadyState(roomCode);
         return;
       }
+      case "race:finish": {
+        const roomCode = roomStore.getRoomCode(ws);
+        if (!roomCode || roomCode !== parsed.msg.payload.roomCode) {
+          return;
+        }
+        const playerId = roomStore.getPlayerId(ws);
+        if (!playerId || playerId !== parsed.msg.payload.playerId) {
+          return;
+        }
+        if (
+          !roomStore.recordFinish(
+            roomCode,
+            playerId,
+            parsed.msg.payload.elapsedMs,
+            parsed.msg.payload.finishedAtMs,
+          )
+        ) {
+          return;
+        }
+        if (roomStore.getFinishCount(roomCode) >= 2) {
+          broadcastRaceResult(roomCode);
+        }
+        return;
+      }
       default:
         send(ws as SendableSocket, "error", {
           code: "UNHANDLED_TYPE",
@@ -236,6 +275,31 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
 
   ws.on("close", (code, reasonBuffer) => {
     const reason = reasonBuffer.toString() || "no-reason";
+    const roomCodeBeforeLeave = roomStore.getRoomCode(ws);
+    const playerIdBeforeLeave = roomStore.getPlayerId(ws);
+    if (
+      roomCodeBeforeLeave &&
+      playerIdBeforeLeave &&
+      roomStore.isRaceActive(roomCodeBeforeLeave) &&
+      !roomStore.hasRaceResult(roomCodeBeforeLeave)
+    ) {
+      const shouldFinalizeFromDnf =
+        roomStore.hasFinish(roomCodeBeforeLeave, playerIdBeforeLeave) ||
+        roomStore.getFinishCount(roomCodeBeforeLeave) >= 1;
+
+      if (!roomStore.hasFinish(roomCodeBeforeLeave, playerIdBeforeLeave)) {
+        roomStore.recordFinish(
+          roomCodeBeforeLeave,
+          playerIdBeforeLeave,
+          Number.POSITIVE_INFINITY,
+          Date.now(),
+        );
+      }
+      if (shouldFinalizeFromDnf) {
+        broadcastRaceResult(roomCodeBeforeLeave);
+      }
+    }
+
     const leaveResult = roomStore.leave(ws);
     if (leaveResult.roomCode) {
       broadcastRoomState(leaveResult.roomCode);

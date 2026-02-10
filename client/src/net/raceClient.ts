@@ -168,6 +168,18 @@ export class RaceClient {
     });
   }
 
+  sendRaceFinish(elapsedMs: number, finishedAtMs: number): void {
+    if (!this.roomCode || !this.playerId) {
+      return;
+    }
+    this.ws.send("race:finish", {
+      roomCode: this.roomCode,
+      playerId: this.playerId,
+      elapsedMs,
+      finishedAtMs,
+    });
+  }
+
   getServerNowMs(): number {
     return Date.now() + this.serverClockOffsetMs;
   }

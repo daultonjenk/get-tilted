@@ -14,6 +14,22 @@ type RoomEntry = {
   name?: string;
 };
 
+type RaceFinishRecord = {
+  elapsedMs: number;
+  finishedAtMs: number;
+};
+
+type RaceResultRecord = {
+  roomCode: string;
+  winnerPlayerId?: string;
+  tie: boolean;
+  results: Array<{
+    playerId: string;
+    status: "finished" | "dnf";
+    elapsedMs?: number;
+  }>;
+};
+
 export class RoomStore {
   private readonly rooms = new Map<RoomCode, RoomEntry[]>();
 
@@ -24,6 +40,12 @@ export class RoomStore {
   private readonly readyByRoom = new Map<RoomCode, Set<PlayerId>>();
 
   private readonly countdownStartByRoom = new Map<RoomCode, number>();
+
+  private readonly raceActiveByRoom = new Map<RoomCode, boolean>();
+
+  private readonly finishesByRoom = new Map<RoomCode, Map<PlayerId, RaceFinishRecord>>();
+
+  private readonly raceResultByRoom = new Map<RoomCode, RaceResultRecord>();
 
   private nextPlayerSeq = 1;
 
@@ -82,10 +104,12 @@ export class RoomStore {
       this.rooms.delete(roomCode);
       this.readyByRoom.delete(roomCode);
       this.clearCountdownStart(roomCode);
+      this.clearRace(roomCode);
       return { size: 0, roomCode, playerId };
     }
     if (roomClients.length < 2) {
       this.clearCountdownStart(roomCode);
+      this.clearRace(roomCode);
     }
     return { size: roomClients.length, roomCode, playerId };
   }
@@ -151,5 +175,109 @@ export class RoomStore {
 
   clearCountdownStart(roomCode: string): void {
     this.countdownStartByRoom.delete(roomCode);
+  }
+
+  clearReady(roomCode: string): void {
+    this.readyByRoom.set(roomCode, new Set<PlayerId>());
+  }
+
+  beginRace(roomCode: string): void {
+    this.raceActiveByRoom.set(roomCode, true);
+    this.finishesByRoom.set(roomCode, new Map<PlayerId, RaceFinishRecord>());
+    this.raceResultByRoom.delete(roomCode);
+  }
+
+  isRaceActive(roomCode: string): boolean {
+    return this.raceActiveByRoom.get(roomCode) === true;
+  }
+
+  recordFinish(
+    roomCode: string,
+    playerId: string,
+    elapsedMs: number,
+    finishedAtMs: number,
+  ): boolean {
+    if (!this.isRaceActive(roomCode)) {
+      return false;
+    }
+    const roomClients = this.rooms.get(roomCode) ?? [];
+    if (!roomClients.some((entry) => entry.playerId === playerId)) {
+      return false;
+    }
+    const finishes = this.finishesByRoom.get(roomCode) ?? new Map<PlayerId, RaceFinishRecord>();
+    if (finishes.has(playerId)) {
+      return false;
+    }
+    finishes.set(playerId, { elapsedMs, finishedAtMs });
+    this.finishesByRoom.set(roomCode, finishes);
+    return true;
+  }
+
+  hasFinish(roomCode: string, playerId: string): boolean {
+    const finishes = this.finishesByRoom.get(roomCode);
+    return finishes?.has(playerId) ?? false;
+  }
+
+  getFinishCount(roomCode: string): number {
+    return this.finishesByRoom.get(roomCode)?.size ?? 0;
+  }
+
+  hasRaceResult(roomCode: string): boolean {
+    return this.raceResultByRoom.has(roomCode);
+  }
+
+  finalizeRaceResultWithCurrentPlayers(roomCode: string): RaceResultRecord | null {
+    const players = this.getPlayers(roomCode);
+    if (players.length === 0) {
+      return null;
+    }
+    const finishes = this.finishesByRoom.get(roomCode) ?? new Map<PlayerId, RaceFinishRecord>();
+
+    const results = players.map((player) => {
+      const finish = finishes.get(player.playerId);
+      if (finish && Number.isFinite(finish.elapsedMs)) {
+        return {
+          playerId: player.playerId,
+          status: "finished" as const,
+          elapsedMs: finish.elapsedMs,
+        };
+      }
+      return {
+        playerId: player.playerId,
+        status: "dnf" as const,
+      };
+    });
+
+    const finished = results
+      .filter((entry) => entry.status === "finished")
+      .map((entry) => ({
+        playerId: entry.playerId,
+        elapsedMs: entry.elapsedMs ?? Number.POSITIVE_INFINITY,
+      }))
+      .sort((a, b) => a.elapsedMs - b.elapsedMs);
+
+    let winnerPlayerId: string | undefined;
+    let tie = false;
+    if (finished.length >= 2 && finished[0]?.elapsedMs === finished[1]?.elapsedMs) {
+      tie = true;
+    } else if (finished.length >= 1 && Number.isFinite(finished[0]!.elapsedMs)) {
+      winnerPlayerId = finished[0]!.playerId;
+    }
+
+    const payload: RaceResultRecord = {
+      roomCode,
+      winnerPlayerId,
+      tie,
+      results,
+    };
+    this.raceResultByRoom.set(roomCode, payload);
+    this.raceActiveByRoom.set(roomCode, false);
+    return payload;
+  }
+
+  clearRace(roomCode: string): void {
+    this.raceActiveByRoom.delete(roomCode);
+    this.finishesByRoom.delete(roomCode);
+    this.raceResultByRoom.delete(roomCode);
   }
 }

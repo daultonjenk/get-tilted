@@ -18,3 +18,10 @@ v0.1.1 update:
 - Added `worker/` workspace with Cloudflare Worker + Durable Object WebSocket skeleton using shared protocol.
 - Root scripts now include `shared` and `worker` in lint/typecheck/build and add `dev:worker`.
 - Verified: `npm run lint`, `npm run typecheck`, `npm run build`, and short two-client WS smoke (`ws_smoke_ok`).
+
+v0.6 update:
+- Extended shared protocol with `race:finish` and `race:result` message contracts plus runtime validation.
+- Added server-side race lifecycle state for finish reports, server-authoritative result resolution, rematch reset, and disconnect DNF handling.
+- Added `RaceClient.sendRaceFinish(...)` and integrated one-shot finish submission from gameplay loop.
+- Added race results UI for multiplayer (winner/tie + standings + rematch READY flow) and solo (time/best + restart).
+- Updated overlay styles for result cards and standings rows with mobile-safe layout.

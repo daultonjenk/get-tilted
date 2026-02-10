@@ -18,6 +18,22 @@ export type MessagePayloadMap = {
     countdownStartAtMs?: number;
   };
   "race:countdown:start": { roomCode: string; startAtMs: number; stepMs: number };
+  "race:finish": {
+    roomCode: string;
+    playerId: string;
+    elapsedMs: number;
+    finishedAtMs: number;
+  };
+  "race:result": {
+    roomCode: string;
+    winnerPlayerId?: string;
+    tie: boolean;
+    results: Array<{
+      playerId: string;
+      status: "finished" | "dnf";
+      elapsedMs?: number;
+    }>;
+  };
   "race:state": {
     roomCode: string;
     playerId: string;
@@ -69,6 +85,8 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "race:ready",
   "race:ready:state",
   "race:countdown:start",
+  "race:finish",
+  "race:result",
   "race:state",
   "race:left",
   "error",
@@ -96,6 +114,10 @@ function isOptionalString(value: unknown): value is string | undefined {
 
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
+}
+
+function isStatus(value: unknown): value is "finished" | "dnf" {
+  return value === "finished" || value === "dnf";
 }
 
 function hasNoOwnKeys(value: Record<string, unknown>): boolean {
@@ -148,6 +170,31 @@ function isPlayerList(
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => isString(entry));
+}
+
+function isOptionalNumber(value: unknown): value is number | undefined {
+  return typeof value === "undefined" || isNumber(value);
+}
+
+function isRaceResultItem(
+  value: unknown,
+): value is { playerId: string; status: "finished" | "dnf"; elapsedMs?: number } {
+  if (!isObject(value) || !isString(value.playerId) || !isStatus(value.status)) {
+    return false;
+  }
+  if (!isOptionalNumber(value.elapsedMs)) {
+    return false;
+  }
+  if (value.status === "finished") {
+    return isNumber(value.elapsedMs);
+  }
+  return typeof value.elapsedMs === "undefined";
+}
+
+function isRaceResultArray(
+  value: unknown,
+): value is Array<{ playerId: string; status: "finished" | "dnf"; elapsedMs?: number }> {
+  return Array.isArray(value) && value.every((entry) => isRaceResultItem(entry));
 }
 
 export function isMessageType(value: string): value is MessageType {
@@ -250,6 +297,35 @@ export function validatePayload<TType extends MessageType>(
       return isNumber(payload.stepMs)
         ? { ok: true }
         : { ok: false, error: "Expected stepMs number" };
+    case "race:finish":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isString(payload.playerId)) {
+        return { ok: false, error: "Expected playerId string" };
+      }
+      if (!isNumber(payload.elapsedMs)) {
+        return { ok: false, error: "Expected elapsedMs number" };
+      }
+      return isNumber(payload.finishedAtMs)
+        ? { ok: true }
+        : { ok: false, error: "Expected finishedAtMs number" };
+    case "race:result":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      if (
+        typeof payload.winnerPlayerId !== "undefined" &&
+        !isString(payload.winnerPlayerId)
+      ) {
+        return { ok: false, error: "Expected optional winnerPlayerId string" };
+      }
+      if (!isBoolean(payload.tie)) {
+        return { ok: false, error: "Expected tie boolean" };
+      }
+      return isRaceResultArray(payload.results)
+        ? { ok: true }
+        : { ok: false, error: "Expected results array" };
     case "race:state":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };

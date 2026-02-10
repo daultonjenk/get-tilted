@@ -13,7 +13,10 @@ import {
 } from "./input/tilt";
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
 import { RaceClient } from "../net/raceClient";
-import type { TypedMessage } from "@get-tilted/shared-protocol";
+import type {
+  MessagePayloadMap,
+  TypedMessage,
+} from "@get-tilted/shared-protocol";
 import {
   resolveDefaultWsUrl,
   resolveWsUrlForHost,
@@ -129,6 +132,8 @@ type NetSmoothingDebug = {
   inputIntentX: number;
   inputIntentZ: number;
 };
+
+type RaceResultPayload = MessagePayloadMap["race:result"];
 
 const TIMESTEP = 1 / 60;
 const MAX_FRAME_DELTA = 0.1;
@@ -495,6 +500,7 @@ export function HelloMarble() {
   const [countdownStartAtMs, setCountdownStartAtMs] = useState<number | null>(null);
   const [countdownStepMs, setCountdownStepMs] = useState(1000);
   const [countdownToken, setCountdownToken] = useState<string | null>(null);
+  const [raceResult, setRaceResult] = useState<RaceResultPayload | null>(null);
   const [showQr, setShowQr] = useState(false);
   const [devJoinHost, setDevJoinHost] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -536,6 +542,7 @@ export function HelloMarble() {
   const countdownIndexRef = useRef(-1);
   const countdownGoHandledRef = useRef(false);
   const autoJoinAttemptedRef = useRef(false);
+  const hasSentFinishRef = useRef(false);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -810,6 +817,8 @@ export function HelloMarble() {
       if (status === "disconnected") {
         setReadyPlayerIds([]);
         setLocalReady(false);
+        setRaceResult(null);
+        hasSentFinishRef.current = false;
         if (
           gameModeRef.current === "multiplayer" &&
           racePhaseRef.current !== "racing"
@@ -852,6 +861,8 @@ export function HelloMarble() {
           setNetError(null);
           setReadyPlayerIds([]);
           setLocalReady(false);
+          setRaceResult(null);
+          hasSentFinishRef.current = false;
           setRacePhase("waiting");
           setControlsLocked(true);
           setCountdownStartAtMs(null);
@@ -903,6 +914,8 @@ export function HelloMarble() {
           );
           if (typeof message.payload.countdownStartAtMs === "number") {
             resetGhostSnapshots();
+            setRaceResult(null);
+            hasSentFinishRef.current = false;
             setCountdownStartAtMs(message.payload.countdownStartAtMs);
             setCountdownStepMs(1000);
             setRacePhase("countdown");
@@ -928,6 +941,8 @@ export function HelloMarble() {
             return;
           }
           resetGhostSnapshots();
+          setRaceResult(null);
+          hasSentFinishRef.current = false;
           setCountdownStartAtMs(message.payload.startAtMs);
           setCountdownStepMs(message.payload.stepMs);
           setRacePhase("countdown");
@@ -1075,6 +1090,19 @@ export function HelloMarble() {
           }
           return;
         }
+        case "race:result":
+          if (gameModeRef.current !== "multiplayer") {
+            return;
+          }
+          setRaceResult(message.payload);
+          setRacePhase("waiting");
+          setControlsLocked(true);
+          setCountdownStartAtMs(null);
+          setCountdownToken(null);
+          countdownIndexRef.current = -1;
+          countdownGoHandledRef.current = false;
+          hasSentFinishRef.current = false;
+          return;
         case "error":
           setNetError(`${message.payload.code}: ${message.payload.message}`);
           return;
@@ -1152,6 +1180,7 @@ export function HelloMarble() {
 
     const respawnMarble = (incrementCounter: boolean) => {
       isRaceFinishedLocal = false;
+      hasSentFinishRef.current = false;
       marbleBody.type = CANNON.Body.DYNAMIC;
       marbleBody.mass = 1;
       marbleBody.updateMassProperties();
@@ -1549,6 +1578,10 @@ export function HelloMarble() {
           marbleBody.updateMassProperties();
           marbleBody.velocity.set(0, 0, 0);
           marbleBody.angularVelocity.set(0, 0, 0);
+          if (!hasSentFinishRef.current) {
+            hasSentFinishRef.current = true;
+            raceClient.sendRaceFinish(elapsed, raceClient.getServerNowMs());
+          }
         }
         setTrialState("finished");
         setTrialCurrentMs(null);
@@ -1914,6 +1947,12 @@ export function HelloMarble() {
 
   const showTouchFallback =
     !tiltStatus.supported || tiltStatus.permission === "denied";
+  const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
+  const showSoloResult = gameMode === "solo" && trialState === "finished";
+  const showRaceLobby =
+    !showMultiplayerResult &&
+    !showSoloResult &&
+    !(gameMode === "multiplayer" && racePhase === "racing" && trialState !== "finished");
   const multiplayerRaceInProgress =
     gameMode === "multiplayer" &&
     racePhase === "racing" &&
@@ -1923,6 +1962,30 @@ export function HelloMarble() {
     gameMode === "multiplayer" &&
     playersInRoom.length === 2 &&
     readyPlayerIds.length < 2;
+
+  const getPlayerLabel = (playerId: string): string => {
+    if (playerId === localPlayerId) {
+      return "You";
+    }
+    const player = playersInRoom.find((entry) => entry.playerId === playerId);
+    return player?.name || player?.playerId || playerId;
+  };
+
+  const getResultHeadline = (): string => {
+    if (!raceResult || gameMode !== "multiplayer") {
+      return "Race Results";
+    }
+    if (raceResult.tie) {
+      return "Tie";
+    }
+    if (raceResult.winnerPlayerId === localPlayerId) {
+      return "You Win";
+    }
+    if (raceResult.winnerPlayerId) {
+      return `${getPlayerLabel(raceResult.winnerPlayerId)} Wins`;
+    }
+    return "Race Results";
+  };
 
   const updateTuning = <K extends keyof TuningState>(
     key: K,
@@ -1991,6 +2054,7 @@ export function HelloMarble() {
 
   const createRoom = () => {
     setNetError(null);
+    setRaceResult(null);
     raceClientRef.current?.createRoom();
   };
 
@@ -2001,6 +2065,7 @@ export function HelloMarble() {
       return;
     }
     setNetError(null);
+    setRaceResult(null);
     raceClientRef.current?.joinRoom(code);
   };
 
@@ -2024,6 +2089,17 @@ export function HelloMarble() {
     raceClientRef.current?.sendReady(!localReady);
   };
 
+  const restartSoloRace = () => {
+    setRaceResult(null);
+    setCountdownToken(null);
+    setCountdownStartAtMs(null);
+    setTrialState("idle");
+    setTrialCurrentMs(null);
+    setRacePhase("racing");
+    setControlsLocked(false);
+    resetRef.current();
+  };
+
   const switchGameMode = (nextMode: GameMode) => {
     if (nextMode === gameMode) {
       return;
@@ -2033,6 +2109,8 @@ export function HelloMarble() {
     setCountdownToken(null);
     setReadyPlayerIds([]);
     setLocalReady(false);
+    setRaceResult(null);
+    hasSentFinishRef.current = false;
     countdownIndexRef.current = -1;
     countdownGoHandledRef.current = false;
     if (nextMode === "solo") {
@@ -2078,7 +2156,7 @@ export function HelloMarble() {
   return (
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
-      {!multiplayerRaceInProgress ? (
+      {showRaceLobby ? (
         <div className="raceOverlay">
           <div className="raceOverlayCard">
             <p className="raceOverlayTitle">Race Lobby</p>
@@ -2149,6 +2227,59 @@ export function HelloMarble() {
                 {localReady ? "UNREADY" : "READY"}
               </button>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+      {showMultiplayerResult ? (
+        <div className="raceOverlay">
+          <div className="raceOverlayCard raceResultCard">
+            <p className="raceOverlayTitle">Race Results</p>
+            <p className="raceResultHeadline">{getResultHeadline()}</p>
+            <div className="raceResultsTable">
+              {raceResult.results.map((entry) => {
+                const isLocal = entry.playerId === localPlayerId;
+                return (
+                  <p
+                    key={entry.playerId}
+                    className={`raceResultRow ${isLocal ? "local" : ""}`}
+                  >
+                    <span>{getPlayerLabel(entry.playerId)}</span>
+                    <span>
+                      {entry.status === "finished" && typeof entry.elapsedMs === "number"
+                        ? formatTimeMs(entry.elapsedMs)
+                        : "DNF"}
+                    </span>
+                  </p>
+                );
+              })}
+            </div>
+            <p className="raceHint">Both players press READY to start rematch.</p>
+            <button
+              type="button"
+              className={`readyButton ${localReady ? "ready" : ""}`}
+              onClick={() => void toggleReady()}
+              disabled={
+                netStatus !== "connected" ||
+                !roomCode ||
+                !localPlayerId ||
+                racePhase !== "waiting"
+              }
+            >
+              {localReady ? "UNREADY REMATCH" : "READY FOR REMATCH"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {showSoloResult ? (
+        <div className="raceOverlay">
+          <div className="raceOverlayCard raceResultCard">
+            <p className="raceOverlayTitle">Race Results</p>
+            <p className="raceResultHeadline">Solo Finished</p>
+            <p>Time: {formatTimeMs(trialLastMs)}</p>
+            <p>Best: {formatTimeMs(trialBestMs)}</p>
+            <button type="button" className="readyButton ready" onClick={restartSoloRace}>
+              RESTART RACE
+            </button>
           </div>
         </div>
       ) : null}
