@@ -76,7 +76,7 @@ type TuningState = {
 
 type TrialState = "idle" | "running" | "finished";
 type RacePhase = "waiting" | "countdown" | "racing";
-type GameMode = "solo" | "multiplayer";
+type GameMode = "unselected" | "solo" | "multiplayer";
 
 type GhostSnapshot = {
   seq?: number;
@@ -483,7 +483,7 @@ export function HelloMarble() {
     const room = new URLSearchParams(window.location.search).get("room");
     return room ? room.toUpperCase() : "";
   });
-  const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "solo";
+  const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "unselected";
   const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
   const [roomCode, setRoomCode] = useState("");
   const [joinRoomCode, setJoinRoomCode] = useState(autoJoinRoomCode);
@@ -493,10 +493,8 @@ export function HelloMarble() {
   );
   const [readyPlayerIds, setReadyPlayerIds] = useState<string[]>([]);
   const [localReady, setLocalReady] = useState(false);
-  const [racePhase, setRacePhase] = useState<RacePhase>(
-    initialGameMode === "solo" ? "racing" : "waiting",
-  );
-  const [controlsLocked, setControlsLocked] = useState(initialGameMode !== "solo");
+  const [racePhase, setRacePhase] = useState<RacePhase>("waiting");
+  const [controlsLocked, setControlsLocked] = useState(true);
   const [countdownStartAtMs, setCountdownStartAtMs] = useState<number | null>(null);
   const [countdownStepMs, setCountdownStepMs] = useState(1000);
   const [countdownToken, setCountdownToken] = useState<string | null>(null);
@@ -543,6 +541,8 @@ export function HelloMarble() {
   const countdownGoHandledRef = useRef(false);
   const autoJoinAttemptedRef = useRef(false);
   const hasSentFinishRef = useRef(false);
+  const freezeMarbleRef = useRef<() => void>(() => {});
+  const unfreezeMarbleRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -1178,13 +1178,28 @@ export function HelloMarble() {
     window.addEventListener("keydown", handleKeyDown, { passive: false });
     window.addEventListener("keyup", handleKeyUp);
 
-    const respawnMarble = (incrementCounter: boolean) => {
-      isRaceFinishedLocal = false;
-      hasSentFinishRef.current = false;
+    const freezeMarble = () => {
+      marbleBody.type = CANNON.Body.STATIC;
+      marbleBody.mass = 0;
+      marbleBody.updateMassProperties();
+      marbleBody.velocity.set(0, 0, 0);
+      marbleBody.angularVelocity.set(0, 0, 0);
+    };
+
+    const unfreezeMarble = () => {
       marbleBody.type = CANNON.Body.DYNAMIC;
       marbleBody.mass = 1;
       marbleBody.updateMassProperties();
       marbleBody.wakeUp();
+    };
+
+    freezeMarbleRef.current = freezeMarble;
+    unfreezeMarbleRef.current = unfreezeMarble;
+
+    const respawnMarble = (incrementCounter: boolean) => {
+      isRaceFinishedLocal = false;
+      hasSentFinishRef.current = false;
+      unfreezeMarble();
       marbleBody.position.copy(computeSpawnWorld());
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
@@ -1198,6 +1213,10 @@ export function HelloMarble() {
       }
     };
     resetRef.current = () => respawnMarble(false);
+    respawnMarble(false);
+    if (gameModeRef.current !== "solo") {
+      freezeMarble();
+    }
 
     const getKeyboardIntent = (): TiltSample => {
       let x = 0;
@@ -1570,14 +1589,10 @@ export function HelloMarble() {
       ) {
         const elapsed = nowMs - trialStartAt;
         trialStartAt = null;
+        freezeMarble();
+        setControlsLocked(true);
         if (gameModeRef.current === "multiplayer") {
           isRaceFinishedLocal = true;
-          setControlsLocked(true);
-          marbleBody.type = CANNON.Body.STATIC;
-          marbleBody.mass = 0;
-          marbleBody.updateMassProperties();
-          marbleBody.velocity.set(0, 0, 0);
-          marbleBody.angularVelocity.set(0, 0, 0);
           if (!hasSentFinishRef.current) {
             hasSentFinishRef.current = true;
             raceClient.sendRaceFinish(elapsed, raceClient.getServerNowMs());
@@ -1947,16 +1962,19 @@ export function HelloMarble() {
 
   const showTouchFallback =
     !tiltStatus.supported || tiltStatus.permission === "denied";
+  const showModePicker = gameMode === "unselected";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
   const showSoloResult = gameMode === "solo" && trialState === "finished";
   const showRaceLobby =
+    gameMode === "multiplayer" &&
     !showMultiplayerResult &&
-    !showSoloResult &&
-    !(gameMode === "multiplayer" && racePhase === "racing" && trialState !== "finished");
+    !(racePhase === "racing" && trialState !== "finished");
   const multiplayerRaceInProgress =
     gameMode === "multiplayer" &&
     racePhase === "racing" &&
     trialState !== "finished";
+  const showMultiplayerNetworkUi =
+    gameMode === "multiplayer" && !multiplayerRaceInProgress;
   const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
   const waitingForReady =
     gameMode === "multiplayer" &&
@@ -2098,6 +2116,7 @@ export function HelloMarble() {
     setRacePhase("racing");
     setControlsLocked(false);
     resetRef.current();
+    unfreezeMarbleRef.current();
   };
 
   const switchGameMode = (nextMode: GameMode) => {
@@ -2116,10 +2135,20 @@ export function HelloMarble() {
     if (nextMode === "solo") {
       setRacePhase("racing");
       setControlsLocked(false);
+      resetRef.current();
+      unfreezeMarbleRef.current();
       return;
+    }
+    if (nextMode === "multiplayer") {
+      setDrawerOpen(true);
+      setActiveDebugTab("network");
     }
     setRacePhase("waiting");
     setControlsLocked(true);
+    setTrialState("idle");
+    setTrialCurrentMs(null);
+    resetRef.current();
+    freezeMarbleRef.current();
   };
 
   const resolvedWsUrl = resolveDefaultWsUrl();
@@ -2156,36 +2185,42 @@ export function HelloMarble() {
   return (
     <div className="appShell">
       <div className="viewport" ref={mountRef} />
+      {showModePicker ? (
+        <div className="raceOverlay">
+          <div className="raceOverlayCard">
+            <p className="raceOverlayTitle">Get Tilted</p>
+            <p>Choose a mode to begin.</p>
+            <div className="modePickerButtons">
+              <button
+                type="button"
+                className="modeButton"
+                onClick={() => switchGameMode("solo")}
+              >
+                Play Solo
+              </button>
+              <button
+                type="button"
+                className="modeButton"
+                onClick={() => switchGameMode("multiplayer")}
+              >
+                Play Multiplayer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {showRaceLobby ? (
         <div className="raceOverlay">
           <div className="raceOverlayCard">
             <p className="raceOverlayTitle">Race Lobby</p>
-            <div className="modeSwitch" role="group" aria-label="Game mode">
-              <button
-                type="button"
-                className={`modeButton ${gameMode === "solo" ? "active" : ""}`}
-                onClick={() => switchGameMode("solo")}
-              >
-                Solo
-              </button>
-              <button
-                type="button"
-                className={`modeButton ${gameMode === "multiplayer" ? "active" : ""}`}
-                onClick={() => switchGameMode("multiplayer")}
-              >
-                Multiplayer
-              </button>
-            </div>
             <p>
-              {gameMode === "solo"
-                ? "Solo run active."
-                : roomCode
-                  ? `Room ${roomCode}`
-                  : "Create or join a room from Network tab"}
+              {roomCode
+                ? `Room ${roomCode}`
+                : "Create or join a room from the Network tab"}
             </p>
-            <p>Status: {gameMode === "solo" ? "solo-local" : netStatus}</p>
-            {gameMode === "multiplayer" ? <p>Players: {playersInRoom.length}/2</p> : null}
-            {gameMode === "multiplayer" && playersInRoom.length > 0 ? (
+            <p>Status: {netStatus}</p>
+            <p>Players: {playersInRoom.length}/2</p>
+            {playersInRoom.length > 0 ? (
               <div className="racePlayers">
                 {playersInRoom.map((player) => {
                   const isReady = readyPlayerIds.includes(player.playerId);
@@ -2199,34 +2234,27 @@ export function HelloMarble() {
                 })}
               </div>
             ) : null}
-            {gameMode === "multiplayer" && racePhase === "countdown" ? (
-              <p className="raceHint">Countdown started...</p>
-            ) : null}
+            {racePhase === "countdown" ? <p className="raceHint">Countdown started...</p> : null}
             {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
             {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
-            {gameMode === "solo" ? (
-              <p className="raceHint">Solo mode skips room ready checks and starts immediately.</p>
-            ) : null}
             {!tiltStatus.supported ? (
               <p className="raceHint">
                 Tilt unavailable on this device. Fallback controls enabled.
               </p>
             ) : null}
-            {gameMode === "multiplayer" ? (
-              <button
-                type="button"
-                className={`readyButton ${localReady ? "ready" : ""}`}
-                onClick={() => void toggleReady()}
-                disabled={
-                  netStatus !== "connected" ||
-                  !roomCode ||
-                  !localPlayerId ||
-                  racePhase !== "waiting"
-                }
-              >
-                {localReady ? "UNREADY" : "READY"}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className={`readyButton ${localReady ? "ready" : ""}`}
+              onClick={() => void toggleReady()}
+              disabled={
+                netStatus !== "connected" ||
+                !roomCode ||
+                !localPlayerId ||
+                racePhase !== "waiting"
+              }
+            >
+              {localReady ? "UNREADY" : "READY"}
+            </button>
           </div>
         </div>
       ) : null}
@@ -2290,7 +2318,7 @@ export function HelloMarble() {
           </div>
         </div>
       ) : null}
-      {!multiplayerRaceInProgress ? (
+      {showMultiplayerNetworkUi || gameMode === "solo" ? (
         <DebugDrawer
           open={drawerOpen}
           onToggle={() => setDrawerOpen((open) => !open)}

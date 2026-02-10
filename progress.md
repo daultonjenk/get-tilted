@@ -25,3 +25,10 @@ v0.6 update:
 - Added `RaceClient.sendRaceFinish(...)` and integrated one-shot finish submission from gameplay loop.
 - Added race results UI for multiplayer (winner/tie + standings + rematch READY flow) and solo (time/best + restart).
 - Updated overlay styles for result cards and standings rows with mobile-safe layout.
+
+v0.6.1 update:
+- Added pre-selection start state (`unselected`) that freezes the marble until mode selection.
+- Normal launches now present a dedicated mode picker; `?room=ROOMCODE` still auto-enters multiplayer.
+- Solo finish now freezes marble at the line and shows restart CTA for quick retry.
+- Multiplayer selection now opens debug drawer directly on the `Network` tab to expose server/join options.
+- Debug drawer is hidden before mode selection and shown after choosing solo or multiplayer.

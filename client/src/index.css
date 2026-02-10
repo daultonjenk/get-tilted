@@ -73,6 +73,13 @@ textarea {
   margin-top: 0.15rem;
 }
 
+.modePickerButtons {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+
 .modeButton {
   border: 1px solid #8aa8c7;
   border-radius: 0.45rem;
