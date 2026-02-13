@@ -111,10 +111,50 @@ Dev LAN notes:
 5. If phone shows WebSocket errors, compare:
    - `Resolved WS URL (this device)` and `Expected join WS URL` in `Network` tab.
 
-## Deploy notes (Pages + Durable Objects)
+## Cloudflare Deploy (v0.7)
 
-Production deploy is planned for v0.7:
+Deploy targets:
 
-- Client deploy target: Cloudflare Pages (static `client/dist`).
-- Realtime deploy target: Cloudflare Workers + Durable Objects (raw WebSocket room server).
-- Keep room logic DO-hibernation-friendly (no unnecessary background timers).
+- Client: Cloudflare Pages project `get-tilted`
+- Realtime backend: Worker `get-tilted-backend` + Durable Objects (`RoomDO`, binding `ROOMS`)
+
+### 1) Authenticate Wrangler once
+
+```bash
+npx wrangler login
+npx wrangler whoami
+```
+
+### 2) Deploy Worker + Durable Objects
+
+```bash
+npm run deploy:worker
+```
+
+Optional logs:
+
+```bash
+npm run tail:worker
+```
+
+### 3) Configure Cloudflare Pages (`get-tilted`)
+
+Use Git integration and set:
+
+- Build command: `npm run pages:build`
+- Output directory: `client/dist`
+
+Set this environment variable in Pages project settings:
+
+- `VITE_WS_URL=wss://get-tilted-backend.<your-subdomain>.workers.dev/ws`
+
+After setting env vars, redeploy Pages.
+
+### 4) Production smoke test
+
+1. Open the Pages URL on two phones.
+2. Host creates a room and shows QR.
+3. Joiner scans QR or opens the room link.
+4. Both players press `READY`.
+5. Confirm synced countdown starts and controls unlock at `GO!`.
+6. Confirm ghost updates and race result appear for both players.

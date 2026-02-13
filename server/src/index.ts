@@ -14,7 +14,8 @@ const wss = new WebSocketServer({
 });
 
 httpServer.on("upgrade", (request, socket, head) => {
-  if (request.url !== "/ws") {
+  const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (pathname !== "/ws") {
     socket.destroy();
     return;
   }

@@ -1,5 +1,10 @@
 import type { TypedMessage } from "@get-tilted/shared-protocol";
-import { WSClient, type WSStatus } from "./wsClient";
+import {
+  WSClient,
+  resolveDefaultWsUrl,
+  resolveWsUrlForRoom,
+  type WSStatus,
+} from "./wsClient";
 
 export type RacePlayer = {
   playerId: string;
@@ -29,6 +34,8 @@ const PING_INTERVAL_MS = 2000;
 export class RaceClient {
   private readonly ws: WSClient;
 
+  private readonly baseWsUrl: string;
+
   private roomCode = "";
 
   private playerId = "";
@@ -49,8 +56,18 @@ export class RaceClient {
 
   private nextRaceStateSeq = 1;
 
+  private pendingCreateRoom = false;
+
+  private pendingJoin:
+    | {
+        roomCode: string;
+        name?: string;
+      }
+    | null = null;
+
   constructor(url?: string) {
-    this.ws = new WSClient(url);
+    this.baseWsUrl = url ?? resolveDefaultWsUrl();
+    this.ws = new WSClient(this.baseWsUrl);
     this.ws.onStatusChange((status) => {
       for (const cb of this.statusListeners) {
         cb(status);
@@ -65,6 +82,7 @@ export class RaceClient {
         this.emitClockOffset();
       } else if (status === "connected") {
         this.startPingLoop();
+        this.flushPendingActions();
       }
     });
     this.ws.onError((error) => {
@@ -76,7 +94,10 @@ export class RaceClient {
       if (message.type === "room:created") {
         this.resetRaceStateSeq();
         this.roomCode = message.payload.roomCode;
-        this.sendHello();
+        this.pendingJoin = {
+          roomCode: message.payload.roomCode,
+        };
+        this.ws.connect(this.getRoomSocketUrl(message.payload.roomCode));
       }
       if (message.type === "room:state" && !this.roomCode) {
         this.roomCode = message.payload.roomCode;
@@ -95,7 +116,15 @@ export class RaceClient {
   }
 
   connect(): void {
-    this.ws.connect();
+    if (this.pendingJoin?.roomCode) {
+      this.ws.connect(this.getRoomSocketUrl(this.pendingJoin.roomCode));
+      return;
+    }
+    if (this.roomCode) {
+      this.ws.connect(this.getRoomSocketUrl(this.roomCode));
+      return;
+    }
+    this.ws.connect(this.getLobbySocketUrl());
   }
 
   disconnect(): void {
@@ -116,15 +145,21 @@ export class RaceClient {
 
   createRoom(): void {
     this.resetRaceStateSeq();
-    this.ws.send("room:create", {});
+    this.pendingCreateRoom = true;
+    this.pendingJoin = null;
+    this.roomCode = "";
+    this.playerId = "";
+    this.ws.connect(this.getLobbySocketUrl());
+    this.flushPendingActions();
   }
 
   joinRoom(roomCode: string, name?: string): void {
     const normalized = roomCode.trim().toUpperCase();
     this.resetRaceStateSeq();
     this.roomCode = normalized;
-    this.ws.send("room:join", { roomCode: normalized, name });
-    this.sendHello(name, normalized);
+    this.pendingJoin = { roomCode: normalized, name };
+    this.ws.connect(this.getRoomSocketUrl(normalized));
+    this.flushPendingActions();
   }
 
   sendHello(name?: string, roomCode = this.roomCode): void {
@@ -233,6 +268,34 @@ export class RaceClient {
     this.ws.send("ping", { t: Date.now() });
   }
 
+  private flushPendingActions(): void {
+    if (this.ws.getStatus() !== "connected") {
+      return;
+    }
+    if (this.pendingCreateRoom) {
+      if (!this.isLobbySocketUrl(this.ws.getUrl())) {
+        this.ws.connect(this.getLobbySocketUrl());
+        return;
+      }
+      this.ws.send("room:create", {});
+      this.pendingCreateRoom = false;
+      return;
+    }
+    if (this.pendingJoin) {
+      const roomUrl = this.getRoomSocketUrl(this.pendingJoin.roomCode);
+      if (this.ws.getUrl() !== roomUrl) {
+        this.ws.connect(roomUrl);
+        return;
+      }
+      this.ws.send("room:join", {
+        roomCode: this.pendingJoin.roomCode,
+        name: this.pendingJoin.name,
+      });
+      this.sendHello(this.pendingJoin.name, this.pendingJoin.roomCode);
+      this.pendingJoin = null;
+    }
+  }
+
   private onPong(sentAtMs: number, serverNowMs: number): void {
     const receivedAtMs = Date.now();
     const rttMs = Math.max(0, receivedAtMs - sentAtMs);
@@ -263,5 +326,18 @@ export class RaceClient {
     this.nextRaceStateSeq =
       seq >= Number.MAX_SAFE_INTEGER ? 1 : this.nextRaceStateSeq + 1;
     return seq;
+  }
+
+  private getLobbySocketUrl(): string {
+    return resolveWsUrlForRoom(this.baseWsUrl);
+  }
+
+  private getRoomSocketUrl(roomCode: string): string {
+    return resolveWsUrlForRoom(this.baseWsUrl, roomCode);
+  }
+
+  private isLobbySocketUrl(urlString: string): boolean {
+    const url = new URL(urlString);
+    return !url.searchParams.get("room");
   }
 }
