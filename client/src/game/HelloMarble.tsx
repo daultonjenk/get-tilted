@@ -170,7 +170,7 @@ const DEFAULT_TUNING: TuningState = {
   bounce: 0.25,
   contactFriction: 0,
   contactRestitution: 0.25,
-  invertTiltX: false,
+  invertTiltX: true,
   invertTiltZ: false,
   invertCameraSide: false,
   enableExtraDownforce: false,
