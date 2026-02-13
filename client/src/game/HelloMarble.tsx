@@ -77,7 +77,6 @@ type TuningState = {
 type TrialState = "idle" | "running" | "finished";
 type RacePhase = "waiting" | "countdown" | "racing";
 type GameMode = "unselected" | "solo" | "multiplayer";
-type MultiplayerMenuMode = "choose" | "host" | "join";
 
 type GhostSnapshot = {
   seq?: number;
@@ -486,9 +485,6 @@ export function HelloMarble() {
   });
   const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "unselected";
   const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
-  const [multiplayerMenuMode, setMultiplayerMenuMode] = useState<MultiplayerMenuMode>(
-    autoJoinRoomCode ? "join" : "choose",
-  );
   const [roomCode, setRoomCode] = useState("");
   const [joinRoomCode, setJoinRoomCode] = useState(autoJoinRoomCode);
   const [localPlayerId, setLocalPlayerId] = useState("");
@@ -2077,6 +2073,10 @@ export function HelloMarble() {
     raceClientRef.current?.connect();
   };
 
+  const disconnectMultiplayer = () => {
+    raceClientRef.current?.disconnect();
+  };
+
   const createRoom = () => {
     setNetError(null);
     setRaceResult(null);
@@ -2148,16 +2148,6 @@ export function HelloMarble() {
     void startSoloRaceSequence();
   };
 
-  const selectMultiplayerHost = () => {
-    setMultiplayerMenuMode("host");
-    setShowQr(true);
-    createRoom();
-  };
-
-  const selectMultiplayerJoin = () => {
-    setMultiplayerMenuMode("join");
-  };
-
   const switchGameMode = (nextMode: GameMode) => {
     if (nextMode === gameMode) {
       return;
@@ -2179,12 +2169,8 @@ export function HelloMarble() {
       return;
     }
     if (nextMode === "multiplayer") {
-      setMultiplayerMenuMode("choose");
       setDrawerOpen(true);
       setActiveDebugTab("network");
-      connectMultiplayer();
-    } else {
-      setMultiplayerMenuMode("choose");
     }
     setRacePhase("waiting");
     setControlsLocked(true);
@@ -2256,126 +2242,48 @@ export function HelloMarble() {
         <div className="raceOverlay">
           <div className="raceOverlayCard">
             <p className="raceOverlayTitle">Race Lobby</p>
+            <p>
+              {roomCode
+                ? `Room ${roomCode}`
+                : "Create or join a room from the Network tab"}
+            </p>
             <p>Status: {netStatus}</p>
-            {!roomCode && multiplayerMenuMode === "choose" ? (
-              <>
-                <p>Choose how to start multiplayer.</p>
-                <div className="mpMenuButtons">
-                  <button type="button" className="modeButton" onClick={selectMultiplayerHost}>
-                    Host
-                  </button>
-                  <button type="button" className="modeButton" onClick={selectMultiplayerJoin}>
-                    Join
-                  </button>
-                </div>
-                {netStatus !== "connected" ? (
-                  <button
-                    type="button"
-                    className="readyButton"
-                    onClick={connectMultiplayer}
-                  >
-                    Retry Connection
-                  </button>
-                ) : null}
-              </>
+            <p>Players: {playersInRoom.length}/2</p>
+            {playersInRoom.length > 0 ? (
+              <div className="racePlayers">
+                {playersInRoom.map((player) => {
+                  const isReady = readyPlayerIds.includes(player.playerId);
+                  const isLocal = player.playerId === localPlayerId;
+                  return (
+                    <p key={player.playerId} className={isReady ? "ready" : "waiting"}>
+                      {isLocal ? "You" : player.name || player.playerId}:{" "}
+                      {isReady ? "READY" : "Waiting"}
+                    </p>
+                  );
+                })}
+              </div>
             ) : null}
-            {!roomCode && multiplayerMenuMode === "join" ? (
-              <>
-                <p>Enter a room code to join.</p>
-                <div className="mpJoinRow">
-                  <input
-                    id="joinRoomCodeOverlay"
-                    value={joinRoomCode}
-                    onChange={(event) => setJoinRoomCode(event.target.value.toUpperCase())}
-                    placeholder="ROOMCODE"
-                  />
-                  <button type="button" onClick={joinRoom}>
-                    Join Room
-                  </button>
-                </div>
-                <div className="mpMenuButtons">
-                  <button
-                    type="button"
-                    className="modeButton"
-                    onClick={() => setMultiplayerMenuMode("choose")}
-                  >
-                    Back
-                  </button>
-                </div>
-                {netStatus !== "connected" ? (
-                  <button
-                    type="button"
-                    className="readyButton"
-                    onClick={connectMultiplayer}
-                  >
-                    Retry Connection
-                  </button>
-                ) : null}
-              </>
-            ) : null}
-            {roomCode ? (
-              <>
-                <p>{`Room ${roomCode}`}</p>
-                <p>Players: {playersInRoom.length}/2</p>
-                {multiplayerMenuMode === "host" ? (
-                  <div className="mpInvitePanel">
-                    <button
-                      type="button"
-                      className="mpInviteToggle"
-                      onClick={() => setShowQr((show) => !show)}
-                    >
-                      {showQr ? "Hide Invite" : "Show Invite"}
-                    </button>
-                    {showQr ? (
-                      <>
-                        {joinUrl ? <p className="joinUrl">{joinUrl}</p> : null}
-                        {qrImageUrl ? (
-                          <img className="qrPreview" src={qrImageUrl} alt="Join room QR code" />
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
-                {playersInRoom.length > 0 ? (
-                  <div className="racePlayers">
-                    {playersInRoom.map((player) => {
-                      const isReady = readyPlayerIds.includes(player.playerId);
-                      const isLocal = player.playerId === localPlayerId;
-                      return (
-                        <p key={player.playerId} className={isReady ? "ready" : "waiting"}>
-                          {isLocal ? "You" : player.name || player.playerId}:{" "}
-                          {isReady ? "READY" : "Waiting"}
-                        </p>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {racePhase === "countdown" ? <p className="raceHint">Countdown started...</p> : null}
-                {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
-                {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
-              </>
-            ) : null}
-            {netError ? <p className="errorText">{netError}</p> : null}
+            {racePhase === "countdown" ? <p className="raceHint">Countdown started...</p> : null}
+            {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
+            {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
             {!tiltStatus.supported ? (
               <p className="raceHint">
                 Tilt unavailable on this device. Fallback controls enabled.
               </p>
             ) : null}
-            {roomCode ? (
-              <button
-                type="button"
-                className={`readyButton ${localReady ? "ready" : ""}`}
-                onClick={() => void toggleReady()}
-                disabled={
-                  netStatus !== "connected" ||
-                  !roomCode ||
-                  !localPlayerId ||
-                  racePhase !== "waiting"
-                }
-              >
-                {localReady ? "UNREADY" : "READY"}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className={`readyButton ${localReady ? "ready" : ""}`}
+              onClick={() => void toggleReady()}
+              disabled={
+                netStatus !== "connected" ||
+                !roomCode ||
+                !localPlayerId ||
+                racePhase !== "waiting"
+              }
+            >
+              {localReady ? "UNREADY" : "READY"}
+            </button>
           </div>
         </div>
       ) : null}
@@ -2974,6 +2882,33 @@ export function HelloMarble() {
               {netSmoothing.inputIntentZ.toFixed(2)}
             </p>
             {netError ? <p className="errorText">{netError}</p> : null}
+            <div className="debugButtonRow">
+              <button type="button" onClick={connectMultiplayer}>
+                Connect
+              </button>
+              <button type="button" onClick={disconnectMultiplayer}>
+                Disconnect
+              </button>
+            </div>
+            <div className="debugButtonRow">
+              <button type="button" onClick={createRoom}>
+                Create Room
+              </button>
+            </div>
+            <label className="controlLabel" htmlFor="joinRoomCode">
+              Join Room
+            </label>
+            <div className="controlRow">
+              <input
+                id="joinRoomCode"
+                value={joinRoomCode}
+                onChange={(event) => setJoinRoomCode(event.target.value.toUpperCase())}
+                placeholder="ROOMCODE"
+              />
+              <button type="button" onClick={joinRoom}>
+                Join
+              </button>
+            </div>
             <label className="controlLabel" htmlFor="devJoinHost">
               Dev Join Host (LAN IPv4)
             </label>
@@ -2986,6 +2921,19 @@ export function HelloMarble() {
             <p>Resolved WS URL (this device): {resolvedWsUrl}</p>
             {joinWsUrl ? <p>Expected join WS URL: {joinWsUrl}</p> : null}
             {joinHostWarning ? <p className="errorText">{joinHostWarning}</p> : null}
+            <label className="controlCheck">
+              <input
+                type="checkbox"
+                checked={showQr}
+                onChange={(event) => setShowQr(event.target.checked)}
+                disabled={!roomCode}
+              />
+              Show QR
+            </label>
+            {joinUrl ? <p className="joinUrl">{joinUrl}</p> : null}
+            {showQr && qrImageUrl ? (
+              <img className="qrPreview" src={qrImageUrl} alt="Join room QR code" />
+            ) : null}
           </div>
         ) : null}
 

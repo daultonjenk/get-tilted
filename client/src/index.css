@@ -80,50 +80,6 @@ textarea {
   margin-top: 0.35rem;
 }
 
-.mpMenuButtons {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.45rem;
-  margin-top: 0.25rem;
-}
-
-.mpJoinRow {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.45rem;
-  align-items: center;
-}
-
-.mpJoinRow input,
-.mpJoinRow button {
-  border: 1px solid #9bc6ff;
-  border-radius: 0.35rem;
-  background: #0f2c4d;
-  color: #eaf4ff;
-  min-height: 40px;
-  padding: 0.35rem 0.5rem;
-}
-
-.mpInvitePanel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  border: 1px solid rgb(155 206 255 / 30%);
-  border-radius: 0.45rem;
-  padding: 0.45rem;
-  background: rgb(8 24 42 / 65%);
-}
-
-.mpInviteToggle {
-  border: 1px solid #9bc6ff;
-  border-radius: 0.35rem;
-  background: #0f2c4d;
-  color: #eaf4ff;
-  min-height: 40px;
-  padding: 0.35rem 0.6rem;
-  cursor: pointer;
-}
-
 .modeButton {
   border: 1px solid #8aa8c7;
   border-radius: 0.45rem;
@@ -588,9 +544,5 @@ textarea {
 
   .controlRow {
     grid-template-columns: 1fr 92px;
-  }
-
-  .mpJoinRow {
-    grid-template-columns: 1fr;
   }
 }
