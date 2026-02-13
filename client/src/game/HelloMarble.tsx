@@ -541,6 +541,7 @@ export function HelloMarble() {
   const countdownGoHandledRef = useRef(false);
   const autoJoinAttemptedRef = useRef(false);
   const hasSentFinishRef = useRef(false);
+  const soloStartSequenceRef = useRef(0);
   const freezeMarbleRef = useRef<() => void>(() => {});
   const unfreezeMarbleRef = useRef<() => void>(() => {});
 
@@ -1412,6 +1413,9 @@ export function HelloMarble() {
           }
           if (!countdownGoHandledRef.current && nextIndex >= COUNTDOWN_LABELS.length - 1) {
             countdownGoHandledRef.current = true;
+            if (gameModeRef.current === "solo") {
+              unfreezeMarbleRef.current();
+            }
             setControlsLocked(false);
             setRacePhase("racing");
             calibrateTiltRef.current();
@@ -1419,6 +1423,9 @@ export function HelloMarble() {
         } else if (elapsedMs >= stepMs * COUNTDOWN_LABELS.length) {
           if (!countdownGoHandledRef.current) {
             countdownGoHandledRef.current = true;
+            if (gameModeRef.current === "solo") {
+              unfreezeMarbleRef.current();
+            }
             setControlsLocked(false);
             setRacePhase("racing");
             calibrateTiltRef.current();
@@ -2107,21 +2114,46 @@ export function HelloMarble() {
     raceClientRef.current?.sendReady(!localReady);
   };
 
-  const restartSoloRace = () => {
+  const startSoloRaceSequence = async () => {
+    const sequenceId = soloStartSequenceRef.current + 1;
+    soloStartSequenceRef.current = sequenceId;
     setRaceResult(null);
     setCountdownToken(null);
     setCountdownStartAtMs(null);
     setTrialState("idle");
     setTrialCurrentMs(null);
-    setRacePhase("racing");
-    setControlsLocked(false);
+    hasSentFinishRef.current = false;
+    countdownIndexRef.current = -1;
+    countdownGoHandledRef.current = false;
     resetRef.current();
-    unfreezeMarbleRef.current();
+    freezeMarbleRef.current();
+
+    if (isMobile) {
+      await enableTiltRef.current();
+      if (soloStartSequenceRef.current !== sequenceId) {
+        return;
+      }
+    }
+
+    setCountdownStartAtMs(raceClientRef.current?.getServerNowMs() ?? Date.now());
+    setCountdownStepMs(1000);
+    setRacePhase("countdown");
+    setControlsLocked(true);
+    setCountdownToken(null);
+    countdownIndexRef.current = -1;
+    countdownGoHandledRef.current = false;
+  };
+
+  const restartSoloRace = () => {
+    void startSoloRaceSequence();
   };
 
   const switchGameMode = (nextMode: GameMode) => {
     if (nextMode === gameMode) {
       return;
+    }
+    if (nextMode !== "solo") {
+      soloStartSequenceRef.current += 1;
     }
     setGameMode(nextMode);
     setCountdownStartAtMs(null);
@@ -2133,10 +2165,7 @@ export function HelloMarble() {
     countdownIndexRef.current = -1;
     countdownGoHandledRef.current = false;
     if (nextMode === "solo") {
-      setRacePhase("racing");
-      setControlsLocked(false);
-      resetRef.current();
-      unfreezeMarbleRef.current();
+      void startSoloRaceSequence();
       return;
     }
     if (nextMode === "multiplayer") {
