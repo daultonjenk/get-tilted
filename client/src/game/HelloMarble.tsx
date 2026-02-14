@@ -13,6 +13,7 @@ import {
 } from "./input/tilt";
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
 import { RaceClient } from "../net/raceClient";
+import { BUILD_ID } from "../buildInfo";
 import type {
   MessagePayloadMap,
   TypedMessage,
@@ -2942,6 +2943,7 @@ export function HelloMarble() {
 
         {activeDebugTab === "diagnostics" ? (
           <div className="debugSection">
+            <p className="buildIdText">Build ID: {BUILD_ID}</p>
             <p>FPS: {debug.fps}</p>
             <p>
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}

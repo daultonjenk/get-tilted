@@ -15,7 +15,7 @@
     "dev:client": "npm run dev -w client -- --host",
     "dev:server": "npm run dev -w server",
     "dev:worker": "npm run typecheck -w worker",
-    "pages:build": "npm run build -w shared && npm run build -w client",
+    "pages:build": "npm run build -w shared && VITE_BUILD_ID=${CF_PAGES_COMMIT_SHA:-local-dev} npm run build -w client",
     "deploy:worker": "npx wrangler deploy --cwd worker",
     "tail:worker": "npx wrangler tail get-tilted-backend",
     "build": "npm run build -w shared && npm run build -w client && npm run build -w server && npm run build -w worker",

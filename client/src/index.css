@@ -362,6 +362,12 @@ textarea {
   font-size: 0.88rem;
 }
 
+.buildIdText {
+  font-size: 0.75rem;
+  opacity: 0.78;
+  letter-spacing: 0.02em;
+}
+
 .controlLabel {
   display: flex;
   flex-direction: column;
