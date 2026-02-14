@@ -66,6 +66,48 @@ textarea {
   text-transform: uppercase;
 }
 
+.menuTitleWrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.05rem;
+}
+
+.menuGameTitle {
+  margin: 0;
+  font-size: clamp(1.7rem, 5.8vw, 2.35rem);
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #fff3bf;
+  text-shadow:
+    0 0 10px rgb(255 246 208 / 32%),
+    0 6px 16px rgb(0 0 0 / 45%);
+  transform-origin: 50% 60%;
+  will-change: transform;
+  animation: menu-title-tilt 4.8s cubic-bezier(0.42, 0, 0.24, 1) infinite;
+}
+
+@keyframes menu-title-tilt {
+  0% {
+    transform: rotate(-6deg);
+  }
+  18% {
+    transform: rotate(-1.2deg);
+  }
+  42% {
+    transform: rotate(5.8deg);
+  }
+  63% {
+    transform: rotate(2.4deg);
+  }
+  82% {
+    transform: rotate(-5deg);
+  }
+  100% {
+    transform: rotate(-6deg);
+  }
+}
+
 .modeSwitch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -216,6 +258,13 @@ textarea {
   100% {
     opacity: 0;
     transform: scale(0.72);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menuGameTitle {
+    animation: none;
+    transform: none;
   }
 }
 

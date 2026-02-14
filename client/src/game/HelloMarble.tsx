@@ -2241,6 +2241,9 @@ export function HelloMarble() {
       {showRaceLobby ? (
         <div className="raceOverlay">
           <div className="raceOverlayCard">
+            <div className="menuTitleWrap">
+              <h1 className="menuGameTitle">Get Tilted</h1>
+            </div>
             <p className="raceOverlayTitle">Race Lobby</p>
             <p>
               {roomCode
