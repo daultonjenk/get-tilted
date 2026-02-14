@@ -13,7 +13,7 @@ import {
 } from "./input/tilt";
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
 import { RaceClient } from "../net/raceClient";
-import { BUILD_ID } from "../buildInfo";
+import { APP_VERSION, BUILD_ID } from "../buildInfo";
 import type {
   MessagePayloadMap,
   TypedMessage,
@@ -2214,6 +2214,7 @@ export function HelloMarble() {
 
   return (
     <div className="appShell">
+      <p className="versionBadge">Version {APP_VERSION}</p>
       <div className="viewport" ref={mountRef} />
       {showModePicker ? (
         <div className="raceOverlay">
