@@ -164,5 +164,8 @@ Implementation expectation:
 - Keep the version in a single source of truth (currently `client/src/buildInfo.ts`).
 - Any change task should include this version update in the same commit.
 - Codex responses must explicitly mention the version bump in the diff summary/changelog.
-- This version number is to be used in the commit message whenever possible
+- Commit messages must use this format by default: `type(v#.#.#.#): short description`
+- Example: `chore(v0.7.2): bump app version and enforce bugfix version discipline`
+- The version token in the commit message must match the build/version context of the change when applicable.
+- Only in truly exceptional cases (for example, emergency revert/cherry-pick constraints) may a different commit message format be used.
 ---
