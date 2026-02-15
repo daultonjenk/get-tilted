@@ -158,26 +158,6 @@ const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 const PLAYER_NAME_STORAGE_KEY = "get-tilted:v0.7.2.8:player-name";
 const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
-const DEFAULT_NET_SMOOTHING: NetSmoothingDebug = {
-  ghostPlayers: 0,
-  avgDelayMs: 0,
-  avgJitterMs: 0,
-  avgSnapshotAgeMs: 0,
-  avgSnapshotAgeJitterMs: 0,
-  extrapolatingPlayers: 0,
-  droppedStale: 0,
-  droppedOutOfOrderSeq: 0,
-  droppedStaleTimestamp: 0,
-  droppedTooOld: 0,
-  timestampCorrected: 0,
-  queueOrderViolations: 0,
-  snapshotQueueSummary: "none",
-  latestSnapshotAgeMs: null,
-  serverClockOffsetMs: 0,
-  inputSourcesSummary: "none",
-  inputIntentX: 0,
-  inputIntentZ: 0,
-};
 
 const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
@@ -453,148 +433,6 @@ function formatTimeMs(ms: number | null): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
-type NetStatsOverlayProps = {
-  netSmoothingRef: { current: NetSmoothingDebug };
-};
-
-type NetStatsLine = {
-  id: string;
-  label: string;
-  format: (value: NetSmoothingDebug) => string;
-};
-
-const NET_STATS_LINES: NetStatsLine[] = [
-  {
-    id: "ghostPlayers",
-    label: "Ghost players",
-    format: (value) => String(value.ghostPlayers),
-  },
-  {
-    id: "avgDelayMs",
-    label: "Ghost interp delay (avg ms)",
-    format: (value) => value.avgDelayMs.toFixed(1),
-  },
-  {
-    id: "avgJitterMs",
-    label: "Ghost jitter (avg ms)",
-    format: (value) => value.avgJitterMs.toFixed(1),
-  },
-  {
-    id: "avgSnapshotAgeMs",
-    label: "Ghost snapshot age (avg ms)",
-    format: (value) => value.avgSnapshotAgeMs.toFixed(1),
-  },
-  {
-    id: "avgSnapshotAgeJitterMs",
-    label: "Ghost snapshot age jitter (avg ms)",
-    format: (value) => value.avgSnapshotAgeJitterMs.toFixed(1),
-  },
-  {
-    id: "extrapolatingPlayers",
-    label: "Ghost extrapolating",
-    format: (value) => String(value.extrapolatingPlayers),
-  },
-  {
-    id: "droppedStale",
-    label: "Dropped stale packets",
-    format: (value) => String(value.droppedStale),
-  },
-  {
-    id: "droppedOutOfOrderSeq",
-    label: "Dropped out-of-order seq",
-    format: (value) => String(value.droppedOutOfOrderSeq),
-  },
-  {
-    id: "droppedStaleTimestamp",
-    label: "Dropped stale timestamp",
-    format: (value) => String(value.droppedStaleTimestamp),
-  },
-  {
-    id: "droppedTooOld",
-    label: "Dropped too-old packets",
-    format: (value) => String(value.droppedTooOld),
-  },
-  {
-    id: "timestampCorrected",
-    label: "Timestamp corrections",
-    format: (value) => String(value.timestampCorrected),
-  },
-  {
-    id: "queueOrderViolations",
-    label: "Queue order violations",
-    format: (value) => String(value.queueOrderViolations),
-  },
-  {
-    id: "snapshotQueueSummary",
-    label: "Snapshot queues",
-    format: (value) => value.snapshotQueueSummary,
-  },
-  {
-    id: "latestSnapshotAgeMs",
-    label: "Latest snapshot age (ms)",
-    format: (value) =>
-      value.latestSnapshotAgeMs == null ? "n/a" : value.latestSnapshotAgeMs.toFixed(1),
-  },
-  {
-    id: "serverClockOffsetMs",
-    label: "Server clock offset (ms)",
-    format: (value) => value.serverClockOffsetMs.toFixed(1),
-  },
-  {
-    id: "inputSourcesSummary",
-    label: "Input sources",
-    format: (value) => value.inputSourcesSummary,
-  },
-  {
-    id: "inputIntent",
-    label: "Input intent",
-    format: (value) => `${value.inputIntentX.toFixed(2)}, ${value.inputIntentZ.toFixed(2)}`,
-  },
-];
-
-function NetStatsOverlay({ netSmoothingRef }: NetStatsOverlayProps) {
-  const valueRefs = useRef<Record<string, HTMLSpanElement | null>>({});
-
-  useEffect(() => {
-    let frame = 0;
-    const updateText = () => {
-      const netSmoothing = netSmoothingRef.current;
-      for (const line of NET_STATS_LINES) {
-        const node = valueRefs.current[line.id];
-        if (!node) {
-          continue;
-        }
-        const nextText = line.format(netSmoothing);
-        if (node.textContent !== nextText) {
-          node.textContent = nextText;
-        }
-      }
-      frame = window.requestAnimationFrame(updateText);
-    };
-    frame = window.requestAnimationFrame(updateText);
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, [netSmoothingRef]);
-
-  return (
-    <>
-      {NET_STATS_LINES.map((line) => (
-        <p key={line.id}>
-          {line.label}:{" "}
-          <span
-            ref={(node) => {
-              valueRefs.current[line.id] = node;
-            }}
-          >
-            {line.format(DEFAULT_NET_SMOOTHING)}
-          </span>
-        </p>
-      ))}
-    </>
-  );
-}
-
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const resetRef = useRef<() => void>(() => {});
@@ -690,7 +528,26 @@ export function HelloMarble() {
     if (typeof window === "undefined") return "";
     return sanitizePlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "");
   });
-  const netSmoothingRef = useRef<NetSmoothingDebug>({ ...DEFAULT_NET_SMOOTHING });
+  const [netSmoothing, setNetSmoothing] = useState<NetSmoothingDebug>({
+    ghostPlayers: 0,
+    avgDelayMs: 0,
+    avgJitterMs: 0,
+    avgSnapshotAgeMs: 0,
+    avgSnapshotAgeJitterMs: 0,
+    extrapolatingPlayers: 0,
+    droppedStale: 0,
+    droppedOutOfOrderSeq: 0,
+    droppedStaleTimestamp: 0,
+    droppedTooOld: 0,
+    timestampCorrected: 0,
+    queueOrderViolations: 0,
+    snapshotQueueSummary: "none",
+    latestSnapshotAgeMs: null,
+    serverClockOffsetMs: 0,
+    inputSourcesSummary: "none",
+    inputIntentX: 0,
+    inputIntentZ: 0,
+  });
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
@@ -972,19 +829,6 @@ export function HelloMarble() {
     const tempQuatD = new THREE.Quaternion();
     const boardPosThree = new THREE.Vector3();
     const boardQuatThree = new THREE.Quaternion();
-    const lastBodyPos = new THREE.Vector3(
-      marbleBody.position.x,
-      marbleBody.position.y,
-      marbleBody.position.z,
-    );
-    const lastBodyQuat = new THREE.Quaternion(
-      marbleBody.quaternion.x,
-      marbleBody.quaternion.y,
-      marbleBody.quaternion.z,
-      marbleBody.quaternion.w,
-    );
-    const interpolatedBodyPos = new THREE.Vector3();
-    const interpolatedBodyQuat = new THREE.Quaternion();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -1464,13 +1308,6 @@ export function HelloMarble() {
       unfreezeMarble();
       marbleBody.position.copy(computeSpawnWorld());
       marbleBody.quaternion.set(0, 0, 0, 1);
-      lastBodyPos.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
-      lastBodyQuat.set(
-        marbleBody.quaternion.x,
-        marbleBody.quaternion.y,
-        marbleBody.quaternion.z,
-        marbleBody.quaternion.w,
-      );
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
       trialStartAt = null;
@@ -1799,13 +1636,6 @@ export function HelloMarble() {
       }
 
       while (accumulator >= TIMESTEP) {
-        lastBodyPos.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
-        lastBodyQuat.set(
-          marbleBody.quaternion.x,
-          marbleBody.quaternion.y,
-          marbleBody.quaternion.z,
-          marbleBody.quaternion.w,
-        );
         world.step(TIMESTEP);
         accumulator -= TIMESTEP;
       }
@@ -1887,23 +1717,17 @@ export function HelloMarble() {
       }
       prevMarbleZ = marbleZ;
 
-      const renderAlpha = clamp(accumulator / TIMESTEP, 0, 1);
-      tempVecD.set(
+      marbleMesh.position.set(
         marbleBody.position.x,
         marbleBody.position.y,
         marbleBody.position.z,
       );
-      interpolatedBodyPos.copy(lastBodyPos).lerp(tempVecD, renderAlpha);
-      marbleMesh.position.copy(interpolatedBodyPos);
-
-      tempQuatD.set(
+      marbleMesh.quaternion.set(
         marbleBody.quaternion.x,
         marbleBody.quaternion.y,
         marbleBody.quaternion.z,
         marbleBody.quaternion.w,
       );
-      interpolatedBodyQuat.copy(lastBodyQuat).slerp(tempQuatD, renderAlpha);
-      marbleMesh.quaternion.copy(interpolatedBodyQuat);
 
       boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
       boardQuatThree.set(
@@ -2183,7 +2007,7 @@ export function HelloMarble() {
           gravY: world.gravity.y,
           gravZ: world.gravity.z,
         }));
-        netSmoothingRef.current = {
+        setNetSmoothing({
           ghostPlayers: ghostCount,
           avgDelayMs,
           avgJitterMs,
@@ -2202,7 +2026,7 @@ export function HelloMarble() {
           inputSourcesSummary,
           inputIntentX,
           inputIntentZ,
-        };
+        });
         debugTimer = 0;
       }
 
@@ -3281,7 +3105,31 @@ export function HelloMarble() {
             <p>Ready players: {readyPlayerIds.length}</p>
             <p>Race phase: {racePhase}</p>
             <p>Controls locked: {controlsLocked ? "yes" : "no"}</p>
-            <NetStatsOverlay netSmoothingRef={netSmoothingRef} />
+            <p>Ghost players: {netSmoothing.ghostPlayers}</p>
+            <p>Ghost interp delay (avg ms): {netSmoothing.avgDelayMs.toFixed(1)}</p>
+            <p>Ghost jitter (avg ms): {netSmoothing.avgJitterMs.toFixed(1)}</p>
+            <p>Ghost snapshot age (avg ms): {netSmoothing.avgSnapshotAgeMs.toFixed(1)}</p>
+            <p>Ghost snapshot age jitter (avg ms): {netSmoothing.avgSnapshotAgeJitterMs.toFixed(1)}</p>
+            <p>Ghost extrapolating: {netSmoothing.extrapolatingPlayers}</p>
+            <p>Dropped stale packets: {netSmoothing.droppedStale}</p>
+            <p>Dropped out-of-order seq: {netSmoothing.droppedOutOfOrderSeq}</p>
+            <p>Dropped stale timestamp: {netSmoothing.droppedStaleTimestamp}</p>
+            <p>Dropped too-old packets: {netSmoothing.droppedTooOld}</p>
+            <p>Timestamp corrections: {netSmoothing.timestampCorrected}</p>
+            <p>Queue order violations: {netSmoothing.queueOrderViolations}</p>
+            <p>Snapshot queues: {netSmoothing.snapshotQueueSummary}</p>
+            <p>
+              Latest snapshot age (ms):{" "}
+              {netSmoothing.latestSnapshotAgeMs == null
+                ? "n/a"
+                : netSmoothing.latestSnapshotAgeMs.toFixed(1)}
+            </p>
+            <p>Server clock offset (ms): {netSmoothing.serverClockOffsetMs.toFixed(1)}</p>
+            <p>Input sources: {netSmoothing.inputSourcesSummary}</p>
+            <p>
+              Input intent: {netSmoothing.inputIntentX.toFixed(2)},{" "}
+              {netSmoothing.inputIntentZ.toFixed(2)}
+            </p>
             {netError ? <p className="errorText">{netError}</p> : null}
             <div className="debugButtonRow">
               <button type="button" onClick={connectMultiplayer}>
