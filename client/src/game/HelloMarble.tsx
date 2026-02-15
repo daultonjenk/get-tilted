@@ -53,10 +53,7 @@ type CameraPresetId =
   | "topdownForward"
   | "broadcast";
 
-type PhysicsPresetId = "marble" | "floaty" | "heavy";
-
 type TuningState = {
-  physicsPreset: PhysicsPresetId;
   gravityG: number;
   tiltStrength: number;
   gyroSensitivity: number;
@@ -154,8 +151,11 @@ const BOARD_TILT_SMOOTH = 12;
 const PIVOT_SMOOTH = 10;
 const TRACK_FLOOR_TOP_Y = 0.3;
 const PENETRATION_EPSILON = 0.004;
-const PENETRATION_CORRECTION_BIAS = 0.001;
-const PENETRATION_CORRECTION_MAX = 0.08;
+const PENETRATION_CORRECTION_BIAS = 0;
+const PENETRATION_CORRECTION_MAX = 0.04;
+const SIDE_IMPACT_NORMAL_UP_DOT_MAX = 0.35;
+const SIDE_IMPACT_UPWARD_SPEED_MIN = 0.35;
+const SIDE_IMPACT_UPWARD_DAMPING = 0.35;
 const SOURCE_RATE_MS = 1000 / 15;
 const INTERP_DELAY_MIN_MS = 120;
 const INTERP_DELAY_MAX_MS = 165;
@@ -171,8 +171,7 @@ const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
 
 const DEFAULT_TUNING: TuningState = {
-  physicsPreset: "marble",
-  gravityG: 19,
+  gravityG: 20,
   tiltStrength: 1.63,
   gyroSensitivity: 1.35,
   maxSpeed: 20,
@@ -183,7 +182,7 @@ const DEFAULT_TUNING: TuningState = {
   angularDamping: 0.06,
   cameraPreset: "chaseCentered",
   bounce: 0,
-  contactFriction: 0.88,
+  contactFriction: 0.84,
   contactRestitution: 0,
   invertTiltX: true,
   invertTiltZ: false,
@@ -192,8 +191,8 @@ const DEFAULT_TUNING: TuningState = {
   extraDownForce: 0.7,
   renderScaleMobile: 1.2,
   debugUpdateHzMobile: 5,
-  physicsMaxSubSteps: 6,
-  physicsSolverIterations: 20,
+  physicsMaxSubSteps: 7,
+  physicsSolverIterations: 24,
   ccdSpeedThreshold: 0.75,
   ccdIterations: 20,
 };
@@ -208,80 +207,6 @@ const CAMERA_PRESETS: CameraPresetId[] = [
   "topdownForward",
   "broadcast",
 ];
-
-const PHYSICS_PRESETS: Record<
-  PhysicsPresetId,
-  Pick<
-    TuningState,
-    | "gravityG"
-    | "linearDamping"
-    | "angularDamping"
-    | "bounce"
-    | "gyroSensitivity"
-    | "contactFriction"
-    | "contactRestitution"
-    | "maxBoardAngVel"
-    | "tiltFilterTau"
-    | "renderScaleMobile"
-    | "debugUpdateHzMobile"
-    | "physicsMaxSubSteps"
-    | "physicsSolverIterations"
-    | "ccdSpeedThreshold"
-    | "ccdIterations"
-  >
-> = {
-  marble: {
-    gravityG: 19,
-    linearDamping: 0.06,
-    angularDamping: 0.06,
-    bounce: 0,
-    gyroSensitivity: 1.35,
-    contactFriction: 0.88,
-    contactRestitution: 0,
-    maxBoardAngVel: 5,
-    tiltFilterTau: 0.1,
-    renderScaleMobile: 1.2,
-    debugUpdateHzMobile: 5,
-    physicsMaxSubSteps: 6,
-    physicsSolverIterations: 20,
-    ccdSpeedThreshold: 0.75,
-    ccdIterations: 20,
-  },
-  floaty: {
-    gravityG: 14,
-    linearDamping: 0.18,
-    angularDamping: 0.18,
-    bounce: 0.03,
-    gyroSensitivity: 1.35,
-    contactFriction: 0.85,
-    contactRestitution: 0.03,
-    maxBoardAngVel: 3.5,
-    tiltFilterTau: 0.15,
-    renderScaleMobile: 1.2,
-    debugUpdateHzMobile: 5,
-    physicsMaxSubSteps: 7,
-    physicsSolverIterations: 24,
-    ccdSpeedThreshold: 0.6,
-    ccdIterations: 24,
-  },
-  heavy: {
-    gravityG: 20,
-    linearDamping: 0.06,
-    angularDamping: 0.06,
-    bounce: 0.08,
-    gyroSensitivity: 1.35,
-    contactFriction: 0.7,
-    contactRestitution: 0.08,
-    maxBoardAngVel: 6,
-    tiltFilterTau: 0.08,
-    renderScaleMobile: 1.2,
-    debugUpdateHzMobile: 5,
-    physicsMaxSubSteps: 5,
-    physicsSolverIterations: 18,
-    ccdSpeedThreshold: 0.9,
-    ccdIterations: 18,
-  },
-};
 
 const DRAWER_TABS: { id: DebugTabId; label: string }[] = [
   { id: "tuning", label: "Tuning" },
@@ -333,18 +258,9 @@ function isCameraPresetId(value: unknown): value is CameraPresetId {
   return typeof value === "string" && CAMERA_PRESETS.includes(value as CameraPresetId);
 }
 
-function isPhysicsPresetId(value: unknown): value is PhysicsPresetId {
-  return value === "marble" || value === "floaty" || value === "heavy";
-}
-
 function buildCanonicalTuning(): TuningState {
-  const base = { ...DEFAULT_TUNING };
-  const presetValues = PHYSICS_PRESETS[base.physicsPreset];
   return {
-    ...base,
-    ...presetValues,
-    bounce: presetValues.bounce,
-    contactRestitution: presetValues.bounce,
+    ...DEFAULT_TUNING,
   };
 }
 
@@ -356,9 +272,6 @@ function sanitizeTuning(input: unknown): TuningState {
 
   const value = input as Partial<TuningState>;
 
-  if (isPhysicsPresetId(value.physicsPreset)) {
-    base.physicsPreset = value.physicsPreset;
-  }
   if (typeof value.gravityG === "number") base.gravityG = clamp(value.gravityG, 8, 24);
   if (typeof value.tiltStrength === "number") {
     base.tiltStrength = clamp(value.tiltStrength, 0.5, 2);
@@ -462,19 +375,6 @@ function getCameraLabel(id: CameraPresetId): string {
       return "Top-down Forward";
     case "broadcast":
       return "Broadcast";
-    default:
-      return "Unknown";
-  }
-}
-
-function getPhysicsPresetLabel(id: PhysicsPresetId): string {
-  switch (id) {
-    case "marble":
-      return "Marble (Default)";
-    case "floaty":
-      return "Floaty";
-    case "heavy":
-      return "Heavy";
     default:
       return "Unknown";
   }
@@ -884,9 +784,9 @@ export function HelloMarble() {
       friction: tuningRef.current.contactFriction,
       restitution: tuningRef.current.contactRestitution,
       contactEquationStiffness: 5e7,
-      contactEquationRelaxation: 4,
+      contactEquationRelaxation: 6,
       frictionEquationStiffness: 5e7,
-      frictionEquationRelaxation: 4,
+      frictionEquationRelaxation: 5,
     });
     world.addContactMaterial(contactMat);
 
@@ -965,6 +865,7 @@ export function HelloMarble() {
     const boardDeltaQuat = new THREE.Quaternion();
     const boardAngularAxis = new THREE.Vector3();
     const boardUpWorld = new THREE.Vector3();
+    const contactNormalWorld = new THREE.Vector3();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -989,6 +890,52 @@ export function HelloMarble() {
     let inputSourcesSummary = "none";
     let inputIntentX = 0;
     let inputIntentZ = 0;
+
+    const suppressVerticalPopOnSideImpact = () => {
+      tempQuatA.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
+      boardUpWorld.set(0, 1, 0).applyQuaternion(tempQuatA).normalize();
+
+      for (const contact of world.contacts) {
+        const isMarbleBoardPair =
+          (contact.bi === marbleBody && contact.bj === boardBody) ||
+          (contact.bi === boardBody && contact.bj === marbleBody);
+        if (!isMarbleBoardPair) {
+          continue;
+        }
+
+        if (contact.bi === marbleBody) {
+          contactNormalWorld.set(contact.ni.x, contact.ni.y, contact.ni.z);
+        } else {
+          contactNormalWorld.set(-contact.ni.x, -contact.ni.y, -contact.ni.z);
+        }
+        contactNormalWorld.normalize();
+
+        const upDot = Math.abs(contactNormalWorld.dot(boardUpWorld));
+        if (upDot >= SIDE_IMPACT_NORMAL_UP_DOT_MAX) {
+          continue;
+        }
+
+        const upwardSpeed =
+          marbleBody.velocity.x * boardUpWorld.x +
+          marbleBody.velocity.y * boardUpWorld.y +
+          marbleBody.velocity.z * boardUpWorld.z;
+        if (upwardSpeed <= SIDE_IMPACT_UPWARD_SPEED_MIN) {
+          continue;
+        }
+
+        const dampedUpwardSpeed = upwardSpeed * SIDE_IMPACT_UPWARD_DAMPING;
+        const reduceBy = upwardSpeed - dampedUpwardSpeed;
+        marbleBody.velocity.x -= boardUpWorld.x * reduceBy;
+        marbleBody.velocity.y -= boardUpWorld.y * reduceBy;
+        marbleBody.velocity.z -= boardUpWorld.z * reduceBy;
+        break;
+      }
+    };
 
     const getOrCreateGhostState = (playerId: string): GhostRenderState => {
       const existing = ghostPlayers.get(playerId);
@@ -1823,6 +1770,7 @@ export function HelloMarble() {
       }
 
       world.step(TIMESTEP, delta, Math.round(currentTuning.physicsMaxSubSteps));
+      suppressVerticalPopOnSideImpact();
 
       const speed = marbleBody.velocity.length();
       if (speed > currentTuning.maxSpeed && speed > 0) {
@@ -2438,16 +2386,6 @@ export function HelloMarble() {
     });
   };
 
-  const applyPhysicsPreset = (preset: PhysicsPresetId) => {
-    const values = PHYSICS_PRESETS[preset];
-    setTuning((prev) => ({
-      ...prev,
-      physicsPreset: preset,
-      ...values,
-      contactRestitution: values.bounce,
-    }));
-  };
-
   const copySettings = async () => {
     const payload = JSON.stringify(tuning, null, 2);
     setImportJsonText(payload);
@@ -2824,21 +2762,6 @@ export function HelloMarble() {
         {activeDebugTab === "tuning" ? (
           <div className="debugSection">
             <p className="tiltMessage">{statusMessage}</p>
-            <label className="controlLabel">
-              Physics Preset
-              <select
-                value={tuning.physicsPreset}
-                onChange={(event) =>
-                  applyPhysicsPreset(event.target.value as PhysicsPresetId)
-                }
-              >
-                {(Object.keys(PHYSICS_PRESETS) as PhysicsPresetId[]).map((preset) => (
-                  <option key={preset} value={preset}>
-                    {getPhysicsPresetLabel(preset)}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label className="controlLabel">
               Max Speed
               <div className="controlRow">
