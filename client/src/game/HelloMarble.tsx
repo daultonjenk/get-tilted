@@ -2379,20 +2379,18 @@ export function HelloMarble() {
             {joinHostWarning ? <p className="raceHint">{joinHostWarning}</p> : null}
             <div className="lobbyPlayersSplit">
               <div className="lobbyPlayerCard">
-                <p className="lobbyPlayerSlotLabel">Player 1</p>
-                <label className="controlLabel lobbyNameField" htmlFor="lobbyPlayerName">
-                  Marble Name (Optional)
-                </label>
-                <input
-                  id="lobbyPlayerName"
-                  className="lobbyNameInput"
-                  value={playerNameInput}
-                  onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
-                  placeholder="Enter name"
-                  maxLength={18}
-                  autoComplete="nickname"
-                />
                 <p className="lobbyPlayerNameValue">{playerOneName}</p>
+                <div className="lobbyNameInputWrap">
+                  <input
+                    id="lobbyPlayerName"
+                    className="lobbyNameInput"
+                    value={playerNameInput}
+                    onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
+                    placeholder="Enter name"
+                    maxLength={18}
+                    autoComplete="nickname"
+                  />
+                </div>
                 <div className="lobbyReadyRow">
                   <div className={`lobbyReadyIndicator ${playerOneReady ? "ready" : "notReady"}`} />
                   <p className={`lobbyReadyStatus ${playerOneReady ? "ready" : "notReady"}`}>
@@ -2401,8 +2399,8 @@ export function HelloMarble() {
                 </div>
               </div>
               <div className="lobbyPlayerCard">
-                <p className="lobbyPlayerSlotLabel">Player 2</p>
                 <p className="lobbyPlayerNameValue">{playerTwoName}</p>
+                <div className="lobbyCardMidSpacer" aria-hidden="true" />
                 <div className="lobbyReadyRow">
                   <div className={`lobbyReadyIndicator ${playerTwoReady ? "ready" : "notReady"}`} />
                   <p className={`lobbyReadyStatus ${playerTwoReady ? "ready" : "notReady"}`}>
@@ -2411,7 +2409,6 @@ export function HelloMarble() {
                 </div>
               </div>
             </div>
-            <p>Players: {playersInRoom.length}/2</p>
             {joinHandshakePending ? (
               <p className="raceHint">
                 Joining room ({joinStageLabel}

@@ -178,16 +178,8 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.45rem;
-}
-
-.lobbyPlayerSlotLabel {
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: #d5e8fb;
-  text-transform: uppercase;
+  gap: 0.5rem;
+  min-height: 178px;
 }
 
 .lobbyPlayerNameValue {
@@ -203,6 +195,17 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.lobbyNameInputWrap {
+  width: 100%;
+  margin-block: auto;
+}
+
+.lobbyCardMidSpacer {
+  width: 100%;
+  margin-block: auto;
+  min-height: 36px;
+}
+
 .lobbyReadyRow {
   width: 100%;
   display: flex;
@@ -210,6 +213,7 @@ textarea {
   justify-content: center;
   gap: 0.55rem;
   min-height: 46px;
+  margin-top: auto;
 }
 
 .lobbyReadyIndicator {
@@ -360,14 +364,6 @@ textarea {
 .raceHint {
   color: #ffdc8f;
   font-size: 0.82rem;
-}
-
-.lobbyNameField {
-  margin: 0;
-  font-size: 0.66rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #d4e8ff;
 }
 
 .lobbyNameInput {
