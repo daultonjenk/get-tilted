@@ -48,6 +48,7 @@ type MarbleDebug = {
   renderScale: number;
   perfTier: MobilePerfTier | "desktop";
   frameMsEma: number;
+  cpuFrameMsEma: number;
   physicsMsEma: number;
   renderMsEma: number;
   miscMsEma: number;
@@ -246,6 +247,16 @@ function sanitizeJoinHost(value: string): string {
 
 function sanitizePlayerName(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 18);
+}
+
+function shouldEnableMobileAntialias(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+  const cores = navigator.hardwareConcurrency ?? 4;
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+  const dpr = window.devicePixelRatio || 1;
+  return cores >= 8 && memory >= 6 && dpr <= 3.5;
 }
 
 function isEditableEventTarget(target: EventTarget | null): boolean {
@@ -529,6 +540,7 @@ export function HelloMarble() {
     renderScale: 1,
     perfTier: "desktop",
     frameMsEma: 1000 / 60,
+    cpuFrameMsEma: 0,
     physicsMsEma: 0,
     renderMsEma: 0,
     miscMsEma: 0,
@@ -795,7 +807,8 @@ export function HelloMarble() {
     const initialRenderScale = mobileMode
       ? mobilePerfGovernor?.getStats().renderScale ?? MOBILE_RENDER_SCALE_MAX
       : 2;
-    const renderer = new THREE.WebGLRenderer({ antialias: !mobileMode });
+    const antialias = mobileMode ? shouldEnableMobileAntialias() : true;
+    const renderer = new THREE.WebGLRenderer({ antialias });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, initialRenderScale));
     mount.appendChild(renderer.domElement);
 
@@ -855,8 +868,8 @@ export function HelloMarble() {
     marbleBodyWithCcd.ccdIterations = tuningRef.current.ccdIterations;
     world.addBody(marbleBody);
 
-    const marbleSegments = mobileMode ? 16 : 32;
-    const ghostSegments = mobileMode ? 12 : 24;
+    const marbleSegments = mobileMode ? 20 : 32;
+    const ghostSegments = mobileMode ? 16 : 24;
     const marbleTexture = createMarbleTexture();
     const marbleMesh = new THREE.Mesh(
       new THREE.SphereGeometry(marbleRadius, marbleSegments, marbleSegments),
@@ -1415,6 +1428,13 @@ export function HelloMarble() {
     window.addEventListener("keydown", handleKeyDown, { passive: false });
     window.addEventListener("keyup", handleKeyUp);
 
+    const snapMarbleInterpolation = () => {
+      marbleBody.previousPosition.copy(marbleBody.position);
+      marbleBody.interpolatedPosition.copy(marbleBody.position);
+      marbleBody.previousQuaternion.copy(marbleBody.quaternion);
+      marbleBody.interpolatedQuaternion.copy(marbleBody.quaternion);
+    };
+
     const freezeMarble = () => {
       marbleBody.type = CANNON.Body.STATIC;
       marbleBody.mass = 0;
@@ -1441,6 +1461,7 @@ export function HelloMarble() {
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
+      snapMarbleInterpolation();
       trialStartAt = null;
       prevMarbleZ = marbleBody.position.z;
       setTrialState("idle");
@@ -1608,6 +1629,7 @@ export function HelloMarble() {
     let debugTimer = 0;
     let lastRenderScale = initialRenderScale;
     let frameMsEma = 1000 / 60;
+    let cpuFrameMsEma = 0;
     let physicsMsEma = 0;
     let renderMsEma = 0;
     let miscMsEma = 0;
@@ -1616,9 +1638,10 @@ export function HelloMarble() {
     const tick = (nowMs: number) => {
       const frameStartMs = performance.now();
       const now = nowMs / 1000;
-      const delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
+      const delta = Math.min(Math.max(now - lastTime, 0), MAX_FRAME_DELTA);
       lastTime = now;
       debugTimer += delta;
+      const frameIntervalMs = Math.max(delta * 1000, 0.1);
 
       const currentTuning = tuningRef.current;
       if (mobileMode && mobilePerfGovernor) {
@@ -1883,6 +1906,7 @@ export function HelloMarble() {
 
         marbleBody.aabbNeedsUpdate = true;
         marbleBody.updateAABB();
+        marbleBody.interpolatedPosition.copy(marbleBody.position);
         penetrationDepth = computePenetrationDepth();
       }
       const angularSpeed = marbleBody.angularVelocity.length();
@@ -1959,16 +1983,21 @@ export function HelloMarble() {
       }
       prevMarbleZ = marbleZ;
 
+      const marbleRenderPos = marbleBody.interpolatedPosition;
+      const marbleRenderQuat = marbleBody.interpolatedQuaternion;
+      const marbleRenderX = marbleRenderPos.x;
+      const marbleRenderZ = marbleRenderPos.z;
+
       marbleMesh.position.set(
-        marbleBody.position.x,
-        marbleBody.position.y,
-        marbleBody.position.z,
+        marbleRenderPos.x,
+        marbleRenderPos.y,
+        marbleRenderPos.z,
       );
       marbleMesh.quaternion.set(
-        marbleBody.quaternion.x,
-        marbleBody.quaternion.y,
-        marbleBody.quaternion.z,
-        marbleBody.quaternion.w,
+        marbleRenderQuat.x,
+        marbleRenderQuat.y,
+        marbleRenderQuat.z,
+        marbleRenderQuat.w,
       );
 
       boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
@@ -2104,89 +2133,89 @@ export function HelloMarble() {
       const sideSign = currentTuning.invertCameraSide ? -1 : 1;
       switch (currentTuning.cameraPreset) {
         case "chaseCentered": {
-          cameraTarget.set(0, 7.5, marbleBody.position.z - 10);
+          cameraTarget.set(0, 7.5, marbleRenderZ - 10);
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.x = 0;
           camera.position.y = 7.5;
-          lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(0, LOOK_HEIGHT, marbleRenderZ + LOOK_AHEAD);
           break;
         }
         case "chaseRight": {
           const side = 4 * sideSign;
-          cameraTarget.set(side, 7.5, marbleBody.position.z - 10);
+          cameraTarget.set(side, 7.5, marbleRenderZ - 10);
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 7.5;
-          lookTarget.set(side, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(side, LOOK_HEIGHT, marbleRenderZ + LOOK_AHEAD);
           break;
         }
         case "chaseLeft": {
           const side = -4 * sideSign;
-          cameraTarget.set(side, 7.5, marbleBody.position.z - 10);
+          cameraTarget.set(side, 7.5, marbleRenderZ - 10);
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 7.5;
-          lookTarget.set(side, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(side, LOOK_HEIGHT, marbleRenderZ + LOOK_AHEAD);
           break;
         }
         case "isoStandard": {
           cameraTarget.set(
-            marbleBody.position.x + 4 * sideSign,
+            marbleRenderX + 4 * sideSign,
             14,
-            marbleBody.position.z - 8,
+            marbleRenderZ - 8,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 14;
-          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(marbleRenderX, 0, marbleRenderZ + LOOK_AHEAD);
           break;
         }
         case "isoFlatter": {
           cameraTarget.set(
-            marbleBody.position.x + 4 * sideSign,
+            marbleRenderX + 4 * sideSign,
             11,
-            marbleBody.position.z - 10,
+            marbleRenderZ - 10,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 11;
           lookTarget.set(
-            marbleBody.position.x,
+            marbleRenderX,
             0,
-            marbleBody.position.z + LOOK_AHEAD + 4,
+            marbleRenderZ + LOOK_AHEAD + 4,
           );
           break;
         }
         case "topdownPure": {
           cameraTarget.set(
-            marbleBody.position.x,
+            marbleRenderX,
             TOPDOWN_HEIGHT,
-            marbleBody.position.z - TOPDOWN_Z_OFFSET,
+            marbleRenderZ - TOPDOWN_Z_OFFSET,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = TOPDOWN_HEIGHT;
-          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z);
+          lookTarget.set(marbleRenderX, 0, marbleRenderZ);
           break;
         }
         case "topdownForward": {
           cameraTarget.set(
-            marbleBody.position.x,
+            marbleRenderX,
             TOPDOWN_HEIGHT,
-            marbleBody.position.z - TOPDOWN_Z_OFFSET,
+            marbleRenderZ - TOPDOWN_Z_OFFSET,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = TOPDOWN_HEIGHT;
-          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + 6);
+          lookTarget.set(marbleRenderX, 0, marbleRenderZ + 6);
           break;
         }
         case "broadcast": {
           cameraTarget.set(
-            marbleBody.position.x + 6 * sideSign,
+            marbleRenderX + 6 * sideSign,
             18,
-            marbleBody.position.z - 12,
+            marbleRenderZ - 12,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 18;
           lookTarget.set(
-            marbleBody.position.x + sideSign,
+            marbleRenderX + sideSign,
             0,
-            marbleBody.position.z + LOOK_AHEAD,
+            marbleRenderZ + LOOK_AHEAD,
           );
           break;
         }
@@ -2197,13 +2226,14 @@ export function HelloMarble() {
       const renderStartMs = performance.now();
       renderer.render(scene, camera);
       const renderMs = performance.now() - renderStartMs;
-      const frameMs = Math.max(performance.now() - frameStartMs, 0.1);
-      const miscMs = Math.max(0, frameMs - physicsMs - renderMs);
+      const cpuFrameMs = Math.max(performance.now() - frameStartMs, 0.1);
+      const miscMs = Math.max(0, cpuFrameMs - physicsMs - renderMs);
+      cpuFrameMsEma += (cpuFrameMs - cpuFrameMsEma) * 0.12;
 
       if (mobileMode && mobilePerfGovernor) {
         const decision = mobilePerfGovernor.push({
           nowMs,
-          frameMs,
+          frameMs: frameIntervalMs,
           physicsMs,
           renderMs,
           miscMs,
@@ -2218,7 +2248,7 @@ export function HelloMarble() {
           renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
         }
       } else {
-        frameMsEma += (frameMs - frameMsEma) * 0.12;
+        frameMsEma += (frameIntervalMs - frameMsEma) * 0.12;
         physicsMsEma += (physicsMs - physicsMsEma) * 0.12;
         renderMsEma += (renderMs - renderMsEma) * 0.12;
         miscMsEma += (miscMs - miscMsEma) * 0.12;
@@ -2257,6 +2287,7 @@ export function HelloMarble() {
             renderScale: lastRenderScale,
             perfTier,
             frameMsEma,
+            cpuFrameMsEma,
             physicsMsEma,
             renderMsEma,
             miscMsEma,
@@ -3523,10 +3554,11 @@ export function HelloMarble() {
         {activeDebugTab === "diagnostics" ? (
           <div className="debugSection">
             <p className="buildIdText">Build ID: {BUILD_ID}</p>
-            <p>FPS: {debug.fps}</p>
+            <p>FPS (display cadence): {debug.fps}</p>
             <p>Render Scale: {debug.renderScale.toFixed(2)}</p>
             <p>Perf Tier: {debug.perfTier}</p>
-            <p>Frame ms (EMA): {debug.frameMsEma.toFixed(2)}</p>
+            <p>Frame interval ms (EMA): {debug.frameMsEma.toFixed(2)}</p>
+            <p>CPU frame ms (EMA): {debug.cpuFrameMsEma.toFixed(2)}</p>
             <p>Physics ms (EMA): {debug.physicsMsEma.toFixed(2)}</p>
             <p>Render ms (EMA): {debug.renderMsEma.toFixed(2)}</p>
             <p>Misc ms (EMA): {debug.miscMsEma.toFixed(2)}</p>

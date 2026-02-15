@@ -50,3 +50,9 @@ v0.7.5.4 update:
 - Gated diagnostics/network React updates so hidden debug tabs no longer run periodic heavy aggregations unless `?perfdebug=1` is enabled.
 - Kept physics-feel settings unchanged (solver/substeps/CCD/tilt dynamics untouched).
 - Verified quality gates pass after changes: `npm run lint`, `npm run typecheck`, `npm run build`.
+
+v0.7.5.5 update:
+- Fixed frame pacing telemetry to use true frame interval (`requestAnimationFrame` delta) instead of CPU-only frame cost; diagnostics FPS now reflects display cadence rather than inflated values.
+- Switched marble mesh and camera follow to render from cannon-es interpolated transforms (`interpolatedPosition`/`interpolatedQuaternion`) for smoother motion on high-refresh mobile displays without changing gameplay physics.
+- Restored mobile sphere tessellation quality (marble 20 segments, ghost 16 segments) and added startup-only conditional mobile antialiasing based on device capability heuristics.
+- Added diagnostics split between frame interval EMA and CPU frame EMA to separate cadence issues from CPU workload.
