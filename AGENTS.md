@@ -143,3 +143,25 @@ A milestone is complete only if:
 - One commit is created and a brief changelog is provided.
 
 ---
+
+## 8) Build version discipline (required)
+
+Purpose: ensure the visible top-left in-game/menu version always identifies the exact build and avoids cache confusion.
+
+Rules:
+- Every implemented change by Codex that affects behavior, UI, config, assets, networking, physics, or build output must bump the displayed build version.
+- Every commit must have a unique build version string. No reuse.
+- When Codex finishes implementing a plan/milestone, the final state must include a new version bump (even if changes were small).
+- The version shown in the top-left menu/screen is authoritative for build identity and must match the value committed in source.
+
+Allowed version formats (examples):
+- `0.5.3a`, `0.5.3b`
+- `0.5.3.1`, `0.5.3.2`
+- `0.5.3+20260215.1`
+
+Implementation expectation:
+- Keep the version in a single source of truth (currently `client/src/buildInfo.ts`).
+- Any change task should include this version update in the same commit.
+- Codex responses must explicitly mention the version bump in the diff summary/changelog.
+
+---
