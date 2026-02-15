@@ -201,7 +201,7 @@ const DEFAULT_TUNING: TuningState = {
   invertCameraSide: false,
   enableExtraDownforce: false,
   extraDownForce: 0.7,
-  renderScaleMobile: 1.2,
+  renderScaleMobile: 1.0,
   debugUpdateHzMobile: 5,
   physicsMaxSubSteps: 7,
   physicsSolverIterations: 24,
@@ -477,6 +477,11 @@ export function HelloMarble() {
       : true,
   );
   const [activeDebugTab, setActiveDebugTab] = useState<DebugTabId>("tuning");
+  const forcePerfDebugRef = useRef(
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("perfdebug") === "1"
+      : false,
+  );
 
   const [respawnCount, setRespawnCount] = useState(0);
   const [tiltStatus, setTiltStatus] = useState<TiltState>({
@@ -602,6 +607,8 @@ export function HelloMarble() {
   const soloStartSequenceRef = useRef(0);
   const freezeMarbleRef = useRef<() => void>(() => {});
   const unfreezeMarbleRef = useRef<() => void>(() => {});
+  const drawerOpenRef = useRef(drawerOpen);
+  const activeDebugTabRef = useRef(activeDebugTab);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -691,6 +698,14 @@ export function HelloMarble() {
   useEffect(() => {
     gameModeRef.current = gameMode;
   }, [gameMode]);
+
+  useEffect(() => {
+    drawerOpenRef.current = drawerOpen;
+  }, [drawerOpen]);
+
+  useEffect(() => {
+    activeDebugTabRef.current = activeDebugTab;
+  }, [activeDebugTab]);
 
   useEffect(() => {
     trialStateRef.current = trialState;
@@ -840,8 +855,8 @@ export function HelloMarble() {
     marbleBodyWithCcd.ccdIterations = tuningRef.current.ccdIterations;
     world.addBody(marbleBody);
 
-    const marbleSegments = mobileMode ? 20 : 32;
-    const ghostSegments = mobileMode ? 16 : 24;
+    const marbleSegments = mobileMode ? 16 : 32;
+    const ghostSegments = mobileMode ? 12 : 24;
     const marbleTexture = createMarbleTexture();
     const marbleMesh = new THREE.Mesh(
       new THREE.SphereGeometry(marbleRadius, marbleSegments, marbleSegments),
@@ -2213,84 +2228,97 @@ export function HelloMarble() {
         ? 1 / Math.max(currentTuning.debugUpdateHzMobile, 1)
         : 0.1;
       if (debugTimer >= debugInterval) {
-        const ghostStateList = [...ghostPlayers.values()];
-        const ghostCount = ghostStateList.length;
-        const avgDelayMs =
-          ghostCount > 0
-            ? ghostStateList.reduce((sum, state) => sum + state.interpolationDelayMs, 0) / ghostCount
-            : 0;
-        const avgJitterMs =
-          ghostCount > 0
-            ? ghostStateList.reduce((sum, state) => sum + state.jitterMs, 0) / ghostCount
-            : 0;
-        const statesWithSnapshotAge = ghostStateList.filter(
-          (state) => state.latestSnapshotAgeMs != null,
-        );
-        const snapshotAgeCount = statesWithSnapshotAge.length;
-        const avgSnapshotAgeMs =
-          snapshotAgeCount > 0
-            ? statesWithSnapshotAge.reduce((sum, state) => sum + state.avgSnapshotAgeMs, 0) /
-              snapshotAgeCount
-            : 0;
-        const avgSnapshotAgeJitterMs =
-          snapshotAgeCount > 0
-            ? statesWithSnapshotAge.reduce((sum, state) => sum + state.snapshotAgeJitterMs, 0) /
-              snapshotAgeCount
-            : 0;
-        const snapshotQueueSummary =
-          ghostCount > 0
-            ? [...ghostPlayers.entries()]
-                .map(([playerId, state]) => `${playerId}:${state.snapshots.length}`)
-                .join(", ")
-            : "none";
+        const diagnosticsTabActive =
+          drawerOpenRef.current && activeDebugTabRef.current === "diagnostics";
+        const networkTabActive =
+          drawerOpenRef.current && activeDebugTabRef.current === "network";
 
-        if (trialStartAt != null) {
-          setTrialCurrentMs(nowMs - trialStartAt);
+        if (forcePerfDebugRef.current || diagnosticsTabActive) {
+          if (trialStartAt != null) {
+            setTrialCurrentMs(nowMs - trialStartAt);
+          }
+          setDebug((prev) => ({
+            ...prev,
+            fps: Math.round(1000 / Math.max(frameMsEma, 0.0001)),
+            posX: marbleBody.position.x,
+            posY: marbleBody.position.y,
+            posZ: marbleBody.position.z,
+            speed: marbleBody.velocity.length(),
+            angularSpeed,
+            verticalSpeed,
+            penetrationDepth,
+            rawTiltX: normalizedIntent.x,
+            rawTiltZ: normalizedIntent.z,
+            tiltX: filteredIntent.x,
+            tiltZ: filteredIntent.z,
+            gravX: world.gravity.x,
+            gravY: world.gravity.y,
+            gravZ: world.gravity.z,
+            renderScale: lastRenderScale,
+            perfTier,
+            frameMsEma,
+            physicsMsEma,
+            renderMsEma,
+            miscMsEma,
+          }));
         }
-        setDebug((prev) => ({
-          ...prev,
-          fps: Math.round(1000 / Math.max(frameMsEma, 0.0001)),
-          posX: marbleBody.position.x,
-          posY: marbleBody.position.y,
-          posZ: marbleBody.position.z,
-          speed: marbleBody.velocity.length(),
-          angularSpeed,
-          verticalSpeed,
-          penetrationDepth,
-          rawTiltX: normalizedIntent.x,
-          rawTiltZ: normalizedIntent.z,
-          tiltX: filteredIntent.x,
-          tiltZ: filteredIntent.z,
-          gravX: world.gravity.x,
-          gravY: world.gravity.y,
-          gravZ: world.gravity.z,
-          renderScale: lastRenderScale,
-          perfTier,
-          frameMsEma,
-          physicsMsEma,
-          renderMsEma,
-          miscMsEma,
-        }));
-        setNetSmoothing({
-          ghostPlayers: ghostCount,
-          avgDelayMs,
-          avgJitterMs,
-          avgSnapshotAgeMs,
-          avgSnapshotAgeJitterMs,
-          extrapolatingPlayers,
-          droppedStale: totalDroppedStale,
-          droppedOutOfOrderSeq: totalDroppedOutOfOrderSeq,
-          droppedStaleTimestamp: totalDroppedStaleTimestamp,
-          droppedTooOld: totalDroppedTooOld,
-          timestampCorrected: totalTimestampCorrected,
-          queueOrderViolations: totalQueueOrderViolations,
-          snapshotQueueSummary,
-          latestSnapshotAgeMs: latestAcceptedSnapshotAgeMs,
-          serverClockOffsetMs,
-          inputSourcesSummary,
-          inputIntentX,
-          inputIntentZ,
-        });
+
+        if (forcePerfDebugRef.current || networkTabActive) {
+          const ghostStateList = [...ghostPlayers.values()];
+          const ghostCount = ghostStateList.length;
+          const avgDelayMs =
+            ghostCount > 0
+              ? ghostStateList.reduce((sum, state) => sum + state.interpolationDelayMs, 0) /
+                ghostCount
+              : 0;
+          const avgJitterMs =
+            ghostCount > 0
+              ? ghostStateList.reduce((sum, state) => sum + state.jitterMs, 0) / ghostCount
+              : 0;
+          const statesWithSnapshotAge = ghostStateList.filter(
+            (state) => state.latestSnapshotAgeMs != null,
+          );
+          const snapshotAgeCount = statesWithSnapshotAge.length;
+          const avgSnapshotAgeMs =
+            snapshotAgeCount > 0
+              ? statesWithSnapshotAge.reduce((sum, state) => sum + state.avgSnapshotAgeMs, 0) /
+                snapshotAgeCount
+              : 0;
+          const avgSnapshotAgeJitterMs =
+            snapshotAgeCount > 0
+              ? statesWithSnapshotAge.reduce(
+                  (sum, state) => sum + state.snapshotAgeJitterMs,
+                  0,
+                ) / snapshotAgeCount
+              : 0;
+          const snapshotQueueSummary =
+            ghostCount > 0
+              ? [...ghostPlayers.entries()]
+                  .map(([playerId, state]) => `${playerId}:${state.snapshots.length}`)
+                  .join(", ")
+              : "none";
+
+          setNetSmoothing({
+            ghostPlayers: ghostCount,
+            avgDelayMs,
+            avgJitterMs,
+            avgSnapshotAgeMs,
+            avgSnapshotAgeJitterMs,
+            extrapolatingPlayers,
+            droppedStale: totalDroppedStale,
+            droppedOutOfOrderSeq: totalDroppedOutOfOrderSeq,
+            droppedStaleTimestamp: totalDroppedStaleTimestamp,
+            droppedTooOld: totalDroppedTooOld,
+            timestampCorrected: totalTimestampCorrected,
+            queueOrderViolations: totalQueueOrderViolations,
+            snapshotQueueSummary,
+            latestSnapshotAgeMs: latestAcceptedSnapshotAgeMs,
+            serverClockOffsetMs,
+            inputSourcesSummary,
+            inputIntentX,
+            inputIntentZ,
+          });
+        }
         debugTimer = 0;
       }
 

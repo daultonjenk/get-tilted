@@ -44,3 +44,9 @@ v0.7.5.3 update:
 - Instrumented `HelloMarble` frame timings (frame/physics/render/misc EMA) and surfaced diagnostics fields (render scale + perf tier + EMA timings).
 - Wired mobile governor into renderer pixel ratio updates while preserving existing physics constants and control feel.
 - Verified quality gates pass: `npm run lint`, `npm run typecheck`, `npm run build`.
+
+v0.7.5.4 update:
+- Reduced mobile default render scale to `1.0` and lowered mobile mesh tessellation (marble 16 segments, ghost 12 segments) to cut GPU load without altering physics parameters.
+- Gated diagnostics/network React updates so hidden debug tabs no longer run periodic heavy aggregations unless `?perfdebug=1` is enabled.
+- Kept physics-feel settings unchanged (solver/substeps/CCD/tilt dynamics untouched).
+- Verified quality gates pass after changes: `npm run lint`, `npm run typecheck`, `npm run build`.
