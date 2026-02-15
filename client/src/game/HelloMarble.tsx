@@ -12,7 +12,7 @@ import {
   type TiltState,
 } from "./input/tilt";
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
-import { RaceClient } from "../net/raceClient";
+import { RaceClient, type JoinTimingSnapshot } from "../net/raceClient";
 import { APP_VERSION, BUILD_ID } from "../buildInfo";
 import type {
   MessagePayloadMap,
@@ -477,6 +477,7 @@ export function HelloMarble() {
   });
   const [netStatus, setNetStatus] = useState<WSStatus>("disconnected");
   const [netError, setNetError] = useState<string | null>(null);
+  const [joinTiming, setJoinTiming] = useState<JoinTimingSnapshot | null>(null);
   const [autoJoinRoomCode] = useState(() => {
     if (typeof window === "undefined") {
       return "";
@@ -847,6 +848,9 @@ export function HelloMarble() {
     });
     raceClient.onError((error) => {
       setNetError(error);
+    });
+    raceClient.onJoinTiming((timing) => {
+      setJoinTiming(timing);
     });
     raceClient.onClockSync((offsetMs) => {
       serverClockOffsetMs = offsetMs;
@@ -1989,6 +1993,31 @@ export function HelloMarble() {
     gameMode === "multiplayer" &&
     playersInRoom.length === 2 &&
     readyPlayerIds.length < 2;
+  const joinHandshakePending =
+    gameMode === "multiplayer" &&
+    netStatus !== "disconnected" &&
+    joinTiming != null &&
+    joinTiming.stage !== "hello_ack";
+  const joinStageLabel = joinTiming
+    ? (() => {
+        switch (joinTiming.stage) {
+          case "requested":
+            return "requested";
+          case "socket_connected":
+            return "socket connected";
+          case "join_sent":
+            return "join sent";
+          case "retrying":
+            return "retrying";
+          case "timeout":
+            return "timeout";
+          case "hello_ack":
+            return "ready";
+          default:
+            return "n/a";
+        }
+      })()
+    : "n/a";
 
   const getPlayerLabel = (playerId: string): string => {
     if (playerId === localPlayerId) {
@@ -2269,6 +2298,15 @@ export function HelloMarble() {
               </div>
             ) : null}
             {racePhase === "countdown" ? <p className="raceHint">Countdown started...</p> : null}
+            {joinHandshakePending ? (
+              <p className="raceHint">
+                Joining room ({joinStageLabel}
+                {joinTiming && joinTiming.retryCount > 0
+                  ? `, retry ${joinTiming.retryCount}/${2}`
+                  : ""}
+                )...
+              </p>
+            ) : null}
             {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
             {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
             {!tiltStatus.supported ? (
@@ -2857,6 +2895,26 @@ export function HelloMarble() {
             <p>Status: {netStatus}</p>
             <p>Room: {roomCode || "n/a"}</p>
             <p>Player ID: {localPlayerId || "n/a"}</p>
+            <p>Join stage: {joinStageLabel}</p>
+            <p>Join retries: {joinTiming?.retryCount ?? "n/a"}</p>
+            <p>
+              Join req → socket (ms):{" "}
+              {joinTiming?.elapsedToSocketConnectedMs == null
+                ? "n/a"
+                : joinTiming.elapsedToSocketConnectedMs}
+            </p>
+            <p>
+              Join req → send (ms):{" "}
+              {joinTiming?.elapsedToJoinSentMs == null
+                ? "n/a"
+                : joinTiming.elapsedToJoinSentMs}
+            </p>
+            <p>
+              Join req → ack (ms):{" "}
+              {joinTiming?.elapsedToHelloAckMs == null
+                ? "n/a"
+                : joinTiming.elapsedToHelloAckMs}
+            </p>
             <p>Players: {playersInRoom.length}</p>
             <p>Ready players: {readyPlayerIds.length}</p>
             <p>Race phase: {racePhase}</p>

@@ -83,7 +83,9 @@ export class WSClient {
 
   private url: string;
 
-  private pendingReconnectUrl: string | null = null;
+  private activeSocketEpoch = 0;
+
+  private readonly staleSockets = new Set<WebSocket>();
 
   private readonly messageListeners = new Set<MessageCallback>();
 
@@ -97,27 +99,35 @@ export class WSClient {
 
   connect(url = this.url): void {
     const nextUrl = normalizeWsUrl(url);
-    if (this.socket && this.status !== "disconnected") {
-      if (this.url !== nextUrl) {
-        this.pendingReconnectUrl = nextUrl;
-        this.socket.close();
-      }
+    if (this.socket && this.status !== "disconnected" && this.url === nextUrl) {
       return;
     }
+
+    const previousSocket = this.socket;
     this.url = nextUrl;
+    this.activeSocketEpoch += 1;
+    const epoch = this.activeSocketEpoch;
+    const socket = new WebSocket(this.url);
+    this.socket = socket;
     this.setStatus("connecting");
-    this.socket = new WebSocket(this.url);
-    this.socket.addEventListener("open", () => this.setStatus("connected"));
-    this.socket.addEventListener("close", () => {
+    socket.addEventListener("open", () => {
+      if (!this.isActiveSocket(socket, epoch)) {
+        return;
+      }
+      this.setStatus("connected");
+    });
+    socket.addEventListener("close", () => {
+      this.staleSockets.delete(socket);
+      if (!this.isActiveSocket(socket, epoch)) {
+        return;
+      }
       this.socket = null;
       this.setStatus("disconnected");
-      if (this.pendingReconnectUrl) {
-        const reconnectUrl = this.pendingReconnectUrl;
-        this.pendingReconnectUrl = null;
-        this.connect(reconnectUrl);
-      }
     });
-    this.socket.addEventListener("message", (event) => {
+    socket.addEventListener("message", (event) => {
+      if (!this.isActiveSocket(socket, epoch)) {
+        return;
+      }
       const parsed: ParseResult = safeParseMessage(event.data);
       if (!parsed.ok) {
         this.emitError(parsed.error);
@@ -125,18 +135,32 @@ export class WSClient {
       }
       this.emitMessage(parsed.msg);
     });
-    this.socket.addEventListener("error", () => {
+    socket.addEventListener("error", () => {
+      if (!this.isActiveSocket(socket, epoch)) {
+        return;
+      }
       this.emitError("WebSocket error");
     });
+
+    if (previousSocket && previousSocket !== socket) {
+      this.retireSocket(previousSocket);
+    }
   }
 
   disconnect(): void {
-    this.pendingReconnectUrl = null;
-    if (!this.socket) {
+    const activeSocket = this.socket;
+    this.socket = null;
+    this.activeSocketEpoch += 1;
+    this.retireSocket(activeSocket);
+    for (const stale of this.staleSockets) {
+      this.retireSocket(stale);
+    }
+    this.staleSockets.clear();
+    if (!activeSocket) {
       this.setStatus("disconnected");
       return;
     }
-    this.socket.close();
+    this.setStatus("disconnected");
   }
 
   send<TType extends keyof MessagePayloadMap>(
@@ -172,6 +196,22 @@ export class WSClient {
 
   getUrl(): string {
     return this.url;
+  }
+
+  private isActiveSocket(socket: WebSocket, epoch: number): boolean {
+    return this.socket === socket && this.activeSocketEpoch === epoch;
+  }
+
+  private retireSocket(socket: WebSocket | null): void {
+    if (!socket) {
+      return;
+    }
+    this.staleSockets.add(socket);
+    try {
+      socket.close();
+    } catch {
+      // Ignore close races; stale events are guarded by epoch checks.
+    }
   }
 
   private setStatus(status: WSStatus): void {
