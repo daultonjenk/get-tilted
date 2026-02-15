@@ -119,41 +119,21 @@ textarea {
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: #fff3bf;
-  text-shadow:
-    0 0 10px rgb(255 246 208 / 32%),
-    0 6px 16px rgb(0 0 0 / 45%);
-  transform-origin: 50% 60%;
+  text-shadow: 0 4px 10px rgb(0 0 0 / 38%);
+  transform-origin: 50% 55%;
   will-change: transform;
-  animation: menu-title-tilt 6.6s linear infinite;
+  display: inline-block;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  animation: menu-title-tilt 5.9s cubic-bezier(0.38, 0.02, 0.64, 0.99) infinite alternate;
 }
 
 @keyframes menu-title-tilt {
   0% {
-    transform: rotate(-5.6deg);
-  }
-  12.5% {
-    transform: rotate(-4deg);
-  }
-  25% {
-    transform: rotate(0deg);
-  }
-  37.5% {
-    transform: rotate(4deg);
-  }
-  50% {
-    transform: rotate(5.6deg);
-  }
-  62.5% {
-    transform: rotate(4deg);
-  }
-  75% {
-    transform: rotate(0deg);
-  }
-  87.5% {
-    transform: rotate(-4deg);
+    transform: rotate(-6.2deg);
   }
   100% {
-    transform: rotate(-5.6deg);
+    transform: rotate(6.2deg);
   }
 }
 
