@@ -92,11 +92,54 @@ textarea {
   text-align: center;
 }
 
+.multiplayerLobbyCard {
+  width: min(560px, 92vw);
+  padding: clamp(1rem, 2.6vw, 1.5rem);
+  gap: 0.7rem;
+  align-items: center;
+  text-align: center;
+}
+
 .raceOverlayTitle {
   font-size: 0.98rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.lobbyCodeLabel {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d9ecff;
+}
+
+.lobbyCodeValue {
+  margin: 0;
+  font-size: clamp(2rem, 7vw, 3rem);
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  color: #fff7c7;
+}
+
+.lobbyQrWrap {
+  width: min(360px, 100%);
+  min-height: 220px;
+  border: 1px solid rgb(155 206 255 / 30%);
+  border-radius: 0.65rem;
+  background: rgb(7 17 31 / 72%);
+  padding: 0.6rem;
+  display: grid;
+  place-items: center;
+}
+
+.lobbyQrImage {
+  width: min(300px, 100%);
+  aspect-ratio: 1;
+  border-radius: 0.4rem;
+  background: #fff;
 }
 
 .menuTitleWrap {
@@ -625,6 +668,19 @@ textarea {
   .menuCard .modePickerButtons {
     grid-template-columns: 1fr;
     width: min(360px, 100%);
+  }
+
+  .multiplayerLobbyCard {
+    width: min(420px, 100%);
+  }
+
+  .lobbyQrWrap {
+    width: 100%;
+    min-height: 180px;
+  }
+
+  .lobbyQrImage {
+    width: min(240px, 100%);
   }
 
   .debugDrawer {

@@ -488,7 +488,6 @@ export function HelloMarble() {
   const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "unselected";
   const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
   const [roomCode, setRoomCode] = useState("");
-  const [joinRoomCode, setJoinRoomCode] = useState(autoJoinRoomCode);
   const [localPlayerId, setLocalPlayerId] = useState("");
   const [playersInRoom, setPlayersInRoom] = useState<Array<{ playerId: string; name?: string }>>(
     [],
@@ -501,7 +500,6 @@ export function HelloMarble() {
   const [countdownStepMs, setCountdownStepMs] = useState(1000);
   const [countdownToken, setCountdownToken] = useState<string | null>(null);
   const [raceResult, setRaceResult] = useState<RaceResultPayload | null>(null);
-  const [showQr, setShowQr] = useState(false);
   const [devJoinHost, setDevJoinHost] = useState(() => {
     if (typeof window === "undefined") return "";
     return sanitizeJoinHost(window.localStorage.getItem(DEV_JOIN_HOST_KEY) ?? "");
@@ -862,8 +860,6 @@ export function HelloMarble() {
             return;
           }
           setRoomCode(message.payload.roomCode);
-          setJoinRoomCode(message.payload.roomCode);
-          setShowQr(true);
           setNetError(null);
           setReadyPlayerIds([]);
           setLocalReady(false);
@@ -1988,6 +1984,10 @@ export function HelloMarble() {
     trialState !== "finished";
   const showMultiplayerNetworkUi =
     gameMode === "multiplayer" && !multiplayerRaceInProgress;
+  const creatingLobby =
+    gameMode === "multiplayer" &&
+    !roomCode &&
+    (netStatus === "connecting" || netStatus === "connected");
   const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
   const waitingForReady =
     gameMode === "multiplayer" &&
@@ -2114,17 +2114,6 @@ export function HelloMarble() {
     raceClientRef.current?.createRoom();
   };
 
-  const joinRoom = () => {
-    const code = joinRoomCode.trim().toUpperCase();
-    if (!code) {
-      setNetError("Join room code is empty.");
-      return;
-    }
-    setNetError(null);
-    setRaceResult(null);
-    raceClientRef.current?.joinRoom(code);
-  };
-
   const toggleReady = async () => {
     if (gameMode !== "multiplayer") {
       setNetError("Switch to Multiplayer mode to use READY.");
@@ -2189,9 +2178,14 @@ export function HelloMarble() {
     setGameMode(nextMode);
     setCountdownStartAtMs(null);
     setCountdownToken(null);
+    setRoomCode("");
+    setLocalPlayerId("");
+    setPlayersInRoom([]);
     setReadyPlayerIds([]);
     setLocalReady(false);
     setRaceResult(null);
+    setNetError(null);
+    setJoinTiming(null);
     hasSentFinishRef.current = false;
     countdownIndexRef.current = -1;
     countdownGoHandledRef.current = false;
@@ -2200,8 +2194,8 @@ export function HelloMarble() {
       return;
     }
     if (nextMode === "multiplayer") {
-      setDrawerOpen(true);
-      setActiveDebugTab("network");
+      setDrawerOpen(false);
+      raceClientRef.current?.createRoom();
     }
     setRacePhase("waiting");
     setControlsLocked(true);
@@ -2273,14 +2267,21 @@ export function HelloMarble() {
         </div>
       ) : null}
       {showRaceLobby ? (
-        <div className="raceOverlay">
-          <div className="raceOverlayCard">
-            <p className="raceOverlayTitle">Race Lobby</p>
-            <p>
-              {roomCode
-                ? `Room ${roomCode}`
-                : "Create or join a room from the Network tab"}
-            </p>
+        <div className="raceOverlay menuOverlay multiplayerLobbyOverlay">
+          <div className="raceOverlayCard multiplayerLobbyCard">
+            <p className="raceOverlayTitle">Multiplayer Lobby</p>
+            <p className="lobbyCodeLabel">Lobby Code</p>
+            <p className="lobbyCodeValue">{roomCode || "----"}</p>
+            <div className="lobbyQrWrap">
+              {qrImageUrl ? (
+                <img className="lobbyQrImage" src={qrImageUrl} alt="Join room QR code" />
+              ) : (
+                <p className="raceHint">
+                  {creatingLobby ? "Creating lobby..." : "QR available after room creation."}
+                </p>
+              )}
+            </div>
+            {joinHostWarning ? <p className="raceHint">{joinHostWarning}</p> : null}
             <p>Status: {netStatus}</p>
             <p>Players: {playersInRoom.length}/2</p>
             {playersInRoom.length > 0 ? (
@@ -2307,6 +2308,7 @@ export function HelloMarble() {
                 )...
               </p>
             ) : null}
+            {creatingLobby ? <p className="raceHint">Waiting for room code...</p> : null}
             {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
             {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
             {!tiltStatus.supported ? (
@@ -2958,20 +2960,6 @@ export function HelloMarble() {
                 Create Room
               </button>
             </div>
-            <label className="controlLabel" htmlFor="joinRoomCode">
-              Join Room
-            </label>
-            <div className="controlRow">
-              <input
-                id="joinRoomCode"
-                value={joinRoomCode}
-                onChange={(event) => setJoinRoomCode(event.target.value.toUpperCase())}
-                placeholder="ROOMCODE"
-              />
-              <button type="button" onClick={joinRoom}>
-                Join
-              </button>
-            </div>
             <label className="controlLabel" htmlFor="devJoinHost">
               Dev Join Host (LAN IPv4)
             </label>
@@ -2984,19 +2972,7 @@ export function HelloMarble() {
             <p>Resolved WS URL (this device): {resolvedWsUrl}</p>
             {joinWsUrl ? <p>Expected join WS URL: {joinWsUrl}</p> : null}
             {joinHostWarning ? <p className="errorText">{joinHostWarning}</p> : null}
-            <label className="controlCheck">
-              <input
-                type="checkbox"
-                checked={showQr}
-                onChange={(event) => setShowQr(event.target.checked)}
-                disabled={!roomCode}
-              />
-              Show QR
-            </label>
             {joinUrl ? <p className="joinUrl">{joinUrl}</p> : null}
-            {showQr && qrImageUrl ? (
-              <img className="qrPreview" src={qrImageUrl} alt="Join room QR code" />
-            ) : null}
           </div>
         ) : null}
 
