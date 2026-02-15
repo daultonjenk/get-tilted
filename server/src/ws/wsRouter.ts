@@ -169,11 +169,8 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
           });
           return;
         }
-        send(ws as SendableSocket, "race:hello:ack", {
-          roomCode,
-          playerId,
-          players: roomStore.getPlayers(roomCode),
-        });
+        roomStore.setPlayerName(ws, parsed.msg.payload.name);
+        broadcastHelloAck(roomCode);
         return;
       }
       case "race:state": {

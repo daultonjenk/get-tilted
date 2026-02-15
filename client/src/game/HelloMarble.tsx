@@ -154,6 +154,7 @@ const SNAPSHOT_MAX_AGE_MS = 2000;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
+const PLAYER_NAME_STORAGE_KEY = "get-tilted:v0.7.2.8:player-name";
 const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
 
@@ -272,6 +273,10 @@ function sanitizeJoinHost(value: string): string {
 
   const hostPattern = /^[A-Za-z0-9.-]+(?::\d+)?$/;
   return hostPattern.test(next) ? next : "";
+}
+
+function sanitizePlayerName(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 18);
 }
 
 function isLocalHost(hostname: string): boolean {
@@ -505,6 +510,10 @@ export function HelloMarble() {
     if (typeof window === "undefined") return "";
     return sanitizeJoinHost(window.localStorage.getItem(DEV_JOIN_HOST_KEY) ?? "");
   });
+  const [playerNameInput, setPlayerNameInput] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return sanitizePlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "");
+  });
   const [netSmoothing, setNetSmoothing] = useState<NetSmoothingDebug>({
     ghostPlayers: 0,
     avgDelayMs: 0,
@@ -530,6 +539,7 @@ export function HelloMarble() {
   const touchTiltRef = useRef(touchTilt);
   const tuningRef = useRef(tuning);
   const raceClientRef = useRef<RaceClient | null>(null);
+  const playerNameRef = useRef(playerNameInput);
   const localPlayerIdRef = useRef(localPlayerId);
   const autoJoinRoomCodeRef = useRef(autoJoinRoomCode);
   const gameModeRef = useRef(gameMode);
@@ -573,6 +583,11 @@ export function HelloMarble() {
   }, [localPlayerId]);
 
   useEffect(() => {
+    playerNameRef.current = playerNameInput;
+    raceClientRef.current?.setPreferredName(playerNameInput || undefined);
+  }, [playerNameInput]);
+
+  useEffect(() => {
     gameModeRef.current = gameMode;
   }, [gameMode]);
 
@@ -610,6 +625,16 @@ export function HelloMarble() {
     }
     window.localStorage.setItem(DEV_JOIN_HOST_KEY, sanitized);
   }, [devJoinHost]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sanitized = sanitizePlayerName(playerNameInput);
+    if (!sanitized) {
+      window.localStorage.removeItem(PLAYER_NAME_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, sanitized);
+  }, [playerNameInput]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -814,6 +839,7 @@ export function HelloMarble() {
 
     const raceClient = new RaceClient();
     raceClientRef.current = raceClient;
+    raceClient.setPreferredName(playerNameRef.current || undefined);
     raceClient.onStatusChange((status) => {
       setNetStatus(status);
       if (status === "disconnected") {
@@ -842,7 +868,7 @@ export function HelloMarble() {
       ) {
         autoJoinAttemptedRef.current = true;
         setNetError(null);
-        raceClient.joinRoom(autoJoinRoomCodeRef.current);
+        raceClient.joinRoom(autoJoinRoomCodeRef.current, playerNameRef.current || undefined);
       }
     });
     raceClient.onError((error) => {
@@ -1117,7 +1143,7 @@ export function HelloMarble() {
     });
     if (autoJoinRoomCodeRef.current) {
       autoJoinAttemptedRef.current = true;
-      raceClient.joinRoom(autoJoinRoomCodeRef.current);
+      raceClient.joinRoom(autoJoinRoomCodeRef.current, playerNameRef.current || undefined);
     }
 
     const computeSpawnWorld = (): CANNON.Vec3 => {
@@ -1992,10 +2018,6 @@ export function HelloMarble() {
     (netStatus === "connecting" || netStatus === "connected");
   const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
   const twoPlayersInLobby = gameMode === "multiplayer" && playersInRoom.length === 2;
-  const waitingForReady =
-    gameMode === "multiplayer" &&
-    playersInRoom.length === 2 &&
-    readyPlayerIds.length < 2;
   const joinHandshakePending =
     gameMode === "multiplayer" &&
     netStatus !== "disconnected" &&
@@ -2023,10 +2045,13 @@ export function HelloMarble() {
     : "n/a";
 
   const getPlayerLabel = (playerId: string): string => {
-    if (playerId === localPlayerId) {
-      return "You";
-    }
     const player = playersInRoom.find((entry) => entry.playerId === playerId);
+    if (player?.name) {
+      return player.name;
+    }
+    if (playerId === localPlayerId) {
+      return playerNameInput || "You";
+    }
     return player?.name || player?.playerId || playerId;
   };
 
@@ -2201,6 +2226,7 @@ export function HelloMarble() {
     }
     if (nextMode === "multiplayer") {
       setDrawerOpen(false);
+      raceClientRef.current?.setPreferredName(playerNameRef.current || undefined);
       raceClientRef.current?.createRoom();
     }
     setRacePhase("waiting");
@@ -2302,17 +2328,26 @@ export function HelloMarble() {
               )}
             </div>
             {joinHostWarning ? <p className="raceHint">{joinHostWarning}</p> : null}
-            <p>Status: {netStatus}</p>
+            <label className="controlLabel lobbyNameField" htmlFor="lobbyPlayerName">
+              Marble Name (Optional)
+            </label>
+            <input
+              id="lobbyPlayerName"
+              className="lobbyNameInput"
+              value={playerNameInput}
+              onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
+              placeholder="Enter name"
+              maxLength={18}
+              autoComplete="nickname"
+            />
             <p>Players: {playersInRoom.length}/2</p>
             {playersInRoom.length > 0 ? (
               <div className="racePlayers">
                 {playersInRoom.map((player) => {
                   const isReady = readyPlayerIds.includes(player.playerId);
-                  const isLocal = player.playerId === localPlayerId;
                   return (
                     <p key={player.playerId} className={isReady ? "ready" : "waiting"}>
-                      {isLocal ? "You" : player.name || player.playerId}:{" "}
-                      {isReady ? "READY" : "Waiting"}
+                      {getPlayerLabel(player.playerId)}: {isReady ? "READY" : "Waiting"}
                     </p>
                   );
                 })}
@@ -2329,7 +2364,6 @@ export function HelloMarble() {
             ) : null}
             {creatingLobby ? <p className="raceHint">Waiting for room code...</p> : null}
             {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
-            {waitingForReady ? <p className="raceHint">Both players must press READY.</p> : null}
             {!tiltStatus.supported ? (
               <p className="raceHint">
                 Tilt unavailable on this device. Fallback controls enabled.

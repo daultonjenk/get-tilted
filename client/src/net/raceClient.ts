@@ -69,6 +69,7 @@ export class RaceClient {
   private roomCode = "";
 
   private playerId = "";
+  private preferredName: string | undefined;
 
   private readonly messageListeners = new Set<MessageListener>();
 
@@ -142,6 +143,7 @@ export class RaceClient {
         this.roomCode = message.payload.roomCode;
         this.pendingJoin = {
           roomCode: message.payload.roomCode,
+          name: this.preferredName,
           handshakeSent: false,
         };
         this.startJoinAttempt(message.payload.roomCode);
@@ -195,6 +197,17 @@ export class RaceClient {
     return this.playerId;
   }
 
+  setPreferredName(name?: string): void {
+    const normalized = name?.trim();
+    this.preferredName = normalized ? normalized : undefined;
+    if (this.pendingJoin) {
+      this.pendingJoin.name = this.preferredName;
+    }
+    if (this.roomCode && this.ws.getStatus() === "connected") {
+      this.sendHello(this.preferredName, this.roomCode);
+    }
+  }
+
   createRoom(): void {
     this.resetRaceStateSeq();
     this.pendingCreateRoom = true;
@@ -210,9 +223,10 @@ export class RaceClient {
 
   joinRoom(roomCode: string, name?: string): void {
     const normalized = roomCode.trim().toUpperCase();
+    const resolvedName = name ?? this.preferredName;
     this.resetRaceStateSeq();
     this.roomCode = normalized;
-    this.pendingJoin = { roomCode: normalized, name, handshakeSent: false };
+    this.pendingJoin = { roomCode: normalized, name: resolvedName, handshakeSent: false };
     this.startJoinAttempt(normalized);
     this.ws.connect(this.getRoomSocketUrl(normalized));
     this.flushPendingActions();

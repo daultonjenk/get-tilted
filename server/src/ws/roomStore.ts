@@ -142,6 +142,23 @@ export class RoomStore {
     }));
   }
 
+  setPlayerName(client: WebSocket, name?: string): boolean {
+    const roomCode = this.clientToRoom.get(client);
+    if (!roomCode) {
+      return false;
+    }
+    const roomClients = this.rooms.get(roomCode);
+    if (!roomClients) {
+      return false;
+    }
+    const entry = roomClients.find((roomEntry) => roomEntry.ws === client);
+    if (!entry) {
+      return false;
+    }
+    entry.name = name;
+    return true;
+  }
+
   setReady(roomCode: string, playerId: string, ready: boolean): boolean {
     const roomClients = this.rooms.get(roomCode) ?? [];
     if (!roomClients.some((entry) => entry.playerId === playerId)) {

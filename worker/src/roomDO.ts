@@ -144,11 +144,8 @@ export class RoomDO {
             });
             return;
           }
-          this.send(server, "race:hello:ack", {
-            roomCode: this.roomCode,
-            playerId,
-            players: this.getPlayers(),
-          });
+          server.playerName = parsed.msg.payload.name;
+          this.broadcastHelloAck();
           return;
         }
         case "race:state": {

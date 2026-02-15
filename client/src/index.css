@@ -250,7 +250,13 @@ textarea {
 .racePlayers {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.06rem;
+}
+
+.racePlayers p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.15;
 }
 
 .racePlayers p.waiting {
@@ -265,6 +271,24 @@ textarea {
 .raceHint {
   color: #ffdc8f;
   font-size: 0.82rem;
+}
+
+.lobbyNameField {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #d4e8ff;
+}
+
+.lobbyNameInput {
+  width: min(360px, 100%);
+  border: 1px solid #9bc6ff;
+  border-radius: 0.45rem;
+  background: #0f2c4d;
+  color: #eaf4ff;
+  padding: 0.45rem 0.6rem;
+  min-height: 40px;
 }
 
 .readyButton {
