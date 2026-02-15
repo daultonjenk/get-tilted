@@ -2217,24 +2217,26 @@ export function HelloMarble() {
       <p className="versionBadge">Version {APP_VERSION}</p>
       <div className="viewport" ref={mountRef} />
       {showModePicker ? (
-        <div className="raceOverlay">
-          <div className="raceOverlayCard">
-            <p className="raceOverlayTitle">Get Tilted</p>
-            <p>Choose a mode to begin.</p>
+        <div className="raceOverlay menuOverlay">
+          <div className="raceOverlayCard menuCard">
+            <div className="menuTitleWrap">
+              <h1 className="menuGameTitle">Get Tilted</h1>
+            </div>
+            <p className="menuIntroText">Choose a mode to begin.</p>
             <div className="modePickerButtons">
               <button
                 type="button"
                 className="modeButton"
                 onClick={() => switchGameMode("solo")}
               >
-                Play Solo
+                Single Player
               </button>
               <button
                 type="button"
                 className="modeButton"
                 onClick={() => switchGameMode("multiplayer")}
               >
-                Play Multiplayer
+                Multiplayer
               </button>
             </div>
           </div>
@@ -2243,9 +2245,6 @@ export function HelloMarble() {
       {showRaceLobby ? (
         <div className="raceOverlay">
           <div className="raceOverlayCard">
-            <div className="menuTitleWrap">
-              <h1 className="menuGameTitle">Get Tilted</h1>
-            </div>
             <p className="raceOverlayTitle">Race Lobby</p>
             <p>
               {roomCode
