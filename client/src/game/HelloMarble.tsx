@@ -1989,6 +1989,7 @@ export function HelloMarble() {
     !roomCode &&
     (netStatus === "connecting" || netStatus === "connected");
   const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
+  const twoPlayersInLobby = gameMode === "multiplayer" && playersInRoom.length === 2;
   const waitingForReady =
     gameMode === "multiplayer" &&
     playersInRoom.length === 2 &&
@@ -2273,7 +2274,21 @@ export function HelloMarble() {
             <p className="lobbyCodeLabel">Lobby Code</p>
             <p className="lobbyCodeValue">{roomCode || "----"}</p>
             <div className="lobbyQrWrap">
-              {qrImageUrl ? (
+              {twoPlayersInLobby ? (
+                <button
+                  type="button"
+                  className={`lobbyReadyButton ${localReady ? "ready" : ""}`}
+                  onClick={() => void toggleReady()}
+                  disabled={
+                    netStatus !== "connected" ||
+                    !roomCode ||
+                    !localPlayerId ||
+                    racePhase !== "waiting"
+                  }
+                >
+                  {localReady ? "UNREADY" : "READY"}
+                </button>
+              ) : qrImageUrl ? (
                 <img className="lobbyQrImage" src={qrImageUrl} alt="Join room QR code" />
               ) : (
                 <p className="raceHint">
@@ -2316,19 +2331,6 @@ export function HelloMarble() {
                 Tilt unavailable on this device. Fallback controls enabled.
               </p>
             ) : null}
-            <button
-              type="button"
-              className={`readyButton ${localReady ? "ready" : ""}`}
-              onClick={() => void toggleReady()}
-              disabled={
-                netStatus !== "connected" ||
-                !roomCode ||
-                !localPlayerId ||
-                racePhase !== "waiting"
-              }
-            >
-              {localReady ? "UNREADY" : "READY"}
-            </button>
           </div>
         </div>
       ) : null}

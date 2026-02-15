@@ -142,6 +142,30 @@ textarea {
   background: #fff;
 }
 
+.lobbyReadyButton {
+  width: min(300px, 100%);
+  aspect-ratio: 1;
+  border: 1px solid #ffe59d;
+  border-radius: 0.5rem;
+  background: linear-gradient(145deg, #8a5a11, #5f3b07);
+  color: #fff6dc;
+  font-size: clamp(1.3rem, 4.2vw, 2rem);
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  cursor: pointer;
+}
+
+.lobbyReadyButton.ready {
+  background: linear-gradient(145deg, #1f9f4d, #0d6631);
+  border-color: #8fffad;
+  color: #effff4;
+}
+
+.lobbyReadyButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .menuTitleWrap {
   display: flex;
   justify-content: center;
@@ -680,6 +704,10 @@ textarea {
   }
 
   .lobbyQrImage {
+    width: min(240px, 100%);
+  }
+
+  .lobbyReadyButton {
     width: min(240px, 100%);
   }
 
