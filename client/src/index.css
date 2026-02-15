@@ -532,6 +532,27 @@ textarea {
   }
 }
 
+.floatingGyroCalibrateButton {
+  position: absolute;
+  right: 0.8rem;
+  bottom: 0.8rem;
+  z-index: 18;
+  border: 1px solid #9bc6ff;
+  border-radius: 0.45rem;
+  background: rgb(15 44 77 / 94%);
+  color: #eaf4ff;
+  min-height: 40px;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.floatingGyroCalibrateButton:active {
+  transform: translateY(1px);
+}
+
 .debugDrawer {
   position: absolute;
   top: 0.75rem;

@@ -279,6 +279,16 @@ function sanitizePlayerName(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 18);
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    return true;
+  }
+  return target instanceof HTMLElement && target.isContentEditable;
+}
+
 function isLocalHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
@@ -1184,6 +1194,9 @@ export function HelloMarble() {
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableEventTarget(event.target)) {
+        return;
+      }
       if (
         event.key === "ArrowUp" ||
         event.key === "ArrowDown" ||
@@ -1198,6 +1211,9 @@ export function HelloMarble() {
         event.key === "S" ||
         event.key === "D"
       ) {
+        if (controlsLockedRef.current) {
+          return;
+        }
         event.preventDefault();
         pressedKeys.add(event.key);
       }
@@ -2012,6 +2028,8 @@ export function HelloMarble() {
     multiplayerMenusVisible && !showMultiplayerResult;
   const showMultiplayerNetworkUi =
     multiplayerMenusVisible && !multiplayerRaceInProgress;
+  const showFloatingGyroCalibrateButton =
+    tiltStatus.supported && tiltStatus.enabled && tiltStatus.permission === "granted";
   const creatingLobby =
     gameMode === "multiplayer" &&
     !roomCode &&
@@ -2442,6 +2460,15 @@ export function HelloMarble() {
             {countdownToken}
           </div>
         </div>
+      ) : null}
+      {showFloatingGyroCalibrateButton ? (
+        <button
+          type="button"
+          className="floatingGyroCalibrateButton"
+          onClick={() => calibrateTiltRef.current()}
+        >
+          Recalibrate
+        </button>
       ) : null}
       {showMultiplayerNetworkUi || gameMode === "solo" ? (
         <DebugDrawer
