@@ -972,6 +972,19 @@ export function HelloMarble() {
     const tempQuatD = new THREE.Quaternion();
     const boardPosThree = new THREE.Vector3();
     const boardQuatThree = new THREE.Quaternion();
+    const lastBodyPos = new THREE.Vector3(
+      marbleBody.position.x,
+      marbleBody.position.y,
+      marbleBody.position.z,
+    );
+    const lastBodyQuat = new THREE.Quaternion(
+      marbleBody.quaternion.x,
+      marbleBody.quaternion.y,
+      marbleBody.quaternion.z,
+      marbleBody.quaternion.w,
+    );
+    const interpolatedBodyPos = new THREE.Vector3();
+    const interpolatedBodyQuat = new THREE.Quaternion();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -1451,6 +1464,13 @@ export function HelloMarble() {
       unfreezeMarble();
       marbleBody.position.copy(computeSpawnWorld());
       marbleBody.quaternion.set(0, 0, 0, 1);
+      lastBodyPos.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
+      lastBodyQuat.set(
+        marbleBody.quaternion.x,
+        marbleBody.quaternion.y,
+        marbleBody.quaternion.z,
+        marbleBody.quaternion.w,
+      );
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
       trialStartAt = null;
@@ -1779,6 +1799,13 @@ export function HelloMarble() {
       }
 
       while (accumulator >= TIMESTEP) {
+        lastBodyPos.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
+        lastBodyQuat.set(
+          marbleBody.quaternion.x,
+          marbleBody.quaternion.y,
+          marbleBody.quaternion.z,
+          marbleBody.quaternion.w,
+        );
         world.step(TIMESTEP);
         accumulator -= TIMESTEP;
       }
@@ -1860,17 +1887,23 @@ export function HelloMarble() {
       }
       prevMarbleZ = marbleZ;
 
-      marbleMesh.position.set(
+      const renderAlpha = clamp(accumulator / TIMESTEP, 0, 1);
+      tempVecD.set(
         marbleBody.position.x,
         marbleBody.position.y,
         marbleBody.position.z,
       );
-      marbleMesh.quaternion.set(
+      interpolatedBodyPos.copy(lastBodyPos).lerp(tempVecD, renderAlpha);
+      marbleMesh.position.copy(interpolatedBodyPos);
+
+      tempQuatD.set(
         marbleBody.quaternion.x,
         marbleBody.quaternion.y,
         marbleBody.quaternion.z,
         marbleBody.quaternion.w,
       );
+      interpolatedBodyQuat.copy(lastBodyQuat).slerp(tempQuatD, renderAlpha);
+      marbleMesh.quaternion.copy(interpolatedBodyQuat);
 
       boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
       boardQuatThree.set(
