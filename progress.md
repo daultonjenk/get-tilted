@@ -32,3 +32,9 @@ v0.6.1 update:
 - Solo finish now freezes marble at the line and shows restart CTA for quick retry.
 - Multiplayer selection now opens debug drawer directly on the `Network` tab to expose server/join options.
 - Debug drawer is hidden before mode selection and shown after choosing solo or multiplayer.
+
+v0.7.5.0 update:
+- Switched board collider to kinematic motion and now feed per-frame linear/angular velocity before stepping to improve contact stability at high speed.
+- Added hybrid anti-penetration safeguard that only nudges the marble outward when measurable floor penetration is detected, and removes inward normal velocity.
+- Reworked startup tuning so canonical defaults auto-apply the selected physics preset values (marble preset traction/damping by default), preventing friction=0 startup gliding.
+- Added angular speed diagnostics and a more asymmetric marble texture so true physics spin is visibly readable.

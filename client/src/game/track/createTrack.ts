@@ -135,7 +135,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const group = new THREE.Group();
   group.name = "track";
 
-  const boardBody = new CANNON.Body({ mass: 0 });
+  const boardBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
   boardBody.position.set(0, 0, 0);
   boardBody.quaternion.set(0, 0, 0, 1);
 

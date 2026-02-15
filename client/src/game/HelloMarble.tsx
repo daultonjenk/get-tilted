@@ -31,6 +31,7 @@ type MarbleDebug = {
   posY: number;
   posZ: number;
   speed: number;
+  angularSpeed: number;
   verticalSpeed: number;
   penetrationDepth: number;
   rawTiltX: number;
@@ -152,6 +153,9 @@ const TOPDOWN_Z_OFFSET = 2;
 const BOARD_TILT_SMOOTH = 12;
 const PIVOT_SMOOTH = 10;
 const TRACK_FLOOR_TOP_Y = 0.3;
+const PENETRATION_EPSILON = 0.004;
+const PENETRATION_CORRECTION_BIAS = 0.001;
+const PENETRATION_CORRECTION_MAX = 0.08;
 const SOURCE_RATE_MS = 1000 / 15;
 const INTERP_DELAY_MIN_MS = 120;
 const INTERP_DELAY_MAX_MS = 165;
@@ -168,26 +172,26 @@ const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
 
 const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
-  gravityG: 19.7,
+  gravityG: 18,
   tiltStrength: 1.63,
   gyroSensitivity: 1.35,
   maxSpeed: 20,
   maxTiltDeg: 14,
   maxBoardAngVel: 5,
   tiltFilterTau: 0.1,
-  linearDamping: 0.01,
-  angularDamping: 0.01,
+  linearDamping: 0.08,
+  angularDamping: 0.08,
   cameraPreset: "chaseCentered",
-  bounce: 0.25,
-  contactFriction: 0,
-  contactRestitution: 0.25,
+  bounce: 0.1,
+  contactFriction: 0.88,
+  contactRestitution: 0.1,
   invertTiltX: true,
   invertTiltZ: false,
   invertCameraSide: false,
   enableExtraDownforce: false,
   extraDownForce: 0.7,
   renderScaleMobile: 1.2,
-  debugUpdateHzMobile: 2,
+  debugUpdateHzMobile: 5,
   physicsMaxSubSteps: 6,
   physicsSolverIterations: 20,
   ccdSpeedThreshold: 0.75,
@@ -333,8 +337,19 @@ function isPhysicsPresetId(value: unknown): value is PhysicsPresetId {
   return value === "marble" || value === "floaty" || value === "heavy";
 }
 
-function sanitizeTuning(input: unknown): TuningState {
+function buildCanonicalTuning(): TuningState {
   const base = { ...DEFAULT_TUNING };
+  const presetValues = PHYSICS_PRESETS[base.physicsPreset];
+  return {
+    ...base,
+    ...presetValues,
+    bounce: presetValues.bounce,
+    contactRestitution: presetValues.bounce,
+  };
+}
+
+function sanitizeTuning(input: unknown): TuningState {
+  const base = buildCanonicalTuning();
   if (!input || typeof input !== "object") {
     return base;
   }
@@ -420,10 +435,10 @@ function sanitizeTuning(input: unknown): TuningState {
 
 function loadTuning(): TuningState {
   if (typeof window === "undefined") {
-    return { ...DEFAULT_TUNING };
+    return buildCanonicalTuning();
   }
 
-  const defaultTuning = { ...DEFAULT_TUNING };
+  const defaultTuning = buildCanonicalTuning();
   // Each fresh app launch starts from canonical defaults, regardless of prior dev tuning.
   window.localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(defaultTuning));
   return defaultTuning;
@@ -474,8 +489,8 @@ function formatTimeMs(ms: number | null): string {
 
 function createMarbleTexture(): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 128;
+  canvas.width = 512;
+  canvas.height = 256;
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     const fallback = new THREE.CanvasTexture(canvas);
@@ -484,30 +499,48 @@ function createMarbleTexture(): THREE.CanvasTexture {
     return fallback;
   }
 
-  ctx.fillStyle = "#2b4058";
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, "#193145");
+  gradient.addColorStop(0.55, "#1f4f78");
+  gradient.addColorStop(1, "#102235");
+  ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  const stripeColors = ["#5cc8ff", "#1f8be8", "#8be0ff", "#1767c8"];
-  const stripeWidth = canvas.width / 16;
-  for (let i = 0; i < 16; i += 1) {
-    ctx.fillStyle = stripeColors[i % stripeColors.length] ?? "#5cc8ff";
-    ctx.fillRect(i * stripeWidth, 0, stripeWidth, canvas.height);
+  const stripeColors = ["#64d2ff", "#2b8be0", "#4cb4ff"];
+  const stripeWidth = canvas.width / 20;
+  for (let i = 0; i < 20; i += 1) {
+    ctx.fillStyle = stripeColors[i % stripeColors.length] ?? "#64d2ff";
+    ctx.fillRect(i * stripeWidth, 0, stripeWidth * 0.7, canvas.height);
   }
 
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.fillRect(canvas.width * 0.46, 0, canvas.width * 0.08, canvas.height);
-
-  ctx.strokeStyle = "rgba(255,255,255,0.35)";
-  ctx.lineWidth = 6;
+  ctx.fillStyle = "#ff6f61";
+  ctx.fillRect(canvas.width * 0.08, canvas.height * 0.2, canvas.width * 0.1, canvas.height * 0.2);
+  ctx.fillStyle = "#ffd166";
   ctx.beginPath();
-  ctx.moveTo(0, canvas.height * 0.5);
-  ctx.lineTo(canvas.width, canvas.height * 0.5);
+  ctx.arc(canvas.width * 0.76, canvas.height * 0.7, canvas.height * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(canvas.width * 0.48, 0, canvas.width * 0.03, canvas.height);
+
+  ctx.strokeStyle = "rgba(0,0,0,0.45)";
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.moveTo(canvas.width * 0.15, 0);
+  ctx.lineTo(canvas.width * 0.95, canvas.height);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(0, canvas.height * 0.22);
+  ctx.lineTo(canvas.width, canvas.height * 0.78);
   ctx.stroke();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
   texture.needsUpdate = true;
   return texture;
 }
@@ -566,6 +599,7 @@ export function HelloMarble() {
     posY: 0,
     posZ: 0,
     speed: 0,
+    angularSpeed: 0,
     verticalSpeed: 0,
     penetrationDepth: 0,
     rawTiltX: 0,
@@ -918,6 +952,19 @@ export function HelloMarble() {
     const boardQuatThree = new THREE.Quaternion();
     const boardInverseQuatThree = new THREE.Quaternion();
     const marblePosLocalToBoard = new THREE.Vector3();
+    const boardPrevPos = new CANNON.Vec3(0, 0, 0);
+    boardPrevPos.copy(boardBody.position);
+    const boardPrevQuat = new THREE.Quaternion(
+      boardBody.quaternion.x,
+      boardBody.quaternion.y,
+      boardBody.quaternion.z,
+      boardBody.quaternion.w,
+    );
+    const boardNextQuat = new THREE.Quaternion();
+    const boardPrevQuatInv = new THREE.Quaternion();
+    const boardDeltaQuat = new THREE.Quaternion();
+    const boardAngularAxis = new THREE.Vector3();
+    const boardUpWorld = new THREE.Vector3();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -1714,11 +1761,61 @@ export function HelloMarble() {
         pivotSmoothed.z - rotatedPivot.z,
       );
 
+      if (delta > 0.00001) {
+        const invDelta = 1 / delta;
+        boardBody.velocity.set(
+          (boardPosition.x - boardPrevPos.x) * invDelta,
+          (boardPosition.y - boardPrevPos.y) * invDelta,
+          (boardPosition.z - boardPrevPos.z) * invDelta,
+        );
+
+        boardNextQuat.set(
+          qFinalCannon.x,
+          qFinalCannon.y,
+          qFinalCannon.z,
+          qFinalCannon.w,
+        );
+        boardPrevQuatInv.copy(boardPrevQuat).invert();
+        boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
+        const w = clamp(boardDeltaQuat.w, -1, 1);
+        let angle = 2 * Math.acos(w);
+        if (angle > Math.PI) {
+          angle -= 2 * Math.PI;
+        }
+        const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
+        if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
+          boardAngularAxis.set(
+            boardDeltaQuat.x / sinHalf,
+            boardDeltaQuat.y / sinHalf,
+            boardDeltaQuat.z / sinHalf,
+          );
+          const angularSpeed = angle * invDelta;
+          boardBody.angularVelocity.set(
+            boardAngularAxis.x * angularSpeed,
+            boardAngularAxis.y * angularSpeed,
+            boardAngularAxis.z * angularSpeed,
+          );
+        } else {
+          boardBody.angularVelocity.set(0, 0, 0);
+        }
+      } else {
+        boardBody.velocity.set(0, 0, 0);
+        boardBody.angularVelocity.set(0, 0, 0);
+        boardNextQuat.set(
+          qFinalCannon.x,
+          qFinalCannon.y,
+          qFinalCannon.z,
+          qFinalCannon.w,
+        );
+      }
+
       boardBody.quaternion.copy(qFinalCannon);
       boardBody.position.copy(boardPosition);
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
       track.group.position.set(boardPosition.x, boardPosition.y, boardPosition.z);
+      boardPrevPos.copy(boardPosition);
+      boardPrevQuat.copy(boardNextQuat);
 
       if (currentTuning.enableExtraDownforce) {
         extraDownForceVec.set(0, -currentTuning.extraDownForce, 0);
@@ -1733,19 +1830,53 @@ export function HelloMarble() {
         marbleBody.velocity.scale(scale, marbleBody.velocity);
       }
       const expectedMarbleCenterYOnFloor = marbleRadius + TRACK_FLOOR_TOP_Y;
-      boardInverseQuatThree.set(
-        boardBody.quaternion.x,
-        boardBody.quaternion.y,
-        boardBody.quaternion.z,
-        boardBody.quaternion.w,
-      ).invert();
-      marblePosLocalToBoard.set(
-        marbleBody.position.x - boardBody.position.x,
-        marbleBody.position.y - boardBody.position.y,
-        marbleBody.position.z - boardBody.position.z,
-      );
-      marblePosLocalToBoard.applyQuaternion(boardInverseQuatThree);
-      const penetrationDepth = Math.max(0, expectedMarbleCenterYOnFloor - marblePosLocalToBoard.y);
+      const computePenetrationDepth = (): number => {
+        boardInverseQuatThree.set(
+          boardBody.quaternion.x,
+          boardBody.quaternion.y,
+          boardBody.quaternion.z,
+          boardBody.quaternion.w,
+        ).invert();
+        marblePosLocalToBoard.set(
+          marbleBody.position.x - boardBody.position.x,
+          marbleBody.position.y - boardBody.position.y,
+          marbleBody.position.z - boardBody.position.z,
+        );
+        marblePosLocalToBoard.applyQuaternion(boardInverseQuatThree);
+        return Math.max(0, expectedMarbleCenterYOnFloor - marblePosLocalToBoard.y);
+      };
+      let penetrationDepth = computePenetrationDepth();
+      if (penetrationDepth > PENETRATION_EPSILON) {
+        tempQuatA.set(
+          boardBody.quaternion.x,
+          boardBody.quaternion.y,
+          boardBody.quaternion.z,
+          boardBody.quaternion.w,
+        );
+        boardUpWorld.set(0, 1, 0).applyQuaternion(tempQuatA).normalize();
+        const correction = Math.min(
+          penetrationDepth + PENETRATION_CORRECTION_BIAS,
+          PENETRATION_CORRECTION_MAX,
+        );
+        marbleBody.position.x += boardUpWorld.x * correction;
+        marbleBody.position.y += boardUpWorld.y * correction;
+        marbleBody.position.z += boardUpWorld.z * correction;
+
+        const inwardSpeed =
+          marbleBody.velocity.x * boardUpWorld.x +
+          marbleBody.velocity.y * boardUpWorld.y +
+          marbleBody.velocity.z * boardUpWorld.z;
+        if (inwardSpeed < 0) {
+          marbleBody.velocity.x -= boardUpWorld.x * inwardSpeed;
+          marbleBody.velocity.y -= boardUpWorld.y * inwardSpeed;
+          marbleBody.velocity.z -= boardUpWorld.z * inwardSpeed;
+        }
+
+        marbleBody.aabbNeedsUpdate = true;
+        marbleBody.updateAABB();
+        penetrationDepth = computePenetrationDepth();
+      }
+      const angularSpeed = marbleBody.angularVelocity.length();
       const verticalSpeed = marbleBody.velocity.y;
 
       if (
@@ -2101,6 +2232,7 @@ export function HelloMarble() {
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
           speed: marbleBody.velocity.length(),
+          angularSpeed,
           verticalSpeed,
           penetrationDepth,
           rawTiltX: normalizedIntent.x,
@@ -3132,7 +3264,7 @@ export function HelloMarble() {
               </div>
             </label>
             <div className="debugButtonRow">
-              <button type="button" onClick={() => setTuning({ ...DEFAULT_TUNING })}>
+              <button type="button" onClick={() => setTuning(buildCanonicalTuning())}>
                 Reset Defaults
               </button>
               <button type="button" onClick={() => void copySettings()}>
@@ -3365,6 +3497,7 @@ export function HelloMarble() {
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}
             </p>
             <p>Speed: {debug.speed.toFixed(2)}</p>
+            <p>Angular speed: {debug.angularSpeed.toFixed(2)}</p>
             <p>Vertical speed: {debug.verticalSpeed.toFixed(2)}</p>
             <p>Penetration depth: {debug.penetrationDepth.toFixed(3)}</p>
             <p>Respawns: {respawnCount}</p>
