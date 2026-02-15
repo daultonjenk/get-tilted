@@ -47,6 +47,7 @@ When implementing a milestone, respond with:
 - **Diff summary:** files created/changed
 - **Verification:** lint/typecheck/build + smoke steps
 - **Commit plan:** one commit per milestone minimum
+- **Push plan:** push each milestone commit to the active remote branch in the same iteration (unless the user explicitly says not to push)
 - After completion: **brief commit/push changelog** (required)
 
 ---
@@ -138,7 +139,8 @@ A milestone is complete only if:
 - App runs without runtime errors.
 - `npm run lint`, `npm run typecheck`, `npm run build` all pass.
 - Manual smoke tests pass (desktop + mobile assumptions respected).
-- One commit is created and a brief changelog is provided.
+- One commit is created and pushed to the active remote branch in the same iteration (unless user says otherwise).
+- A brief commit/push changelog is provided.
 
 ---
 
