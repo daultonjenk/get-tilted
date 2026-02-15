@@ -31,6 +31,8 @@ type MarbleDebug = {
   posY: number;
   posZ: number;
   speed: number;
+  verticalSpeed: number;
+  penetrationDepth: number;
   rawTiltX: number;
   rawTiltZ: number;
   tiltX: number;
@@ -74,6 +76,10 @@ type TuningState = {
   extraDownForce: number;
   renderScaleMobile: number;
   debugUpdateHzMobile: number;
+  physicsMaxSubSteps: number;
+  physicsSolverIterations: number;
+  ccdSpeedThreshold: number;
+  ccdIterations: number;
 };
 
 type TrialState = "idle" | "running" | "finished";
@@ -145,6 +151,7 @@ const TOPDOWN_HEIGHT = 16;
 const TOPDOWN_Z_OFFSET = 2;
 const BOARD_TILT_SMOOTH = 12;
 const PIVOT_SMOOTH = 10;
+const TRACK_FLOOR_TOP_Y = 0.3;
 const SOURCE_RATE_MS = 1000 / 15;
 const INTERP_DELAY_MIN_MS = 120;
 const INTERP_DELAY_MAX_MS = 165;
@@ -181,6 +188,10 @@ const DEFAULT_TUNING: TuningState = {
   extraDownForce: 0.7,
   renderScaleMobile: 1.2,
   debugUpdateHzMobile: 2,
+  physicsMaxSubSteps: 6,
+  physicsSolverIterations: 20,
+  ccdSpeedThreshold: 0.75,
+  ccdIterations: 20,
 };
 
 const CAMERA_PRESETS: CameraPresetId[] = [
@@ -209,6 +220,10 @@ const PHYSICS_PRESETS: Record<
     | "tiltFilterTau"
     | "renderScaleMobile"
     | "debugUpdateHzMobile"
+    | "physicsMaxSubSteps"
+    | "physicsSolverIterations"
+    | "ccdSpeedThreshold"
+    | "ccdIterations"
   >
 > = {
   marble: {
@@ -223,6 +238,10 @@ const PHYSICS_PRESETS: Record<
     tiltFilterTau: 0.1,
     renderScaleMobile: 1.2,
     debugUpdateHzMobile: 5,
+    physicsMaxSubSteps: 6,
+    physicsSolverIterations: 20,
+    ccdSpeedThreshold: 0.75,
+    ccdIterations: 20,
   },
   floaty: {
     gravityG: 14,
@@ -236,6 +255,10 @@ const PHYSICS_PRESETS: Record<
     tiltFilterTau: 0.15,
     renderScaleMobile: 1.2,
     debugUpdateHzMobile: 5,
+    physicsMaxSubSteps: 7,
+    physicsSolverIterations: 24,
+    ccdSpeedThreshold: 0.6,
+    ccdIterations: 24,
   },
   heavy: {
     gravityG: 20,
@@ -249,6 +272,10 @@ const PHYSICS_PRESETS: Record<
     tiltFilterTau: 0.08,
     renderScaleMobile: 1.2,
     debugUpdateHzMobile: 5,
+    physicsMaxSubSteps: 5,
+    physicsSolverIterations: 18,
+    ccdSpeedThreshold: 0.9,
+    ccdIterations: 18,
   },
 };
 
@@ -375,6 +402,18 @@ function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.debugUpdateHzMobile === "number") {
     base.debugUpdateHzMobile = clamp(value.debugUpdateHzMobile, 2, 15);
   }
+  if (typeof value.physicsMaxSubSteps === "number") {
+    base.physicsMaxSubSteps = Math.round(clamp(value.physicsMaxSubSteps, 1, 12));
+  }
+  if (typeof value.physicsSolverIterations === "number") {
+    base.physicsSolverIterations = Math.round(clamp(value.physicsSolverIterations, 8, 40));
+  }
+  if (typeof value.ccdSpeedThreshold === "number") {
+    base.ccdSpeedThreshold = clamp(value.ccdSpeedThreshold, 0.05, 4);
+  }
+  if (typeof value.ccdIterations === "number") {
+    base.ccdIterations = Math.round(clamp(value.ccdIterations, 1, 40));
+  }
 
   return base;
 }
@@ -433,6 +472,46 @@ function formatTimeMs(ms: number | null): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
+function createMarbleTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    const fallback = new THREE.CanvasTexture(canvas);
+    fallback.colorSpace = THREE.SRGBColorSpace;
+    fallback.needsUpdate = true;
+    return fallback;
+  }
+
+  ctx.fillStyle = "#2b4058";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const stripeColors = ["#5cc8ff", "#1f8be8", "#8be0ff", "#1767c8"];
+  const stripeWidth = canvas.width / 16;
+  for (let i = 0; i < 16; i += 1) {
+    ctx.fillStyle = stripeColors[i % stripeColors.length] ?? "#5cc8ff";
+    ctx.fillRect(i * stripeWidth, 0, stripeWidth, canvas.height);
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.fillRect(canvas.width * 0.46, 0, canvas.width * 0.08, canvas.height);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(0, canvas.height * 0.5);
+  ctx.lineTo(canvas.width, canvas.height * 0.5);
+  ctx.stroke();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const resetRef = useRef<() => void>(() => {});
@@ -487,6 +566,8 @@ export function HelloMarble() {
     posY: 0,
     posZ: 0,
     speed: 0,
+    verticalSpeed: 0,
+    penetrationDepth: 0,
     rawTiltX: 0,
     rawTiltZ: 0,
     tiltX: 0,
@@ -756,7 +837,7 @@ export function HelloMarble() {
       iterations: number;
       tolerance: number;
     };
-    solver.iterations = 12;
+    solver.iterations = tuningRef.current.physicsSolverIterations;
     solver.tolerance = 1e-4;
     world.gravity.set(0, -tuningRef.current.gravityG, 0);
     world.addBody(boardBody);
@@ -768,10 +849,10 @@ export function HelloMarble() {
     const contactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
       friction: tuningRef.current.contactFriction,
       restitution: tuningRef.current.contactRestitution,
-      contactEquationStiffness: 1e8,
-      contactEquationRelaxation: 3,
-      frictionEquationStiffness: 1e8,
-      frictionEquationRelaxation: 3,
+      contactEquationStiffness: 5e7,
+      contactEquationRelaxation: 4,
+      frictionEquationStiffness: 5e7,
+      frictionEquationRelaxation: 4,
     });
     world.addContactMaterial(contactMat);
 
@@ -788,15 +869,21 @@ export function HelloMarble() {
       ccdSpeedThreshold: number;
       ccdIterations: number;
     };
-    marbleBodyWithCcd.ccdSpeedThreshold = 1.0;
-    marbleBodyWithCcd.ccdIterations = 10;
+    marbleBodyWithCcd.ccdSpeedThreshold = tuningRef.current.ccdSpeedThreshold;
+    marbleBodyWithCcd.ccdIterations = tuningRef.current.ccdIterations;
     world.addBody(marbleBody);
 
     const marbleSegments = mobileMode ? 20 : 32;
     const ghostSegments = mobileMode ? 16 : 24;
+    const marbleTexture = createMarbleTexture();
     const marbleMesh = new THREE.Mesh(
       new THREE.SphereGeometry(marbleRadius, marbleSegments, marbleSegments),
-      new THREE.MeshStandardMaterial({ color: 0x4fc3f7 }),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: marbleTexture,
+        roughness: 0.32,
+        metalness: 0.08,
+      }),
     );
     scene.add(marbleMesh);
     const ghostMaterial = new THREE.MeshStandardMaterial({
@@ -829,6 +916,8 @@ export function HelloMarble() {
     const tempQuatD = new THREE.Quaternion();
     const boardPosThree = new THREE.Vector3();
     const boardQuatThree = new THREE.Quaternion();
+    const boardInverseQuatThree = new THREE.Quaternion();
+    const marblePosLocalToBoard = new THREE.Vector3();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -1474,7 +1563,6 @@ export function HelloMarble() {
 
     let animationFrame = 0;
     let lastTime = performance.now() / 1000;
-    let accumulator = 0;
     let debugTimer = 0;
     let lastRenderScale = tuningRef.current.renderScaleMobile;
 
@@ -1482,7 +1570,6 @@ export function HelloMarble() {
       const now = nowMs / 1000;
       const delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
       lastTime = now;
-      accumulator += delta;
       debugTimer += delta;
 
       const currentTuning = tuningRef.current;
@@ -1491,8 +1578,11 @@ export function HelloMarble() {
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
       }
       world.gravity.set(0, -currentTuning.gravityG, 0);
+      solver.iterations = Math.round(currentTuning.physicsSolverIterations);
       marbleBody.linearDamping = currentTuning.linearDamping;
       marbleBody.angularDamping = currentTuning.angularDamping;
+      marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
+      marbleBodyWithCcd.ccdIterations = Math.round(currentTuning.ccdIterations);
       contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
       contactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
 
@@ -1635,16 +1725,28 @@ export function HelloMarble() {
         marbleBody.applyForce(extraDownForceVec, marbleBody.position);
       }
 
-      while (accumulator >= TIMESTEP) {
-        world.step(TIMESTEP);
-        accumulator -= TIMESTEP;
-      }
+      world.step(TIMESTEP, delta, Math.round(currentTuning.physicsMaxSubSteps));
 
       const speed = marbleBody.velocity.length();
       if (speed > currentTuning.maxSpeed && speed > 0) {
         const scale = currentTuning.maxSpeed / speed;
         marbleBody.velocity.scale(scale, marbleBody.velocity);
       }
+      const expectedMarbleCenterYOnFloor = marbleRadius + TRACK_FLOOR_TOP_Y;
+      boardInverseQuatThree.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      ).invert();
+      marblePosLocalToBoard.set(
+        marbleBody.position.x - boardBody.position.x,
+        marbleBody.position.y - boardBody.position.y,
+        marbleBody.position.z - boardBody.position.z,
+      );
+      marblePosLocalToBoard.applyQuaternion(boardInverseQuatThree);
+      const penetrationDepth = Math.max(0, expectedMarbleCenterYOnFloor - marblePosLocalToBoard.y);
+      const verticalSpeed = marbleBody.velocity.y;
 
       if (
         nowMs - lastRaceSendAt >= SOURCE_RATE_MS &&
@@ -1999,6 +2101,8 @@ export function HelloMarble() {
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
           speed: marbleBody.velocity.length(),
+          verticalSpeed,
+          penetrationDepth,
           rawTiltX: normalizedIntent.x,
           rawTiltZ: normalizedIntent.z,
           tiltX: filteredIntent.x,
@@ -2063,6 +2167,7 @@ export function HelloMarble() {
         playerState.mesh.geometry.dispose();
       }
       ghostMaterial.dispose();
+      marbleTexture.dispose();
       for (const body of track.bodies) {
         world.removeBody(body);
       }
@@ -2901,6 +3006,98 @@ export function HelloMarble() {
                 />
               </div>
             </label>
+            <label className="controlLabel">
+              Physics Max Substeps
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={1}
+                  max={12}
+                  step={1}
+                  value={tuning.physicsMaxSubSteps}
+                  onChange={(event) =>
+                    updateTuning("physicsMaxSubSteps", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={1}
+                  value={tuning.physicsMaxSubSteps}
+                  onChange={(event) =>
+                    updateTuning("physicsMaxSubSteps", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              Solver Iterations
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={8}
+                  max={40}
+                  step={1}
+                  value={tuning.physicsSolverIterations}
+                  onChange={(event) =>
+                    updateTuning("physicsSolverIterations", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={1}
+                  value={tuning.physicsSolverIterations}
+                  onChange={(event) =>
+                    updateTuning("physicsSolverIterations", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              CCD Speed Threshold
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={0.05}
+                  max={4}
+                  step={0.01}
+                  value={tuning.ccdSpeedThreshold}
+                  onChange={(event) =>
+                    updateTuning("ccdSpeedThreshold", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.01}
+                  value={tuning.ccdSpeedThreshold}
+                  onChange={(event) =>
+                    updateTuning("ccdSpeedThreshold", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
+            <label className="controlLabel">
+              CCD Iterations
+              <div className="controlRow">
+                <input
+                  type="range"
+                  min={1}
+                  max={40}
+                  step={1}
+                  value={tuning.ccdIterations}
+                  onChange={(event) =>
+                    updateTuning("ccdIterations", Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={1}
+                  value={tuning.ccdIterations}
+                  onChange={(event) =>
+                    updateTuning("ccdIterations", Number(event.target.value))
+                  }
+                />
+              </div>
+            </label>
             <label className="controlCheck">
               <input
                 type="checkbox"
@@ -3168,6 +3365,8 @@ export function HelloMarble() {
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}
             </p>
             <p>Speed: {debug.speed.toFixed(2)}</p>
+            <p>Vertical speed: {debug.verticalSpeed.toFixed(2)}</p>
+            <p>Penetration depth: {debug.penetrationDepth.toFixed(3)}</p>
             <p>Respawns: {respawnCount}</p>
             <p>Trial state: {trialState}</p>
             <p>Trial current: {formatTimeMs(trialCurrentMs)}</p>
