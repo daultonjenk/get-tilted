@@ -166,6 +166,8 @@ Implementation expectation:
 - Codex responses must explicitly mention the version bump in the diff summary/changelog.
 - Commit messages must use this format by default: `type(v#.#.#.#): short description`
 - Example: `chore(v0.7.2): bump app version and enforce bugfix version discipline`
-- The version token in the commit message must match the build/version context of the change when applicable.
+- The version token in the commit message must exactly match `APP_VERSION` in `client/src/buildInfo.ts` for that same commit.
+- This exact-match rule applies to all commits (including docs-only, tiny fixes, and minor patches) unless the exceptional-case rule below is used.
+- If a commit message introduces a new `v#.#.#.#` token, `client/src/buildInfo.ts` must be updated to that exact version in that commit.
 - Only in truly exceptional cases (for example, emergency revert/cherry-pick constraints) may a different commit message format be used.
 ---
