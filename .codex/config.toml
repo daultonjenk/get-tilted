@@ -9,3 +9,6 @@ network_access = true
 
 [features]
 collaboration_modes = true
+
+[projects."/home/daulton/src/get-tilted"]
+trust_level = "trusted"
