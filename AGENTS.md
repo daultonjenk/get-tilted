@@ -42,8 +42,6 @@ This file defines how Codex (and any assistant agent) should execute work on **G
 ## 2) Expected response format for Codex work
 
 When implementing a milestone, respond with:
-- **Plan:** ON/OFF (default ON for non-trivial work)
-- **Reasoning strength:** Low/Medium/High (default Medium)
 - **Steps:** numbered, single optimal path (no alternatives unless asked)
 - **Commands:** exact commands to run
 - **Diff summary:** files created/changed
