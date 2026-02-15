@@ -24,6 +24,10 @@ import {
   resolveWsUrlForHost,
   type WSStatus,
 } from "../net/wsClient";
+import {
+  createMobileGovernor,
+  type MobilePerfTier,
+} from "./perf/mobileGovernor";
 
 type MarbleDebug = {
   fps: number;
@@ -41,6 +45,12 @@ type MarbleDebug = {
   gravX: number;
   gravY: number;
   gravZ: number;
+  renderScale: number;
+  perfTier: MobilePerfTier | "desktop";
+  frameMsEma: number;
+  physicsMsEma: number;
+  renderMsEma: number;
+  miscMsEma: number;
 };
 
 type CameraPresetId =
@@ -163,6 +173,8 @@ const INTERP_DELAY_RISE_BLEND = 0.18;
 const INTERP_DELAY_FALL_BLEND = 0.08;
 const EXTRAPOLATION_MAX_MS = 45;
 const SNAPSHOT_MAX_AGE_MS = 2000;
+const MOBILE_RENDER_SCALE_MIN = 0.72;
+const MOBILE_RENDER_SCALE_MAX = 1;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
@@ -509,6 +521,12 @@ export function HelloMarble() {
     gravX: 0,
     gravY: -DEFAULT_TUNING.gravityG,
     gravZ: 0,
+    renderScale: 1,
+    perfTier: "desktop",
+    frameMsEma: 1000 / 60,
+    physicsMsEma: 0,
+    renderMsEma: 0,
+    miscMsEma: 0,
   });
   const [netStatus, setNetStatus] = useState<WSStatus>("disconnected");
   const [netError, setNetError] = useState<string | null>(null);
@@ -745,10 +763,25 @@ export function HelloMarble() {
     camera.up.set(0, 1, 0);
 
     const mobileMode = window.matchMedia("(max-width: 700px)").matches;
+    const mobilePerfGovernor = mobileMode
+      ? createMobileGovernor(
+          clamp(
+            tuningRef.current.renderScaleMobile,
+            MOBILE_RENDER_SCALE_MIN,
+            MOBILE_RENDER_SCALE_MAX,
+          ),
+          {
+            minScale: MOBILE_RENDER_SCALE_MIN,
+            maxScale: MOBILE_RENDER_SCALE_MAX,
+            targetFps: 60,
+          },
+        )
+      : null;
+    const initialRenderScale = mobileMode
+      ? mobilePerfGovernor?.getStats().renderScale ?? MOBILE_RENDER_SCALE_MAX
+      : 2;
     const renderer = new THREE.WebGLRenderer({ antialias: !mobileMode });
-    renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio, mobileMode ? tuningRef.current.renderScaleMobile : 2),
-    );
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, initialRenderScale));
     mount.appendChild(renderer.domElement);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -1558,18 +1591,29 @@ export function HelloMarble() {
     let animationFrame = 0;
     let lastTime = performance.now() / 1000;
     let debugTimer = 0;
-    let lastRenderScale = tuningRef.current.renderScaleMobile;
+    let lastRenderScale = initialRenderScale;
+    let frameMsEma = 1000 / 60;
+    let physicsMsEma = 0;
+    let renderMsEma = 0;
+    let miscMsEma = 0;
+    let perfTier: MobilePerfTier | "desktop" = mobileMode ? "high" : "desktop";
 
     const tick = (nowMs: number) => {
+      const frameStartMs = performance.now();
       const now = nowMs / 1000;
       const delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
       lastTime = now;
       debugTimer += delta;
 
       const currentTuning = tuningRef.current;
-      if (mobileMode && Math.abs(currentTuning.renderScaleMobile - lastRenderScale) > 0.001) {
-        lastRenderScale = currentTuning.renderScaleMobile;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
+      if (mobileMode && mobilePerfGovernor) {
+        mobilePerfGovernor.setUserScaleCap(
+          clamp(
+            currentTuning.renderScaleMobile,
+            MOBILE_RENDER_SCALE_MIN,
+            MOBILE_RENDER_SCALE_MAX,
+          ),
+        );
       }
       world.gravity.set(0, -currentTuning.gravityG, 0);
       solver.iterations = Math.round(currentTuning.physicsSolverIterations);
@@ -1769,8 +1813,10 @@ export function HelloMarble() {
         marbleBody.applyForce(extraDownForceVec, marbleBody.position);
       }
 
+      const physicsStartMs = performance.now();
       world.step(TIMESTEP, delta, Math.round(currentTuning.physicsMaxSubSteps));
       suppressVerticalPopOnSideImpact();
+      const physicsMs = performance.now() - physicsStartMs;
 
       const speed = marbleBody.velocity.length();
       if (speed > currentTuning.maxSpeed && speed > 0) {
@@ -2133,7 +2179,35 @@ export function HelloMarble() {
 
       camera.lookAt(lookTarget);
 
+      const renderStartMs = performance.now();
       renderer.render(scene, camera);
+      const renderMs = performance.now() - renderStartMs;
+      const frameMs = Math.max(performance.now() - frameStartMs, 0.1);
+      const miscMs = Math.max(0, frameMs - physicsMs - renderMs);
+
+      if (mobileMode && mobilePerfGovernor) {
+        const decision = mobilePerfGovernor.push({
+          nowMs,
+          frameMs,
+          physicsMs,
+          renderMs,
+          miscMs,
+        });
+        frameMsEma = decision.frameMsEma;
+        physicsMsEma = decision.physicsMsEma;
+        renderMsEma = decision.renderMsEma;
+        miscMsEma = decision.miscMsEma;
+        perfTier = decision.tier;
+        if (decision.changed && Math.abs(decision.renderScale - lastRenderScale) > 0.001) {
+          lastRenderScale = decision.renderScale;
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
+        }
+      } else {
+        frameMsEma += (frameMs - frameMsEma) * 0.12;
+        physicsMsEma += (physicsMs - physicsMsEma) * 0.12;
+        renderMsEma += (renderMs - renderMsEma) * 0.12;
+        miscMsEma += (miscMs - miscMsEma) * 0.12;
+      }
 
       const debugInterval = mobileMode
         ? 1 / Math.max(currentTuning.debugUpdateHzMobile, 1)
@@ -2175,7 +2249,7 @@ export function HelloMarble() {
         }
         setDebug((prev) => ({
           ...prev,
-          fps: Math.round(1 / Math.max(delta, 0.0001)),
+          fps: Math.round(1000 / Math.max(frameMsEma, 0.0001)),
           posX: marbleBody.position.x,
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
@@ -2190,6 +2264,12 @@ export function HelloMarble() {
           gravX: world.gravity.x,
           gravY: world.gravity.y,
           gravZ: world.gravity.z,
+          renderScale: lastRenderScale,
+          perfTier,
+          frameMsEma,
+          physicsMsEma,
+          renderMsEma,
+          miscMsEma,
         }));
         setNetSmoothing({
           ghostPlayers: ghostCount,
@@ -3416,6 +3496,12 @@ export function HelloMarble() {
           <div className="debugSection">
             <p className="buildIdText">Build ID: {BUILD_ID}</p>
             <p>FPS: {debug.fps}</p>
+            <p>Render Scale: {debug.renderScale.toFixed(2)}</p>
+            <p>Perf Tier: {debug.perfTier}</p>
+            <p>Frame ms (EMA): {debug.frameMsEma.toFixed(2)}</p>
+            <p>Physics ms (EMA): {debug.physicsMsEma.toFixed(2)}</p>
+            <p>Render ms (EMA): {debug.renderMsEma.toFixed(2)}</p>
+            <p>Misc ms (EMA): {debug.miscMsEma.toFixed(2)}</p>
             <p>
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}
             </p>

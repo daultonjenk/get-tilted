@@ -38,3 +38,9 @@ v0.7.5.0 update:
 - Added hybrid anti-penetration safeguard that only nudges the marble outward when measurable floor penetration is detected, and removes inward normal velocity.
 - Reworked startup tuning so canonical defaults auto-apply the selected physics preset values (marble preset traction/damping by default), preventing friction=0 startup gliding.
 - Added angular speed diagnostics and a more asymmetric marble texture so true physics spin is visibly readable.
+
+v0.7.5.3 update:
+- Added mobile performance governor module (`client/src/game/perf/mobileGovernor.ts`) with hysteresis-based DPR adaptation targeting 60 FPS using render-only scaling.
+- Instrumented `HelloMarble` frame timings (frame/physics/render/misc EMA) and surfaced diagnostics fields (render scale + perf tier + EMA timings).
+- Wired mobile governor into renderer pixel ratio updates while preserving existing physics constants and control feel.
+- Verified quality gates pass: `npm run lint`, `npm run typecheck`, `npm run build`.
