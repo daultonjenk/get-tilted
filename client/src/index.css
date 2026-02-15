@@ -93,11 +93,31 @@ textarea {
 }
 
 .multiplayerLobbyCard {
+  position: relative;
   width: min(560px, 92vw);
-  padding: clamp(1rem, 2.6vw, 1.5rem);
+  padding: clamp(1rem, 2.6vw, 1.5rem) clamp(1rem, 2.6vw, 1.5rem) 1.25rem;
   gap: 0.7rem;
   align-items: center;
   text-align: center;
+}
+
+.lobbyBackButton {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  border: 1px solid #8eb6dc;
+  border-radius: 0.4rem;
+  background: rgb(15 39 67 / 90%);
+  color: #d9ecff;
+  min-height: 34px;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lobbyBackButton:hover {
+  border-color: #b8dcff;
 }
 
 .raceOverlayTitle {
@@ -142,28 +162,78 @@ textarea {
   background: #fff;
 }
 
-.lobbyReadyButton {
-  width: min(300px, 100%);
+.lobbyPlayersSplit {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.lobbyPlayerCard {
+  border: 1px solid rgb(155 206 255 / 30%);
+  border-radius: 0.65rem;
+  background: rgb(10 27 46 / 74%);
+  padding: 0.6rem 0.6rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.lobbyPlayerSlotLabel {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #d5e8fb;
+  text-transform: uppercase;
+}
+
+.lobbyPlayerNameValue {
+  margin: 0.1rem 0 0;
+  font-size: clamp(1.05rem, 3.9vw, 1.3rem);
+  line-height: 1.1;
+  min-height: 1.3em;
+  font-weight: 800;
+  color: #fff7c7;
+  text-transform: uppercase;
+}
+
+.lobbyReadyIndicator {
+  width: clamp(54px, 18vw, 80px);
   aspect-ratio: 1;
-  border: 1px solid #ffe59d;
-  border-radius: 0.5rem;
-  background: linear-gradient(145deg, #8a5a11, #5f3b07);
-  color: #fff6dc;
-  font-size: clamp(1.3rem, 4.2vw, 2rem);
+  border-radius: 0.35rem;
+  border: 4px solid rgb(255 255 255 / 15%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%);
+}
+
+.lobbyReadyIndicator.ready {
+  background: linear-gradient(145deg, #27b34d, #18903b);
+}
+
+.lobbyReadyIndicator.notReady {
+  background: linear-gradient(145deg, #ff3838, #be0f19);
+}
+
+.lobbyReadyStatus {
+  margin: 0;
+  font-size: clamp(1.08rem, 4vw, 1.4rem);
   font-weight: 900;
-  letter-spacing: 0.09em;
-  cursor: pointer;
+  letter-spacing: 0.03em;
 }
 
-.lobbyReadyButton.ready {
-  background: linear-gradient(145deg, #1f9f4d, #0d6631);
-  border-color: #8fffad;
-  color: #effff4;
+.lobbyReadyStatus.ready {
+  color: #eeff72;
 }
 
-.lobbyReadyButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.lobbyReadyStatus.notReady {
+  color: #eeff72;
+}
+
+.lobbyInlineReadyButton {
+  width: 100%;
+  max-width: 140px;
+  margin-top: 0.15rem;
 }
 
 .menuTitleWrap {
@@ -275,20 +345,20 @@ textarea {
 
 .lobbyNameField {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: 0.66rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #d4e8ff;
 }
 
 .lobbyNameInput {
-  width: min(360px, 100%);
+  width: 100%;
   border: 1px solid #9bc6ff;
   border-radius: 0.45rem;
   background: #0f2c4d;
   color: #eaf4ff;
-  padding: 0.45rem 0.6rem;
-  min-height: 40px;
+  padding: 0.35rem 0.5rem;
+  min-height: 36px;
 }
 
 .readyButton {
@@ -884,8 +954,8 @@ textarea {
     width: min(240px, 100%);
   }
 
-  .lobbyReadyButton {
-    width: min(240px, 100%);
+  .lobbyPlayersSplit {
+    gap: 0.55rem;
   }
 
   .debugDrawer {

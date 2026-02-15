@@ -154,11 +154,18 @@ Rules:
 - Every commit must have a unique build version string. No reuse.
 - When Codex finishes implementing a plan/milestone, the final state must include a new version bump (even if changes were small).
 - The version shown in the top-left menu/screen is authoritative for build identity and must match the value committed in source.
+- Required format: `major_release.major_feature.minor_feature.bugfix`
+- Segment meaning:
+  - `major_release`: first full release is `1`; increment for a major overhaul/rework.
+  - `major_feature`: increment for major capability additions (for example multiplayer, gyro controls, Cloudflare deploy, procedural tracks).
+  - `minor_feature`: increment for smaller feature work and non-trivial tweaks (for example UI updates, performance improvements).
+  - `bugfix`: increment for small fixes and minor corrections.
+- Agents should use best judgment to increment the most appropriate segment based on scope and impact.
 
 Allowed version formats (examples):
-- `0.5.3a`, `0.5.3b`
 - `0.5.3.1`, `0.5.3.2`
-- `0.5.3+20260215.1`
+- `0.5.3.10`, `0.5.3.11`
+- `1.0.0.0`
 
 Implementation expectation:
 - Keep the version in a single source of truth (currently `client/src/buildInfo.ts`).

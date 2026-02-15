@@ -2047,6 +2047,22 @@ export function HelloMarble() {
     netStatus !== "disconnected" &&
     joinTiming != null &&
     joinTiming.stage !== "hello_ack";
+  const localPlayer =
+    localPlayerId.length > 0
+      ? playersInRoom.find((player) => player.playerId === localPlayerId)
+      : undefined;
+  const remotePlayer = playersInRoom.find((player) => player.playerId !== localPlayerId);
+  const playerOneName = localPlayer?.name || playerNameInput || "Player 1";
+  const playerTwoName =
+    remotePlayer?.name || remotePlayer?.playerId || (playersInRoom.length > 1 ? "Player 2" : "Waiting...");
+  const playerOneReady = localPlayerId ? readyPlayerIds.includes(localPlayerId) : false;
+  const playerTwoReady = remotePlayer ? readyPlayerIds.includes(remotePlayer.playerId) : false;
+  const canToggleLobbyReady =
+    netStatus === "connected" &&
+    Boolean(roomCode) &&
+    Boolean(localPlayerId) &&
+    racePhase === "waiting" &&
+    twoPlayersInLobby;
   const joinStageLabel = joinTiming
     ? (() => {
         switch (joinTiming.stage) {
@@ -2229,6 +2245,11 @@ export function HelloMarble() {
     void startSoloRaceSequence();
   };
 
+  const returnToMainMenu = () => {
+    raceClientRef.current?.disconnect();
+    switchGameMode("unselected");
+  };
+
   const switchGameMode = (nextMode: GameMode) => {
     if (nextMode === gameMode) {
       return;
@@ -2331,25 +2352,14 @@ export function HelloMarble() {
       {showRaceLobby ? (
         <div className="raceOverlay menuOverlay multiplayerLobbyOverlay">
           <div className="raceOverlayCard multiplayerLobbyCard">
+            <button type="button" className="lobbyBackButton" onClick={returnToMainMenu}>
+              {"< Back"}
+            </button>
             <p className="raceOverlayTitle">Multiplayer Lobby</p>
             <p className="lobbyCodeLabel">Lobby Code</p>
             <p className="lobbyCodeValue">{roomCode || "----"}</p>
             <div className="lobbyQrWrap">
-              {twoPlayersInLobby ? (
-                <button
-                  type="button"
-                  className={`lobbyReadyButton ${localReady ? "ready" : ""}`}
-                  onClick={() => void toggleReady()}
-                  disabled={
-                    netStatus !== "connected" ||
-                    !roomCode ||
-                    !localPlayerId ||
-                    racePhase !== "waiting"
-                  }
-                >
-                  {localReady ? "UNREADY" : "READY"}
-                </button>
-              ) : qrImageUrl ? (
+              {qrImageUrl ? (
                 <img className="lobbyQrImage" src={qrImageUrl} alt="Join room QR code" />
               ) : (
                 <p className="raceHint">
@@ -2358,31 +2368,45 @@ export function HelloMarble() {
               )}
             </div>
             {joinHostWarning ? <p className="raceHint">{joinHostWarning}</p> : null}
-            <label className="controlLabel lobbyNameField" htmlFor="lobbyPlayerName">
-              Marble Name (Optional)
-            </label>
-            <input
-              id="lobbyPlayerName"
-              className="lobbyNameInput"
-              value={playerNameInput}
-              onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
-              placeholder="Enter name"
-              maxLength={18}
-              autoComplete="nickname"
-            />
-            <p>Players: {playersInRoom.length}/2</p>
-            {playersInRoom.length > 0 ? (
-              <div className="racePlayers">
-                {playersInRoom.map((player) => {
-                  const isReady = readyPlayerIds.includes(player.playerId);
-                  return (
-                    <p key={player.playerId} className={isReady ? "ready" : "waiting"}>
-                      {getPlayerLabel(player.playerId)}: {isReady ? "READY" : "Waiting"}
-                    </p>
-                  );
-                })}
+            <div className="lobbyPlayersSplit">
+              <div className="lobbyPlayerCard">
+                <p className="lobbyPlayerSlotLabel">Player 1</p>
+                <label className="controlLabel lobbyNameField" htmlFor="lobbyPlayerName">
+                  Marble Name (Optional)
+                </label>
+                <input
+                  id="lobbyPlayerName"
+                  className="lobbyNameInput"
+                  value={playerNameInput}
+                  onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
+                  placeholder="Enter name"
+                  maxLength={18}
+                  autoComplete="nickname"
+                />
+                <p className="lobbyPlayerNameValue">{playerOneName}</p>
+                <div className={`lobbyReadyIndicator ${playerOneReady ? "ready" : "notReady"}`} />
+                <p className={`lobbyReadyStatus ${playerOneReady ? "ready" : "notReady"}`}>
+                  {playerOneReady ? "READY" : "NOT READY"}
+                </p>
+                <button
+                  type="button"
+                  className={`readyButton lobbyInlineReadyButton ${localReady ? "ready" : ""}`}
+                  onClick={() => void toggleReady()}
+                  disabled={!canToggleLobbyReady}
+                >
+                  {localReady ? "UNREADY" : "READY"}
+                </button>
               </div>
-            ) : null}
+              <div className="lobbyPlayerCard">
+                <p className="lobbyPlayerSlotLabel">Player 2</p>
+                <p className="lobbyPlayerNameValue">{playerTwoName}</p>
+                <div className={`lobbyReadyIndicator ${playerTwoReady ? "ready" : "notReady"}`} />
+                <p className={`lobbyReadyStatus ${playerTwoReady ? "ready" : "notReady"}`}>
+                  {playerTwoReady ? "READY" : "NOT READY"}
+                </p>
+              </div>
+            </div>
+            <p>Players: {playersInRoom.length}/2</p>
             {joinHandshakePending ? (
               <p className="raceHint">
                 Joining room ({joinStageLabel}
