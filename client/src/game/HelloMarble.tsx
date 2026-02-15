@@ -1974,16 +1974,15 @@ export function HelloMarble() {
   const showModePicker = gameMode === "unselected";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
   const showSoloResult = gameMode === "solo" && trialState === "finished";
-  const showRaceLobby =
-    gameMode === "multiplayer" &&
-    !showMultiplayerResult &&
-    !(racePhase === "racing" && trialState !== "finished");
   const multiplayerRaceInProgress =
     gameMode === "multiplayer" &&
     racePhase === "racing" &&
     trialState !== "finished";
+  const multiplayerMenusVisible = gameMode === "multiplayer" && racePhase === "waiting";
+  const showRaceLobby =
+    multiplayerMenusVisible && !showMultiplayerResult;
   const showMultiplayerNetworkUi =
-    gameMode === "multiplayer" && !multiplayerRaceInProgress;
+    multiplayerMenusVisible && !multiplayerRaceInProgress;
   const creatingLobby =
     gameMode === "multiplayer" &&
     !roomCode &&
@@ -2313,7 +2312,6 @@ export function HelloMarble() {
                 })}
               </div>
             ) : null}
-            {racePhase === "countdown" ? <p className="raceHint">Countdown started...</p> : null}
             {joinHandshakePending ? (
               <p className="raceHint">
                 Joining room ({joinStageLabel}
