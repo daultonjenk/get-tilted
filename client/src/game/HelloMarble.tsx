@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { createTrack } from "./track/createTrack";
@@ -2028,8 +2029,13 @@ export function HelloMarble() {
     multiplayerMenusVisible && !showMultiplayerResult;
   const showMultiplayerNetworkUi =
     multiplayerMenusVisible && !multiplayerRaceInProgress;
+  const gameplayUiVisible =
+    !showModePicker && !showRaceLobby && !showMultiplayerResult && !showSoloResult;
   const showFloatingGyroCalibrateButton =
-    tiltStatus.supported && tiltStatus.enabled && tiltStatus.permission === "granted";
+    gameplayUiVisible &&
+    tiltStatus.supported &&
+    tiltStatus.enabled &&
+    tiltStatus.permission === "granted";
   const creatingLobby =
     gameMode === "multiplayer" &&
     !roomCode &&
@@ -2090,6 +2096,12 @@ export function HelloMarble() {
       return `${getPlayerLabel(raceResult.winnerPlayerId)} Wins`;
     }
     return "Race Results";
+  };
+
+  const handleFloatingRecalibrate = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    calibrateTiltRef.current();
   };
 
   const updateTuning = <K extends keyof TuningState>(
@@ -2465,7 +2477,7 @@ export function HelloMarble() {
         <button
           type="button"
           className="floatingGyroCalibrateButton"
-          onClick={() => calibrateTiltRef.current()}
+          onClick={handleFloatingRecalibrate}
         >
           Recalibrate
         </button>
