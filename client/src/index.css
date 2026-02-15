@@ -55,6 +55,42 @@ textarea {
   height: 100%;
 }
 
+.orientationGuardOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(4 14 25 / 92%);
+}
+
+.orientationGuardCard {
+  width: min(420px, 92vw);
+  border: 1px solid rgb(251 245 187 / 38%);
+  border-radius: 0.75rem;
+  padding: 1rem 1.1rem;
+  background:
+    linear-gradient(150deg, rgb(12 20 33 / 94%), rgb(14 40 66 / 92%)),
+    radial-gradient(circle at 15% 20%, rgb(255 255 255 / 10%), transparent 55%);
+  text-align: center;
+}
+
+.orientationGuardTitle {
+  margin: 0;
+  color: #fff7c7;
+  font-size: clamp(1.2rem, 5.5vw, 1.55rem);
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.orientationGuardHint {
+  margin: 0.55rem 0 0;
+  color: #d9ecff;
+  font-size: clamp(0.95rem, 3.4vw, 1.05rem);
+}
+
 .raceOverlay {
   position: absolute;
   left: 0.75rem;

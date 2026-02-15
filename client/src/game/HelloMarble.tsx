@@ -444,6 +444,9 @@ export function HelloMarble() {
       ? window.matchMedia("(max-width: 700px)").matches
       : false,
   );
+  const [isPortraitViewport, setIsPortraitViewport] = useState(() =>
+    typeof window !== "undefined" ? window.innerHeight >= window.innerWidth : true,
+  );
   const [drawerOpen, setDrawerOpen] = useState(() =>
     typeof window !== "undefined"
       ? !window.matchMedia("(max-width: 700px)").matches
@@ -580,6 +583,60 @@ export function HelloMarble() {
       media.removeEventListener("change", onChange);
     };
   }, []);
+
+  useEffect(() => {
+    const updateViewportOrientation = () => {
+      setIsPortraitViewport(window.innerHeight >= window.innerWidth);
+    };
+    updateViewportOrientation();
+    window.addEventListener("resize", updateViewportOrientation);
+    window.addEventListener("orientationchange", updateViewportOrientation);
+    window.visualViewport?.addEventListener("resize", updateViewportOrientation);
+    return () => {
+      window.removeEventListener("resize", updateViewportOrientation);
+      window.removeEventListener("orientationchange", updateViewportOrientation);
+      window.visualViewport?.removeEventListener("resize", updateViewportOrientation);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile || typeof window === "undefined") {
+      return;
+    }
+    const tryLockPortraitOrientation = async () => {
+      const orientationApi = window.screen.orientation as
+        | (ScreenOrientation & {
+            lock?: (
+              orientation:
+                | "any"
+                | "natural"
+                | "landscape"
+                | "portrait"
+                | "portrait-primary"
+                | "portrait-secondary"
+                | "landscape-primary"
+                | "landscape-secondary",
+            ) => Promise<void>;
+          })
+        | undefined;
+      if (!orientationApi || typeof orientationApi.lock !== "function") {
+        return;
+      }
+      try {
+        await orientationApi.lock("portrait-primary");
+      } catch {
+        // Browsers can reject lock requests unless in fullscreen/PWA/user gesture.
+      }
+    };
+    void tryLockPortraitOrientation();
+    const onGesture = () => {
+      void tryLockPortraitOrientation();
+    };
+    window.addEventListener("pointerdown", onGesture, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", onGesture);
+    };
+  }, [isMobile]);
 
   useEffect(() => {
     tiltStatusRef.current = tiltStatus;
@@ -2042,6 +2099,7 @@ export function HelloMarble() {
     (netStatus === "connecting" || netStatus === "connected");
   const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
   const twoPlayersInLobby = gameMode === "multiplayer" && playersInRoom.length === 2;
+  const showRotateToPortraitOverlay = isMobile && !isPortraitViewport;
   const joinHandshakePending =
     gameMode === "multiplayer" &&
     netStatus !== "disconnected" &&
@@ -2323,6 +2381,16 @@ export function HelloMarble() {
     <div className="appShell">
       <p className="versionBadge">Version {APP_VERSION}</p>
       <div className="viewport" ref={mountRef} />
+      {showRotateToPortraitOverlay ? (
+        <div className="orientationGuardOverlay" role="alert" aria-live="polite">
+          <div className="orientationGuardCard">
+            <p className="orientationGuardTitle">Rotate To Portrait</p>
+            <p className="orientationGuardHint">
+              Keep your phone upright to keep tilt controls stable.
+            </p>
+          </div>
+        </div>
+      ) : null}
       {showModePicker ? (
         <div className="raceOverlay menuOverlay">
           <div className="raceOverlayCard menuCard">
