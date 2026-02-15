@@ -150,6 +150,7 @@ Purpose: ensure the visible top-left in-game/menu version always identifies the 
 
 Rules:
 - Every implemented change by Codex that affects behavior, UI, config, assets, networking, physics, or build output must bump the displayed build version.
+- This includes small bugfixes, hotfixes, and minor patches; no implementation change is exempt from version bumping.
 - Every commit must have a unique build version string. No reuse.
 - When Codex finishes implementing a plan/milestone, the final state must include a new version bump (even if changes were small).
 - The version shown in the top-left menu/screen is authoritative for build identity and must match the value committed in source.
