@@ -291,6 +291,8 @@ textarea {
 }
 
 .raceResultCard {
+  position: relative;
+  z-index: 1;
   border-color: rgb(155 206 255 / 45%);
 }
 
@@ -322,6 +324,136 @@ textarea {
 .raceResultRow.local {
   border-color: rgb(151 255 127 / 45%);
   background: rgb(24 62 43 / 55%);
+}
+
+.raceResultOverlay {
+  isolation: isolate;
+}
+
+.raceResultCelebration {
+  position: absolute;
+  inset: -1rem -0.8rem -0.8rem -0.8rem;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.raceResultCelebration::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 0.9rem;
+  background:
+    radial-gradient(circle at 15% 82%, rgb(255 93 93 / 34%), transparent 42%),
+    radial-gradient(circle at 28% 12%, rgb(255 211 105 / 30%), transparent 38%),
+    radial-gradient(circle at 82% 18%, rgb(120 255 175 / 30%), transparent 40%),
+    radial-gradient(circle at 75% 78%, rgb(118 192 255 / 32%), transparent 41%);
+  filter: blur(7px);
+  animation: race-result-bloom 1200ms ease-out both;
+}
+
+.raceResultCelebration .sparkle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #fff5ce;
+  box-shadow: 0 0 10px rgb(255 245 196 / 70%);
+  animation: race-result-sparkle 1150ms ease-out forwards;
+}
+
+.raceResultCelebration.live .sparkle {
+  animation-duration: 1400ms;
+}
+
+.raceResultCelebration.final {
+  opacity: 0.68;
+}
+
+.raceResultCelebration .s1 {
+  left: 6%;
+  top: 68%;
+}
+
+.raceResultCelebration .s2 {
+  left: 18%;
+  top: 12%;
+}
+
+.raceResultCelebration .s3 {
+  left: 32%;
+  top: 78%;
+}
+
+.raceResultCelebration .s4 {
+  left: 40%;
+  top: 10%;
+}
+
+.raceResultCelebration .s5 {
+  left: 52%;
+  top: 64%;
+}
+
+.raceResultCelebration .s6 {
+  left: 63%;
+  top: 18%;
+}
+
+.raceResultCelebration .s7 {
+  left: 72%;
+  top: 74%;
+}
+
+.raceResultCelebration .s8 {
+  left: 84%;
+  top: 14%;
+}
+
+.raceResultCelebration .s9 {
+  left: 11%;
+  top: 36%;
+}
+
+.raceResultCelebration .s10 {
+  left: 27%;
+  top: 49%;
+}
+
+.raceResultCelebration .s11 {
+  left: 59%;
+  top: 42%;
+}
+
+.raceResultCelebration .s12 {
+  left: 88%;
+  top: 54%;
+}
+
+@keyframes race-result-bloom {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes race-result-sparkle {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) translateY(8px);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5) translateY(-10px);
+  }
 }
 
 .countdownOverlay {

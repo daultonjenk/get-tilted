@@ -155,6 +155,7 @@ const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
+const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
 
 const DEFAULT_TUNING: TuningState = {
   physicsPreset: "marble",
@@ -1097,13 +1098,15 @@ export function HelloMarble() {
             return;
           }
           setRaceResult(message.payload);
-          setRacePhase("waiting");
-          setControlsLocked(true);
-          setCountdownStartAtMs(null);
-          setCountdownToken(null);
-          countdownIndexRef.current = -1;
-          countdownGoHandledRef.current = false;
-          hasSentFinishRef.current = false;
+          if (message.payload.isFinal) {
+            setRacePhase("waiting");
+            setControlsLocked(true);
+            setCountdownStartAtMs(null);
+            setCountdownToken(null);
+            countdownIndexRef.current = -1;
+            countdownGoHandledRef.current = false;
+            hasSentFinishRef.current = false;
+          }
           return;
         case "error":
           setNetError(`${message.payload.code}: ${message.payload.message}`);
@@ -2031,6 +2034,9 @@ export function HelloMarble() {
     if (!raceResult || gameMode !== "multiplayer") {
       return "Race Results";
     }
+    if (!raceResult.isFinal) {
+      return raceResult.winnerPlayerId === localPlayerId ? "You Finished!" : "First Finisher";
+    }
     if (raceResult.tie) {
       return "Tie";
     }
@@ -2333,7 +2339,12 @@ export function HelloMarble() {
         </div>
       ) : null}
       {showMultiplayerResult ? (
-        <div className="raceOverlay">
+        <div className="raceOverlay raceResultOverlay">
+          <div className={`raceResultCelebration ${raceResult?.isFinal ? "final" : "live"}`}>
+            {RESULT_SPARKLES.map((sparkleIndex) => (
+              <span key={sparkleIndex} className={`sparkle s${sparkleIndex + 1}`} />
+            ))}
+          </div>
           <div className="raceOverlayCard raceResultCard">
             <p className="raceOverlayTitle">Race Results</p>
             <p className="raceResultHeadline">{getResultHeadline()}</p>
@@ -2355,20 +2366,26 @@ export function HelloMarble() {
                 );
               })}
             </div>
-            <p className="raceHint">Both players press READY to start rematch.</p>
-            <button
-              type="button"
-              className={`readyButton ${localReady ? "ready" : ""}`}
-              onClick={() => void toggleReady()}
-              disabled={
-                netStatus !== "connected" ||
-                !roomCode ||
-                !localPlayerId ||
-                racePhase !== "waiting"
-              }
-            >
-              {localReady ? "UNREADY REMATCH" : "READY FOR REMATCH"}
-            </button>
+            <p className="raceHint">
+              {raceResult.isFinal
+                ? "Both players press READY to start rematch."
+                : "Waiting for the next marble to finish..."}
+            </p>
+            {raceResult.isFinal ? (
+              <button
+                type="button"
+                className={`readyButton ${localReady ? "ready" : ""}`}
+                onClick={() => void toggleReady()}
+                disabled={
+                  netStatus !== "connected" ||
+                  !roomCode ||
+                  !localPlayerId ||
+                  racePhase !== "waiting"
+                }
+              >
+                {localReady ? "UNREADY REMATCH" : "READY FOR REMATCH"}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

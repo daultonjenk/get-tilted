@@ -26,6 +26,7 @@ export type MessagePayloadMap = {
   };
   "race:result": {
     roomCode: string;
+    isFinal: boolean;
     winnerPlayerId?: string;
     tie: boolean;
     results: Array<{
@@ -313,6 +314,9 @@ export function validatePayload<TType extends MessageType>(
     case "race:result":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };
+      }
+      if (!isBoolean(payload.isFinal)) {
+        return { ok: false, error: "Expected isFinal boolean" };
       }
       if (
         typeof payload.winnerPlayerId !== "undefined" &&

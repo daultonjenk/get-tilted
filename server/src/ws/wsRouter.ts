@@ -67,8 +67,8 @@ function broadcastHelloAck(roomCode: string): void {
   }
 }
 
-function broadcastRaceResult(roomCode: string): void {
-  const payload = roomStore.finalizeRaceResultWithCurrentPlayers(roomCode);
+function broadcastRaceResult(roomCode: string, isFinal: boolean): void {
+  const payload = roomStore.getRaceResultSnapshotWithCurrentPlayers(roomCode, isFinal);
   if (!payload) {
     return;
   }
@@ -76,9 +76,11 @@ function broadcastRaceResult(roomCode: string): void {
   for (const client of clients) {
     send(client as SendableSocket, "race:result", payload);
   }
-  roomStore.clearReady(roomCode);
-  roomStore.clearCountdownStart(roomCode);
-  broadcastReadyState(roomCode);
+  if (isFinal) {
+    roomStore.clearReady(roomCode);
+    roomStore.clearCountdownStart(roomCode);
+    broadcastReadyState(roomCode);
+  }
 }
 
 function broadcastToOthers<TType extends keyof MessagePayloadMap>(
@@ -260,9 +262,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         ) {
           return;
         }
-        if (roomStore.getFinishCount(roomCode) >= 2) {
-          broadcastRaceResult(roomCode);
-        }
+        broadcastRaceResult(roomCode, roomStore.getFinishCount(roomCode) >= 2);
         return;
       }
       default:
@@ -296,7 +296,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         );
       }
       if (shouldFinalizeFromDnf) {
-        broadcastRaceResult(roomCodeBeforeLeave);
+        broadcastRaceResult(roomCodeBeforeLeave, true);
       }
     }
 

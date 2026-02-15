@@ -21,6 +21,7 @@ type RaceFinishRecord = {
 
 type RaceResultRecord = {
   roomCode: string;
+  isFinal: boolean;
   winnerPlayerId?: string;
   tie: boolean;
   results: Array<{
@@ -226,27 +227,48 @@ export class RoomStore {
     return this.raceResultByRoom.has(roomCode);
   }
 
-  finalizeRaceResultWithCurrentPlayers(roomCode: string): RaceResultRecord | null {
+  getRaceResultSnapshotWithCurrentPlayers(roomCode: string, isFinal: boolean): RaceResultRecord | null {
     const players = this.getPlayers(roomCode);
     if (players.length === 0) {
       return null;
     }
     const finishes = this.finishesByRoom.get(roomCode) ?? new Map<PlayerId, RaceFinishRecord>();
 
-    const results = players.map((player) => {
-      const finish = finishes.get(player.playerId);
-      if (finish && Number.isFinite(finish.elapsedMs)) {
-        return {
-          playerId: player.playerId,
-          status: "finished" as const,
-          elapsedMs: finish.elapsedMs,
-        };
-      }
-      return {
-        playerId: player.playerId,
-        status: "dnf" as const,
-      };
-    });
+    const results = isFinal
+      ? players.map((player) => {
+          const finish = finishes.get(player.playerId);
+          if (finish && Number.isFinite(finish.elapsedMs)) {
+            return {
+              playerId: player.playerId,
+              status: "finished" as const,
+              elapsedMs: finish.elapsedMs,
+            };
+          }
+          return {
+            playerId: player.playerId,
+            status: "dnf" as const,
+          };
+        })
+      : players
+          .map((player) => {
+            const finish = finishes.get(player.playerId);
+            if (finish && Number.isFinite(finish.elapsedMs)) {
+              return {
+                playerId: player.playerId,
+                status: "finished" as const,
+                elapsedMs: finish.elapsedMs,
+              };
+            }
+            return null;
+          })
+          .filter((entry): entry is { playerId: string; status: "finished"; elapsedMs: number } => {
+            return entry !== null;
+          })
+          .sort((a, b) => a.elapsedMs - b.elapsedMs);
+
+    if (results.length === 0) {
+      return null;
+    }
 
     const finished = results
       .filter((entry) => entry.status === "finished")
@@ -266,12 +288,15 @@ export class RoomStore {
 
     const payload: RaceResultRecord = {
       roomCode,
+      isFinal,
       winnerPlayerId,
       tie,
       results,
     };
-    this.raceResultByRoom.set(roomCode, payload);
-    this.raceActiveByRoom.set(roomCode, false);
+    if (isFinal) {
+      this.raceResultByRoom.set(roomCode, payload);
+      this.raceActiveByRoom.set(roomCode, false);
+    }
     return payload;
   }
 

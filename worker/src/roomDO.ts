@@ -226,9 +226,7 @@ export class RoomDO {
             elapsedMs: parsed.msg.payload.elapsedMs,
             finishedAtMs: parsed.msg.payload.finishedAtMs,
           });
-          if (this.finishes.size >= ROOM_MAX_CLIENTS) {
-            this.broadcastRaceResult();
-          }
+          this.broadcastRaceResult(this.finishes.size >= ROOM_MAX_CLIENTS);
           return;
         }
         default:
@@ -267,7 +265,7 @@ export class RoomDO {
       }
 
       if (this.finishes.size >= 1 && this.getSocketCount() < ROOM_MAX_CLIENTS) {
-        this.broadcastRaceResult();
+        this.broadcastRaceResult(true);
       }
 
       if (this.getSocketCount() < ROOM_MAX_CLIENTS) {
@@ -396,8 +394,8 @@ export class RoomDO {
     this.readyPlayerIds.clear();
   }
 
-  private broadcastRaceResult(): void {
-    if (!this.roomCode || this.raceResult != null) {
+  private broadcastRaceResult(isFinal: boolean): void {
+    if (!this.roomCode || (isFinal && this.raceResult != null)) {
       return;
     }
 
@@ -406,20 +404,41 @@ export class RoomDO {
       return;
     }
 
-    const results = players.map((player) => {
-      const finish = this.finishes.get(player.playerId);
-      if (finish && Number.isFinite(finish.elapsedMs)) {
-        return {
-          playerId: player.playerId,
-          status: "finished" as const,
-          elapsedMs: finish.elapsedMs,
-        };
-      }
-      return {
-        playerId: player.playerId,
-        status: "dnf" as const,
-      };
-    });
+    const results = isFinal
+      ? players.map((player) => {
+          const finish = this.finishes.get(player.playerId);
+          if (finish && Number.isFinite(finish.elapsedMs)) {
+            return {
+              playerId: player.playerId,
+              status: "finished" as const,
+              elapsedMs: finish.elapsedMs,
+            };
+          }
+          return {
+            playerId: player.playerId,
+            status: "dnf" as const,
+          };
+        })
+      : players
+          .map((player) => {
+            const finish = this.finishes.get(player.playerId);
+            if (finish && Number.isFinite(finish.elapsedMs)) {
+              return {
+                playerId: player.playerId,
+                status: "finished" as const,
+                elapsedMs: finish.elapsedMs,
+              };
+            }
+            return null;
+          })
+          .filter((entry): entry is { playerId: string; status: "finished"; elapsedMs: number } => {
+            return entry !== null;
+          })
+          .sort((a, b) => a.elapsedMs - b.elapsedMs);
+
+    if (results.length === 0) {
+      return;
+    }
 
     const finished = results
       .filter((entry) => entry.status === "finished")
@@ -437,17 +456,21 @@ export class RoomDO {
       winnerPlayerId = finished[0]!.playerId;
     }
 
-    this.raceResult = {
+    const payload: RaceResultPayload = {
       roomCode: this.roomCode,
+      isFinal,
       winnerPlayerId,
       tie,
       results,
     };
-    this.broadcast("race:result", this.raceResult);
-    this.raceActive = false;
-    this.readyPlayerIds.clear();
-    this.countdownStartAtMs = null;
-    this.broadcastReadyState();
+    this.broadcast("race:result", payload);
+    if (isFinal) {
+      this.raceResult = payload;
+      this.raceActive = false;
+      this.readyPlayerIds.clear();
+      this.countdownStartAtMs = null;
+      this.broadcastReadyState();
+    }
   }
 
   private createPlayerId(): string {
