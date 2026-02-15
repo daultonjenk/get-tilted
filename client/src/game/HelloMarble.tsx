@@ -1113,7 +1113,8 @@ export function HelloMarble() {
       }
     });
     if (autoJoinRoomCodeRef.current) {
-      raceClient.connect();
+      autoJoinAttemptedRef.current = true;
+      raceClient.joinRoom(autoJoinRoomCodeRef.current);
     }
 
     const computeSpawnWorld = (): CANNON.Vec3 => {
