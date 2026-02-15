@@ -17,32 +17,43 @@ type TiltFilterOptions = {
 const MAX_TILT_DEG = 15;
 
 let neutralX = 0;
-let neutralY = 0;
 let neutralZ = 0;
+let latestRawSample: TiltSample = { x: 0, y: 0, z: 0 };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function normalizeAxisWithNeutral(rawAxis: number, neutralAxis: number): number {
+  const centered = rawAxis - neutralAxis;
+  const denominator = centered >= 0 ? 1 - neutralAxis : 1 + neutralAxis;
+  if (denominator <= 0.0001) {
+    return 0;
+  }
+  return clamp(centered / denominator, -1, 1);
+}
+
 function normalizeOrientationSample(beta: number, gamma: number): TiltSample {
   const rawX = clamp(gamma / MAX_TILT_DEG, -1, 1);
   const rawZ = clamp(-beta / MAX_TILT_DEG, -1, 1);
+  latestRawSample = { x: rawX, y: 0, z: rawZ };
 
   return {
-    x: clamp(rawX - neutralX, -1, 1),
+    x: normalizeAxisWithNeutral(rawX, neutralX),
     y: 0,
-    z: clamp(rawZ - neutralZ, -1, 1),
+    z: normalizeAxisWithNeutral(rawZ, neutralZ),
   };
 }
 
 function normalizeMotionSample(accelX: number, accelY: number): TiltSample {
   const rawX = clamp(accelX / 9.81, -1, 1);
   const rawZ = clamp(accelY / 9.81, -1, 1);
+  latestRawSample = { x: rawX, y: 0, z: rawZ };
 
   return {
-    x: clamp(rawX - neutralX, -1, 1),
+    x: normalizeAxisWithNeutral(rawX, neutralX),
     y: 0,
-    z: clamp(rawZ - neutralZ, -1, 1),
+    z: normalizeAxisWithNeutral(rawZ, neutralZ),
   };
 }
 
@@ -142,7 +153,9 @@ export function makeTiltFilter(opts?: TiltFilterOptions): {
 }
 
 export function calibrateCurrent(sample: TiltSample): void {
-  neutralX = clamp(neutralX + sample.x, -1, 1);
-  neutralY = clamp(neutralY + sample.y, -1, 1);
-  neutralZ = clamp(neutralZ + sample.z, -1, 1);
+  const nextNeutral = Number.isFinite(latestRawSample.x)
+    ? latestRawSample
+    : sample;
+  neutralX = clamp(nextNeutral.x, -1, 1);
+  neutralZ = clamp(nextNeutral.z, -1, 1);
 }

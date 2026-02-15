@@ -185,7 +185,7 @@ const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
 const DEFAULT_TUNING: TuningState = {
   gravityG: 20,
   tiltStrength: 1.63,
-  gyroSensitivity: 1.35,
+  gyroSensitivity: 1,
   maxSpeed: 20,
   maxTiltDeg: 14,
   maxBoardAngVel: 5,
@@ -289,7 +289,7 @@ function sanitizeTuning(input: unknown): TuningState {
     base.tiltStrength = clamp(value.tiltStrength, 0.5, 2);
   }
   if (typeof value.gyroSensitivity === "number") {
-    base.gyroSensitivity = clamp(value.gyroSensitivity, 0.5, 2.5);
+    base.gyroSensitivity = clamp(value.gyroSensitivity, 0.8, 1.2);
   }
   if (typeof value.maxSpeed === "number") base.maxSpeed = clamp(value.maxSpeed, 4, 20);
   if (typeof value.maxTiltDeg === "number") {
@@ -923,6 +923,8 @@ export function HelloMarble() {
     let inputSourcesSummary = "none";
     let inputIntentX = 0;
     let inputIntentZ = 0;
+    let inputRawIntentX = 0;
+    let inputRawIntentZ = 0;
 
     const suppressVerticalPopOnSideImpact = () => {
       tempQuatA.set(
@@ -1688,8 +1690,12 @@ export function HelloMarble() {
           activeInputs.push("keyboard");
         }
         if (tiltEnabled) {
-          sourceX += motionTiltRef.current.x * currentTuning.gyroSensitivity;
-          sourceZ += motionTiltRef.current.z * currentTuning.gyroSensitivity;
+          const gyroGain =
+            Math.abs(currentTuning.gyroSensitivity - 1) > 0.0001
+              ? currentTuning.gyroSensitivity
+              : 1;
+          sourceX += motionTiltRef.current.x * gyroGain;
+          sourceZ += motionTiltRef.current.z * gyroGain;
           activeInputs.push("tilt");
         }
         if (touchFallbackEnabled) {
@@ -1707,6 +1713,8 @@ export function HelloMarble() {
 
       const intentX = currentTuning.invertTiltX ? -sourceIntent.x : sourceIntent.x;
       const intentZ = currentTuning.invertTiltZ ? -sourceIntent.z : sourceIntent.z;
+      inputRawIntentX = intentX;
+      inputRawIntentZ = intentZ;
       const normalizedIntent: TiltSample = {
         x: clamp(intentX, -1, 1),
         y: 0,
@@ -2257,8 +2265,8 @@ export function HelloMarble() {
           angularSpeed,
           verticalSpeed,
           penetrationDepth,
-          rawTiltX: normalizedIntent.x,
-          rawTiltZ: normalizedIntent.z,
+          rawTiltX: inputRawIntentX,
+          rawTiltZ: inputRawIntentZ,
           tiltX: filteredIntent.x,
           tiltZ: filteredIntent.z,
           gravX: world.gravity.x,
@@ -2889,12 +2897,12 @@ export function HelloMarble() {
               </div>
             </label>
             <label className="controlLabel">
-              Gyro Sensitivity
+              Gyro Gain (Debug)
               <div className="controlRow">
                 <input
                   type="range"
-                  min={0.5}
-                  max={2.5}
+                  min={0.8}
+                  max={1.2}
                   step={0.01}
                   value={tuning.gyroSensitivity}
                   onChange={(event) =>
