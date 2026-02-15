@@ -124,36 +124,36 @@ textarea {
     0 6px 16px rgb(0 0 0 / 45%);
   transform-origin: 50% 60%;
   will-change: transform;
-  animation: menu-title-tilt 7.8s linear infinite;
+  animation: menu-title-tilt 6.6s linear infinite;
 }
 
 @keyframes menu-title-tilt {
   0% {
-    transform: rotate(-4.2deg);
+    transform: rotate(-5.6deg);
   }
-  12% {
-    transform: rotate(-2.2deg);
+  12.5% {
+    transform: rotate(-4deg);
   }
   25% {
-    transform: rotate(0.8deg);
+    transform: rotate(0deg);
   }
-  38% {
-    transform: rotate(3.9deg);
+  37.5% {
+    transform: rotate(4deg);
   }
   50% {
-    transform: rotate(4.2deg);
+    transform: rotate(5.6deg);
   }
-  62% {
-    transform: rotate(2.3deg);
+  62.5% {
+    transform: rotate(4deg);
   }
   75% {
-    transform: rotate(-0.9deg);
+    transform: rotate(0deg);
   }
-  88% {
-    transform: rotate(-3.8deg);
+  87.5% {
+    transform: rotate(-4deg);
   }
   100% {
-    transform: rotate(-4.2deg);
+    transform: rotate(-5.6deg);
   }
 }
 
