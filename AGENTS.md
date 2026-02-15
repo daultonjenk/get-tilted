@@ -163,5 +163,5 @@ Implementation expectation:
 - Keep the version in a single source of truth (currently `client/src/buildInfo.ts`).
 - Any change task should include this version update in the same commit.
 - Codex responses must explicitly mention the version bump in the diff summary/changelog.
-
+- This version number is to be used in the commit message whenever possible
 ---
