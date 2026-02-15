@@ -177,7 +177,8 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: flex-start;
+  gap: 0.45rem;
 }
 
 .lobbyPlayerSlotLabel {
@@ -197,14 +198,27 @@ textarea {
   font-weight: 800;
   color: #fff7c7;
   text-transform: uppercase;
+  text-align: center;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.lobbyReadyRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 46px;
 }
 
 .lobbyReadyIndicator {
-  width: clamp(54px, 18vw, 80px);
-  aspect-ratio: 1;
-  border-radius: 0.35rem;
-  border: 4px solid rgb(255 255 255 / 15%);
+  width: clamp(18px, 3.6vw, 22px);
+  height: clamp(18px, 3.6vw, 22px);
+  border-radius: 999px;
+  border: 2px solid rgb(255 255 255 / 25%);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%);
+  flex: 0 0 auto;
 }
 
 .lobbyReadyIndicator.ready {
@@ -217,9 +231,12 @@ textarea {
 
 .lobbyReadyStatus {
   margin: 0;
-  font-size: clamp(1.08rem, 4vw, 1.4rem);
+  font-size: clamp(0.9rem, 3vw, 1.05rem);
   font-weight: 900;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  min-width: 95px;
+  text-align: left;
 }
 
 .lobbyReadyStatus.ready {
@@ -230,10 +247,12 @@ textarea {
   color: #eeff72;
 }
 
-.lobbyInlineReadyButton {
-  width: 100%;
-  max-width: 140px;
-  margin-top: 0.15rem;
+.lobbyCenterReadyButton {
+  width: min(280px, 100%);
+  min-height: 64px;
+  margin: 0;
+  font-size: clamp(1.05rem, 3.8vw, 1.3rem);
+  letter-spacing: 0.08em;
 }
 
 .menuTitleWrap {

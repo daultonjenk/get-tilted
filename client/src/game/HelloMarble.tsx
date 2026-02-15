@@ -2359,7 +2359,16 @@ export function HelloMarble() {
             <p className="lobbyCodeLabel">Lobby Code</p>
             <p className="lobbyCodeValue">{roomCode || "----"}</p>
             <div className="lobbyQrWrap">
-              {qrImageUrl ? (
+              {twoPlayersInLobby ? (
+                <button
+                  type="button"
+                  className={`readyButton lobbyCenterReadyButton ${localReady ? "ready" : ""}`}
+                  onClick={() => void toggleReady()}
+                  disabled={!canToggleLobbyReady}
+                >
+                  {localReady ? "UNREADY" : "READY"}
+                </button>
+              ) : qrImageUrl ? (
                 <img className="lobbyQrImage" src={qrImageUrl} alt="Join room QR code" />
               ) : (
                 <p className="raceHint">
@@ -2384,26 +2393,22 @@ export function HelloMarble() {
                   autoComplete="nickname"
                 />
                 <p className="lobbyPlayerNameValue">{playerOneName}</p>
-                <div className={`lobbyReadyIndicator ${playerOneReady ? "ready" : "notReady"}`} />
-                <p className={`lobbyReadyStatus ${playerOneReady ? "ready" : "notReady"}`}>
-                  {playerOneReady ? "READY" : "NOT READY"}
-                </p>
-                <button
-                  type="button"
-                  className={`readyButton lobbyInlineReadyButton ${localReady ? "ready" : ""}`}
-                  onClick={() => void toggleReady()}
-                  disabled={!canToggleLobbyReady}
-                >
-                  {localReady ? "UNREADY" : "READY"}
-                </button>
+                <div className="lobbyReadyRow">
+                  <div className={`lobbyReadyIndicator ${playerOneReady ? "ready" : "notReady"}`} />
+                  <p className={`lobbyReadyStatus ${playerOneReady ? "ready" : "notReady"}`}>
+                    {playerOneReady ? "READY" : "NOT READY"}
+                  </p>
+                </div>
               </div>
               <div className="lobbyPlayerCard">
                 <p className="lobbyPlayerSlotLabel">Player 2</p>
                 <p className="lobbyPlayerNameValue">{playerTwoName}</p>
-                <div className={`lobbyReadyIndicator ${playerTwoReady ? "ready" : "notReady"}`} />
-                <p className={`lobbyReadyStatus ${playerTwoReady ? "ready" : "notReady"}`}>
-                  {playerTwoReady ? "READY" : "NOT READY"}
-                </p>
+                <div className="lobbyReadyRow">
+                  <div className={`lobbyReadyIndicator ${playerTwoReady ? "ready" : "notReady"}`} />
+                  <p className={`lobbyReadyStatus ${playerTwoReady ? "ready" : "notReady"}`}>
+                    {playerTwoReady ? "READY" : "NOT READY"}
+                  </p>
+                </div>
               </div>
             </div>
             <p>Players: {playersInRoom.length}/2</p>
