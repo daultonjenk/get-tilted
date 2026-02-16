@@ -25,17 +25,29 @@ const COUNTDOWN_TOTAL_STEPS = 4;
 const ROOM_CODE_LENGTH = 6;
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const LOBBY_KEY = "__LOBBY__";
+const ROOM_IDLE_ALARM_MS = 5 * 60 * 1000; // 5 minutes until empty room cleanup
+
+// race:state value-range bounds for server-side validation
+const POS_RANGE = 500; // max absolute value for any position component
+const VEL_RANGE = 200; // max absolute value for any velocity component
+const RACE_STATE_MAX_HZ = 25; // max state messages per second per player
+const RACE_STATE_MIN_INTERVAL_MS = 1000 / RACE_STATE_MAX_HZ;
 
 export class RoomDO {
   private roomKey = LOBBY_KEY;
 
   private roomCode: string | null = null;
 
+  private readonly state: DurableObjectState;
+
   constructor(state: DurableObjectState) {
-    void state;
+    this.state = state;
   }
 
   private sockets = new Set<SocketWithMeta>();
+
+  /** Per-player timestamp of last accepted race:state message (for rate limiting). */
+  private lastRaceStateAt = new Map<string, number>();
 
   private readyPlayerIds = new Set<string>();
 
@@ -65,6 +77,7 @@ export class RoomDO {
     server.accept();
 
     this.sockets.add(server);
+    this.cancelCleanupAlarm();
     this.broadcastRoomState();
 
     server.addEventListener("message", (event) => {
@@ -155,6 +168,19 @@ export class RoomDO {
           if (!server.playerId || parsed.msg.payload.playerId !== server.playerId) {
             return;
           }
+          // T1-4: Rate limiting — drop messages exceeding max Hz per player
+          const now = Date.now();
+          const lastAt = this.lastRaceStateAt.get(server.playerId) ?? 0;
+          if (now - lastAt < RACE_STATE_MIN_INTERVAL_MS) {
+            return; // rate-limited
+          }
+          this.lastRaceStateAt.set(server.playerId, now);
+
+          // T1-4: Value-range validation — reject extreme/malicious payloads
+          if (!this.isRaceStateInBounds(parsed.msg.payload)) {
+            return;
+          }
+
           this.broadcastToOthers(server, "race:state", parsed.msg.payload);
           return;
         }
@@ -239,6 +265,7 @@ export class RoomDO {
 
       if (server.playerId) {
         this.readyPlayerIds.delete(server.playerId);
+        this.lastRaceStateAt.delete(server.playerId);
       }
 
       if (
@@ -274,6 +301,7 @@ export class RoomDO {
 
       this.broadcastRoomState();
       this.broadcastReadyState();
+      this.scheduleCleanupAlarm();
     });
 
     return new Response(null, { status: 101, webSocket: client });
@@ -484,5 +512,47 @@ export class RoomDO {
       out += ROOM_CODE_CHARS[byte % ROOM_CODE_CHARS.length];
     }
     return out;
+  }
+
+  /** T1-4: Validate that race:state payload values are within expected bounds. */
+  private isRaceStateInBounds(
+    payload: MessagePayloadMap["race:state"],
+  ): boolean {
+    const { pos, vel, trackPos } = payload;
+    if (!this.isTupleInRange(pos, POS_RANGE)) return false;
+    if (!this.isTupleInRange(vel, VEL_RANGE)) return false;
+    if (trackPos && !this.isTupleInRange(trackPos, POS_RANGE)) return false;
+    return true;
+  }
+
+  private isTupleInRange(
+    tuple: readonly number[],
+    maxAbs: number,
+  ): boolean {
+    for (const v of tuple) {
+      if (v !== v || v < -maxAbs || v > maxAbs) return false; // NaN check via self-inequality
+    }
+    return true;
+  }
+
+  /** T1-5: Schedule room cleanup when last socket disconnects. */
+  private scheduleCleanupAlarm(): void {
+    if (this.sockets.size === 0) {
+      this.state.storage.setAlarm(Date.now() + ROOM_IDLE_ALARM_MS);
+    }
+  }
+
+  /** T1-5: Cancel cleanup alarm when a new connection arrives. */
+  private cancelCleanupAlarm(): void {
+    this.state.storage.deleteAlarm();
+  }
+
+  /** T1-5: Durable Object alarm handler — clean up empty rooms. */
+  async alarm(): Promise<void> {
+    if (this.sockets.size === 0) {
+      this.lastRaceStateAt.clear();
+      this.clearRace();
+      await this.state.storage.deleteAll();
+    }
   }
 }

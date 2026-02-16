@@ -87,6 +87,8 @@ export class WSClient {
 
   private readonly staleSockets = new Set<WebSocket>();
 
+  private readonly socketAbortControllers = new Map<WebSocket, AbortController>();
+
   private readonly messageListeners = new Set<MessageCallback>();
 
   private readonly errorListeners = new Set<ErrorCallback>();
@@ -110,20 +112,24 @@ export class WSClient {
     const socket = new WebSocket(this.url);
     this.socket = socket;
     this.setStatus("connecting");
+    const controller = new AbortController();
+    const opts = { signal: controller.signal };
+    this.socketAbortControllers.set(socket, controller);
     socket.addEventListener("open", () => {
       if (!this.isActiveSocket(socket, epoch)) {
         return;
       }
       this.setStatus("connected");
-    });
+    }, opts);
     socket.addEventListener("close", () => {
       this.staleSockets.delete(socket);
+      this.socketAbortControllers.delete(socket);
       if (!this.isActiveSocket(socket, epoch)) {
         return;
       }
       this.socket = null;
       this.setStatus("disconnected");
-    });
+    }, opts);
     socket.addEventListener("message", (event) => {
       if (!this.isActiveSocket(socket, epoch)) {
         return;
@@ -134,13 +140,13 @@ export class WSClient {
         return;
       }
       this.emitMessage(parsed.msg);
-    });
+    }, opts);
     socket.addEventListener("error", () => {
       if (!this.isActiveSocket(socket, epoch)) {
         return;
       }
       this.emitError("WebSocket error");
-    });
+    }, opts);
 
     if (previousSocket && previousSocket !== socket) {
       this.retireSocket(previousSocket);
@@ -205,6 +211,11 @@ export class WSClient {
   private retireSocket(socket: WebSocket | null): void {
     if (!socket) {
       return;
+    }
+    const controller = this.socketAbortControllers.get(socket);
+    if (controller) {
+      controller.abort();
+      this.socketAbortControllers.delete(socket);
     }
     this.staleSockets.add(socket);
     try {

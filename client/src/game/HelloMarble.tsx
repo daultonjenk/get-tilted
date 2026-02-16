@@ -3,6 +3,7 @@ import type { MouseEvent } from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { createTrack } from "./track/createTrack";
+import { RingBuffer } from "./RingBuffer";
 import {
   calibrateCurrent,
   isTiltSupported,
@@ -96,18 +97,42 @@ type RacePhase = "waiting" | "countdown" | "racing";
 type GameMode = "unselected" | "solo" | "multiplayer";
 
 type GhostSnapshot = {
-  seq?: number;
+  seq: number | undefined;
   t: number;
   recvAtMs: number;
   pos: THREE.Vector3;
   quat: THREE.Quaternion;
   vel: THREE.Vector3;
-  trackPos?: THREE.Vector3;
-  trackQuat?: THREE.Quaternion;
+  hasTrackPose: boolean;
+  trackPos: THREE.Vector3;
+  trackQuat: THREE.Quaternion;
 };
 
+const SNAPSHOT_QUEUE_CAPACITY = 64;
+
+/** Pre-allocated pool of GhostSnapshot objects to avoid per-message GC pressure. */
+const snapshotPool: GhostSnapshot[] = [];
+
+function acquireSnapshot(): GhostSnapshot {
+  return snapshotPool.pop() ?? {
+    seq: undefined,
+    t: 0,
+    recvAtMs: 0,
+    pos: new THREE.Vector3(),
+    quat: new THREE.Quaternion(),
+    vel: new THREE.Vector3(),
+    hasTrackPose: false,
+    trackPos: new THREE.Vector3(),
+    trackQuat: new THREE.Quaternion(),
+  };
+}
+
+function releaseSnapshot(snap: GhostSnapshot): void {
+  snapshotPool.push(snap);
+}
+
 type GhostRenderState = {
-  snapshots: GhostSnapshot[];
+  snapshots: RingBuffer<GhostSnapshot>;
   mesh: THREE.Mesh;
   avgSourceDeltaMs: number;
   jitterMs: number;
@@ -174,6 +199,12 @@ const INTERP_DELAY_RISE_BLEND = 0.18;
 const INTERP_DELAY_FALL_BLEND = 0.08;
 const EXTRAPOLATION_MAX_MS = 45;
 const SNAPSHOT_MAX_AGE_MS = 2000;
+const TAB_BACKGROUND_THRESHOLD_MS = 500;
+// Pre-computed input source labels indexed by bitmask (keyboard=1, tilt=2, touch=4).
+const INPUT_LABELS = [
+  "none", "keyboard", "tilt", "keyboard+tilt",
+  "touch", "keyboard+touch", "tilt+touch", "keyboard+tilt+touch",
+];
 const MOBILE_SAFE_RENDER_SCALE_MIN = 0.72;
 const MOBILE_SAFE_RENDER_SCALE_MAX = 1;
 const MOBILE_RENDER_SCALE_MIN = 0.75;
@@ -891,6 +922,12 @@ export function HelloMarble() {
     const tempQuatB = new THREE.Quaternion();
     const tempQuatC = new THREE.Quaternion();
     const tempQuatD = new THREE.Quaternion();
+    // Pre-allocated tuples for network sends to avoid per-send GC pressure.
+    const sendPos: [number, number, number] = [0, 0, 0];
+    const sendQuat: [number, number, number, number] = [0, 0, 0, 0];
+    const sendVel: [number, number, number] = [0, 0, 0];
+    const sendTrackPos: [number, number, number] = [0, 0, 0];
+    const sendTrackQuat: [number, number, number, number] = [0, 0, 0, 0];
     const boardPosThree = new THREE.Vector3();
     const boardQuatThree = new THREE.Quaternion();
     const boardInverseQuatThree = new THREE.Quaternion();
@@ -994,7 +1031,7 @@ export function HelloMarble() {
       mesh.visible = false;
       scene.add(mesh);
       const next: GhostRenderState = {
-        snapshots: [],
+        snapshots: new RingBuffer<GhostSnapshot>(SNAPSHOT_QUEUE_CAPACITY),
         mesh,
         avgSourceDeltaMs: SOURCE_RATE_MS,
         jitterMs: 0,
@@ -1021,7 +1058,7 @@ export function HelloMarble() {
 
     const resetGhostSnapshots = (): void => {
       for (const [, playerState] of ghostPlayers) {
-        playerState.snapshots.length = 0;
+        playerState.snapshots.clear();
         playerState.lastSourceSeq = -1;
         playerState.lastSourceT = -1;
         playerState.lastRecvAtMs = -1;
@@ -1273,23 +1310,23 @@ export function HelloMarble() {
           playerState.lastSourceT = enqueueT;
           playerState.lastRecvAtMs = recvAtMs;
 
-          playerState.snapshots.push({
-            seq: sourceSeq,
-            t: enqueueT,
-            recvAtMs,
-            pos: new THREE.Vector3(...message.payload.pos),
-            quat: new THREE.Quaternion(...message.payload.quat),
-            vel: new THREE.Vector3(...message.payload.vel),
-            trackPos: message.payload.trackPos
-              ? new THREE.Vector3(...message.payload.trackPos)
-              : undefined,
-            trackQuat: message.payload.trackQuat
-              ? new THREE.Quaternion(...message.payload.trackQuat)
-              : undefined,
-          });
-          while (playerState.snapshots.length > 64) {
-            playerState.snapshots.shift();
+          const snap = acquireSnapshot();
+          snap.seq = sourceSeq;
+          snap.t = enqueueT;
+          snap.recvAtMs = recvAtMs;
+          snap.pos.set(...message.payload.pos);
+          snap.quat.set(...message.payload.quat);
+          snap.vel.set(...message.payload.vel);
+          if (message.payload.trackPos && message.payload.trackQuat) {
+            snap.hasTrackPose = true;
+            snap.trackPos.set(...message.payload.trackPos);
+            snap.trackQuat.set(...message.payload.trackQuat);
+          } else {
+            snap.hasTrackPose = false;
           }
+          const evicted = playerState.snapshots.push(snap);
+          if (evicted) releaseSnapshot(evicted);
+          // Ring buffer auto-evicts when at capacity; no manual overflow loop needed.
           return;
         }
         case "race:left": {
@@ -1553,7 +1590,7 @@ export function HelloMarble() {
       outPos: THREE.Vector3,
       outQuat: THREE.Quaternion,
     ): boolean => {
-      if (!snapshot.trackPos || !snapshot.trackQuat) {
+      if (!snapshot.hasTrackPose) {
         return false;
       }
       outPos.copy(snapshot.trackPos);
@@ -1600,6 +1637,32 @@ export function HelloMarble() {
       state.mesh.quaternion.copy(worldQuat);
     };
 
+    // T1-3: Tab-backgrounding handling — flush stale ghost snapshots on un-background.
+    let lastVisibleAtMs = performance.now();
+    let wasBackgrounded = false;
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Tab going to background — record the timestamp.
+        lastVisibleAtMs = performance.now();
+      } else {
+        // Tab returning to foreground.
+        const gapMs = performance.now() - lastVisibleAtMs;
+        if (gapMs > TAB_BACKGROUND_THRESHOLD_MS) {
+          wasBackgrounded = true;
+          // Flush ghost snapshot queues: keep only the 2 most recent entries
+          // so interpolation can resume immediately without draining a huge queue.
+          for (const [, playerState] of ghostPlayers) {
+            const snaps = playerState.snapshots;
+            while (snaps.length > 2) {
+              const flushed = snaps.shift();
+              if (flushed) releaseSnapshot(flushed);
+            }
+          }
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     let animationFrame = 0;
     let lastTime = performance.now() / 1000;
     let debugTimer = 0;
@@ -1620,8 +1683,13 @@ export function HelloMarble() {
       }
       lastCadenceTimestampMs = nowMs;
       const now = nowMs / 1000;
-      const delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
+      let delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
       lastTime = now;
+      // T1-3: After un-backgrounding, clamp delta to a single frame to avoid physics jump.
+      if (wasBackgrounded) {
+        delta = TIMESTEP;
+        wasBackgrounded = false;
+      }
       debugTimer += delta;
 
       const currentTuning = tuningRef.current;
@@ -1712,9 +1780,9 @@ export function HelloMarble() {
       } else {
         let sourceX = keyboardIntent.x;
         let sourceZ = keyboardIntent.z;
-        const activeInputs: string[] = [];
+        let inputMask = 0;
         if (keyboardActive) {
-          activeInputs.push("keyboard");
+          inputMask |= 1;
         }
         if (tiltEnabled) {
           const gyroGain =
@@ -1723,19 +1791,19 @@ export function HelloMarble() {
               : 1;
           sourceX += motionTiltRef.current.x * gyroGain;
           sourceZ += motionTiltRef.current.z * gyroGain;
-          activeInputs.push("tilt");
+          inputMask |= 2;
         }
         if (touchFallbackEnabled) {
           sourceX += touchIntent.x;
           sourceZ += touchIntent.z;
-          activeInputs.push("touch");
+          inputMask |= 4;
         }
         sourceIntent = {
           x: sourceX,
           y: 0,
           z: sourceZ,
         };
-        inputSourcesSummary = activeInputs.length > 0 ? activeInputs.join("+") : "none";
+        inputSourcesSummary = INPUT_LABELS[inputMask]!;
       }
 
       const intentX = currentTuning.invertTiltX ? -sourceIntent.x : sourceIntent.x;
@@ -1926,23 +1994,30 @@ export function HelloMarble() {
         const monotonicT = Math.max(candidateT, lastSentRaceStateT + 1);
         lastSentRaceStateT = monotonicT;
 
+        sendPos[0] = marbleBody.position.x;
+        sendPos[1] = marbleBody.position.y;
+        sendPos[2] = marbleBody.position.z;
+        sendQuat[0] = marbleBody.quaternion.x;
+        sendQuat[1] = marbleBody.quaternion.y;
+        sendQuat[2] = marbleBody.quaternion.z;
+        sendQuat[3] = marbleBody.quaternion.w;
+        sendVel[0] = marbleBody.velocity.x;
+        sendVel[1] = marbleBody.velocity.y;
+        sendVel[2] = marbleBody.velocity.z;
+        sendTrackPos[0] = boardBody.position.x;
+        sendTrackPos[1] = boardBody.position.y;
+        sendTrackPos[2] = boardBody.position.z;
+        sendTrackQuat[0] = boardBody.quaternion.x;
+        sendTrackQuat[1] = boardBody.quaternion.y;
+        sendTrackQuat[2] = boardBody.quaternion.z;
+        sendTrackQuat[3] = boardBody.quaternion.w;
         raceClient.sendRaceState({
           t: monotonicT,
-          pos: [marbleBody.position.x, marbleBody.position.y, marbleBody.position.z],
-          quat: [
-            marbleBody.quaternion.x,
-            marbleBody.quaternion.y,
-            marbleBody.quaternion.z,
-            marbleBody.quaternion.w,
-          ],
-          vel: [marbleBody.velocity.x, marbleBody.velocity.y, marbleBody.velocity.z],
-          trackPos: [boardBody.position.x, boardBody.position.y, boardBody.position.z],
-          trackQuat: [
-            boardBody.quaternion.x,
-            boardBody.quaternion.y,
-            boardBody.quaternion.z,
-            boardBody.quaternion.w,
-          ],
+          pos: sendPos,
+          quat: sendQuat,
+          vel: sendVel,
+          trackPos: sendTrackPos,
+          trackQuat: sendTrackQuat,
         });
         lastRaceSendAt = nowMs;
       }
@@ -2006,31 +2081,29 @@ export function HelloMarble() {
         if (snapshots.length === 0) {
           continue;
         }
-        let queueViolationIndex = -1;
-        for (let idx = 1; idx < snapshots.length; idx += 1) {
-          if (snapshots[idx]!.t <= snapshots[idx - 1]!.t) {
-            queueViolationIndex = idx;
-            break;
+        // Remove ALL out-of-order violations in a single pass (T2-7 fix).
+        // Scan backwards so removeAt() doesn't shift unvisited indices.
+        for (let idx = snapshots.length - 1; idx >= 1; idx--) {
+          if (snapshots.at(idx)!.t <= snapshots.at(idx - 1)!.t) {
+            snapshots.removeAt(idx);
+            playerState.queueOrderViolationCount += 1;
+            totalQueueOrderViolations += 1;
           }
         }
-        if (queueViolationIndex >= 0) {
-          snapshots.splice(queueViolationIndex, 1);
-          playerState.queueOrderViolationCount += 1;
-          totalQueueOrderViolations += 1;
-          if (snapshots.length === 0) {
-            continue;
-          }
+        if (snapshots.length === 0) {
+          continue;
         }
         const targetInterpTime = interpNowMs - playerState.interpolationDelayMs;
         while (
           snapshots.length >= 3 &&
-          snapshots[1]!.t <= targetInterpTime
+          snapshots.at(1)!.t <= targetInterpTime
         ) {
-          snapshots.shift();
+          const shifted = snapshots.shift();
+          if (shifted) releaseSnapshot(shifted);
         }
         if (snapshots.length >= 2) {
-          const a = snapshots[0]!;
-          const b = snapshots[1]!;
+          const a = snapshots.at(0)!;
+          const b = snapshots.at(1)!;
           resolveSnapshotPose(
             a,
             tempVecA,
@@ -2098,7 +2171,7 @@ export function HelloMarble() {
           continue;
         }
 
-        const latest = snapshots[0]!;
+        const latest = snapshots.at(0)!;
         resolveSnapshotPose(
           latest,
           tempVecA,
@@ -2336,6 +2409,7 @@ export function HelloMarble() {
 
     return () => {
       window.cancelAnimationFrame(animationFrame);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("resize", resize);

@@ -30,7 +30,10 @@ type StatusListener = (status: WSStatus) => void;
 type ClockSyncListener = (offsetMs: number) => void;
 type JoinTimingListener = (timing: JoinTimingSnapshot | null) => void;
 
-const PING_INTERVAL_MS = 2000;
+const PING_FAST_INTERVAL_MS = 500; // Burst pings during convergence phase
+const PING_STEADY_INTERVAL_MS = 1000; // Steady-state ping interval
+const PING_FAST_PHASE_MS = 10000; // Duration of fast convergence phase
+const CLOCK_OFFSET_WINDOW_SIZE = 8; // Sliding window for median filter
 const JOIN_ACK_RETRY_MS = 1200;
 const JOIN_ACK_MAX_RETRIES = 2;
 
@@ -85,6 +88,10 @@ export class RaceClient {
 
   private pingTimer: number | null = null;
 
+  private pingStartedAtMs = 0;
+
+  private readonly clockOffsetSamples: number[] = [];
+
   private nextRaceStateSeq = 1;
 
   private pendingCreateRoom = false;
@@ -123,6 +130,7 @@ export class RaceClient {
         this.stopPingLoop();
         this.serverClockOffsetMs = 0;
         this.hasClockSync = false;
+        this.clockOffsetSamples.length = 0;
         this.emitClockOffset();
       } else if (status === "connected") {
         if (this.pendingJoin) {
@@ -324,10 +332,24 @@ export class RaceClient {
     if (this.pingTimer != null) {
       return;
     }
+    this.pingStartedAtMs = Date.now();
     this.sendPing();
-    this.pingTimer = window.setInterval(() => {
+    this.schedulePing();
+  }
+
+  private schedulePing(): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const elapsed = Date.now() - this.pingStartedAtMs;
+    const interval = elapsed < PING_FAST_PHASE_MS
+      ? PING_FAST_INTERVAL_MS
+      : PING_STEADY_INTERVAL_MS;
+    this.pingTimer = window.setTimeout(() => {
+      this.pingTimer = null;
       this.sendPing();
-    }, PING_INTERVAL_MS);
+      this.schedulePing();
+    }, interval);
   }
 
   private stopPingLoop(): void {
@@ -335,7 +357,7 @@ export class RaceClient {
       return;
     }
     if (typeof window !== "undefined") {
-      window.clearInterval(this.pingTimer);
+      window.clearTimeout(this.pingTimer);
     }
     this.pingTimer = null;
   }
@@ -541,13 +563,22 @@ export class RaceClient {
     const rttMs = Math.max(0, receivedAtMs - sentAtMs);
     const estimatedServerNowAtReceive = serverNowMs + rttMs * 0.5;
     const sampleOffset = estimatedServerNowAtReceive - receivedAtMs;
-    if (!this.hasClockSync) {
-      this.serverClockOffsetMs = sampleOffset;
-      this.hasClockSync = true;
-    } else {
-      this.serverClockOffsetMs =
-        this.serverClockOffsetMs * 0.85 + sampleOffset * 0.15;
+
+    // Sliding window: keep last N samples, use median for robustness.
+    this.clockOffsetSamples.push(sampleOffset);
+    if (this.clockOffsetSamples.length > CLOCK_OFFSET_WINDOW_SIZE) {
+      this.clockOffsetSamples.shift();
     }
+
+    // Median offset is more robust than EMA against outliers and asymmetric paths.
+    const sorted = [...this.clockOffsetSamples].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 1
+      ? sorted[mid]!
+      : (sorted[mid - 1]! + sorted[mid]!) * 0.5;
+
+    this.serverClockOffsetMs = median;
+    this.hasClockSync = true;
     this.emitClockOffset();
   }
 
