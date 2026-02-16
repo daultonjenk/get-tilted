@@ -30,7 +30,7 @@ import {
 } from "./perf/mobileGovernor";
 
 type MarbleDebug = {
-  fps: number;
+  cadenceHz: number;
   posX: number;
   posY: number;
   posZ: number;
@@ -47,7 +47,7 @@ type MarbleDebug = {
   gravZ: number;
   renderScale: number;
   perfTier: MobilePerfTier | "desktop";
-  frameMsEma: number;
+  cpuFrameMsEma: number;
   physicsMsEma: number;
   renderMsEma: number;
   miscMsEma: number;
@@ -83,6 +83,7 @@ type TuningState = {
   enableExtraDownforce: boolean;
   extraDownForce: number;
   renderScaleMobile: number;
+  mobileSafeFallback: boolean;
   debugUpdateHzMobile: number;
   physicsMaxSubSteps: number;
   physicsSolverIterations: number;
@@ -173,8 +174,10 @@ const INTERP_DELAY_RISE_BLEND = 0.18;
 const INTERP_DELAY_FALL_BLEND = 0.08;
 const EXTRAPOLATION_MAX_MS = 45;
 const SNAPSHOT_MAX_AGE_MS = 2000;
-const MOBILE_RENDER_SCALE_MIN = 0.72;
-const MOBILE_RENDER_SCALE_MAX = 1;
+const MOBILE_SAFE_RENDER_SCALE_MIN = 0.72;
+const MOBILE_SAFE_RENDER_SCALE_MAX = 1;
+const MOBILE_RENDER_SCALE_MIN = 0.75;
+const MOBILE_RENDER_SCALE_MAX = 2;
 const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
@@ -201,7 +204,8 @@ const DEFAULT_TUNING: TuningState = {
   invertCameraSide: false,
   enableExtraDownforce: false,
   extraDownForce: 0.7,
-  renderScaleMobile: 1.2,
+  renderScaleMobile: 2,
+  mobileSafeFallback: false,
   debugUpdateHzMobile: 5,
   physicsMaxSubSteps: 7,
   physicsSolverIterations: 24,
@@ -337,7 +341,10 @@ function sanitizeTuning(input: unknown): TuningState {
     base.extraDownForce = clamp(value.extraDownForce, 0, 12);
   }
   if (typeof value.renderScaleMobile === "number") {
-    base.renderScaleMobile = clamp(value.renderScaleMobile, 0.75, 1.5);
+    base.renderScaleMobile = clamp(value.renderScaleMobile, MOBILE_RENDER_SCALE_MIN, MOBILE_RENDER_SCALE_MAX);
+  }
+  if (typeof value.mobileSafeFallback === "boolean") {
+    base.mobileSafeFallback = value.mobileSafeFallback;
   }
   if (typeof value.debugUpdateHzMobile === "number") {
     base.debugUpdateHzMobile = clamp(value.debugUpdateHzMobile, 2, 15);
@@ -506,7 +513,7 @@ export function HelloMarble() {
     return Number.isFinite(parsed) ? parsed : null;
   });
   const [debug, setDebug] = useState<MarbleDebug>({
-    fps: 0,
+    cadenceHz: 0,
     posX: 0,
     posY: 0,
     posZ: 0,
@@ -523,7 +530,7 @@ export function HelloMarble() {
     gravZ: 0,
     renderScale: 1,
     perfTier: "desktop",
-    frameMsEma: 1000 / 60,
+    cpuFrameMsEma: 1000 / 60,
     physicsMsEma: 0,
     renderMsEma: 0,
     miscMsEma: 0,
@@ -763,24 +770,27 @@ export function HelloMarble() {
     camera.up.set(0, 1, 0);
 
     const mobileMode = window.matchMedia("(max-width: 700px)").matches;
-    const mobilePerfGovernor = mobileMode
+    const initialRenderScaleCap = clamp(
+      tuningRef.current.renderScaleMobile,
+      MOBILE_RENDER_SCALE_MIN,
+      MOBILE_RENDER_SCALE_MAX,
+    );
+    const mobilePerfGovernor = mobileMode && tuningRef.current.mobileSafeFallback
       ? createMobileGovernor(
           clamp(
-            tuningRef.current.renderScaleMobile,
-            MOBILE_RENDER_SCALE_MIN,
-            MOBILE_RENDER_SCALE_MAX,
+            initialRenderScaleCap,
+            MOBILE_SAFE_RENDER_SCALE_MIN,
+            MOBILE_SAFE_RENDER_SCALE_MAX,
           ),
           {
-            minScale: MOBILE_RENDER_SCALE_MIN,
-            maxScale: MOBILE_RENDER_SCALE_MAX,
+            minScale: MOBILE_SAFE_RENDER_SCALE_MIN,
+            maxScale: MOBILE_SAFE_RENDER_SCALE_MAX,
             targetFps: 60,
           },
         )
       : null;
-    const initialRenderScale = mobileMode
-      ? mobilePerfGovernor?.getStats().renderScale ?? MOBILE_RENDER_SCALE_MAX
-      : 2;
-    const renderer = new THREE.WebGLRenderer({ antialias: !mobileMode });
+    const initialRenderScale = mobilePerfGovernor?.getStats().renderScale ?? initialRenderScaleCap;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, initialRenderScale));
     mount.appendChild(renderer.domElement);
 
@@ -840,8 +850,8 @@ export function HelloMarble() {
     marbleBodyWithCcd.ccdIterations = tuningRef.current.ccdIterations;
     world.addBody(marbleBody);
 
-    const marbleSegments = mobileMode ? 20 : 32;
-    const ghostSegments = mobileMode ? 16 : 24;
+    const marbleSegments = 32;
+    const ghostSegments = 24;
     const marbleTexture = createMarbleTexture();
     const marbleMesh = new THREE.Mesh(
       new THREE.SphereGeometry(marbleRadius, marbleSegments, marbleSegments),
@@ -1594,14 +1604,21 @@ export function HelloMarble() {
     let lastTime = performance.now() / 1000;
     let debugTimer = 0;
     let lastRenderScale = initialRenderScale;
-    let frameMsEma = 1000 / 60;
+    let cadenceMsEma = 1000 / 60;
+    let cpuFrameMsEma = 1000 / 60;
+    let lastCadenceTimestampMs: number | null = null;
     let physicsMsEma = 0;
     let renderMsEma = 0;
     let miscMsEma = 0;
-    let perfTier: MobilePerfTier | "desktop" = mobileMode ? "high" : "desktop";
+    let perfTier: MobilePerfTier | "desktop" = mobilePerfGovernor ? "high" : "desktop";
 
     const tick = (nowMs: number) => {
       const frameStartMs = performance.now();
+      if (lastCadenceTimestampMs != null) {
+        const rafDeltaMs = clamp(nowMs - lastCadenceTimestampMs, 1, 250);
+        cadenceMsEma += (rafDeltaMs - cadenceMsEma) * 0.12;
+      }
+      lastCadenceTimestampMs = nowMs;
       const now = nowMs / 1000;
       const delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
       lastTime = now;
@@ -1612,10 +1629,20 @@ export function HelloMarble() {
         mobilePerfGovernor.setUserScaleCap(
           clamp(
             currentTuning.renderScaleMobile,
-            MOBILE_RENDER_SCALE_MIN,
-            MOBILE_RENDER_SCALE_MAX,
+            MOBILE_SAFE_RENDER_SCALE_MIN,
+            MOBILE_SAFE_RENDER_SCALE_MAX,
           ),
         );
+      } else if (mobileMode) {
+        const nextRenderScale = clamp(
+          currentTuning.renderScaleMobile,
+          MOBILE_RENDER_SCALE_MIN,
+          MOBILE_RENDER_SCALE_MAX,
+        );
+        if (Math.abs(nextRenderScale - lastRenderScale) > 0.001) {
+          lastRenderScale = nextRenderScale;
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
+        }
       }
       world.gravity.set(0, -currentTuning.gravityG, 0);
       solver.iterations = Math.round(currentTuning.physicsSolverIterations);
@@ -2201,7 +2228,7 @@ export function HelloMarble() {
           renderMs,
           miscMs,
         });
-        frameMsEma = decision.frameMsEma;
+        cpuFrameMsEma = decision.frameMsEma;
         physicsMsEma = decision.physicsMsEma;
         renderMsEma = decision.renderMsEma;
         miscMsEma = decision.miscMsEma;
@@ -2211,7 +2238,7 @@ export function HelloMarble() {
           renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
         }
       } else {
-        frameMsEma += (frameMs - frameMsEma) * 0.12;
+        cpuFrameMsEma += (frameMs - cpuFrameMsEma) * 0.12;
         physicsMsEma += (physicsMs - physicsMsEma) * 0.12;
         renderMsEma += (renderMs - renderMsEma) * 0.12;
         miscMsEma += (miscMs - miscMsEma) * 0.12;
@@ -2257,7 +2284,7 @@ export function HelloMarble() {
         }
         setDebug((prev) => ({
           ...prev,
-          fps: Math.round(1000 / Math.max(frameMsEma, 0.0001)),
+          cadenceHz: Math.round(1000 / Math.max(cadenceMsEma, 0.0001)),
           posX: marbleBody.position.x,
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
@@ -2274,7 +2301,7 @@ export function HelloMarble() {
           gravZ: world.gravity.z,
           renderScale: lastRenderScale,
           perfTier,
-          frameMsEma,
+          cpuFrameMsEma,
           physicsMsEma,
           renderMsEma,
           miscMsEma,
@@ -3063,7 +3090,7 @@ export function HelloMarble() {
                 <input
                   type="range"
                   min={0.75}
-                  max={1.5}
+                  max={2}
                   step={0.01}
                   value={tuning.renderScaleMobile}
                   onChange={(event) =>
@@ -3079,6 +3106,16 @@ export function HelloMarble() {
                   }
                 />
               </div>
+            </label>
+            <label className="controlLabel controlLabelCheckbox">
+              <input
+                type="checkbox"
+                checked={tuning.mobileSafeFallback}
+                onChange={(event) =>
+                  updateTuning("mobileSafeFallback", event.target.checked)
+                }
+              />
+              Mobile Safe Fallback (dynamic governor)
             </label>
             <label className="controlLabel">
               Mobile Debug Hz
@@ -3503,10 +3540,10 @@ export function HelloMarble() {
         {activeDebugTab === "diagnostics" ? (
           <div className="debugSection">
             <p className="buildIdText">Build ID: {BUILD_ID}</p>
-            <p>FPS: {debug.fps}</p>
+            <p>Cadence Hz: {debug.cadenceHz}</p>
             <p>Render Scale: {debug.renderScale.toFixed(2)}</p>
             <p>Perf Tier: {debug.perfTier}</p>
-            <p>Frame ms (EMA): {debug.frameMsEma.toFixed(2)}</p>
+            <p>CPU frame ms (EMA): {debug.cpuFrameMsEma.toFixed(2)}</p>
             <p>Physics ms (EMA): {debug.physicsMsEma.toFixed(2)}</p>
             <p>Render ms (EMA): {debug.renderMsEma.toFixed(2)}</p>
             <p>Misc ms (EMA): {debug.miscMsEma.toFixed(2)}</p>
