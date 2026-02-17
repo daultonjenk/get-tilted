@@ -21,10 +21,7 @@ import {
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
 import { RaceClient, type JoinTimingSnapshot } from "../net/raceClient";
 import { APP_VERSION, BUILD_ID } from "../buildInfo";
-import type {
-  MessagePayloadMap,
-  TypedMessage,
-} from "@get-tilted/shared-protocol";
+import type { TypedMessage } from "@get-tilted/shared-protocol";
 import {
   resolveDefaultWsUrl,
   resolveWsUrlForHost,
@@ -34,427 +31,75 @@ import {
   createMobileGovernor,
   type MobilePerfTier,
 } from "./perf/mobileGovernor";
-
-type CameraPresetId =
-  | "chaseCentered"
-  | "chaseRight"
-  | "chaseLeft"
-  | "isoStandard"
-  | "isoFlatter"
-  | "topdownPure"
-  | "topdownForward"
-  | "broadcast";
-
-type TuningState = {
-  gravityG: number;
-  tiltStrength: number;
-  gyroSensitivity: number;
-  maxSpeed: number;
-  maxTiltDeg: number;
-  maxBoardAngVel: number;
-  tiltFilterTau: number;
-  linearDamping: number;
-  angularDamping: number;
-  cameraPreset: CameraPresetId;
-  bounce: number;
-  contactFriction: number;
-  contactRestitution: number;
-  invertTiltX: boolean;
-  invertTiltZ: boolean;
-  invertCameraSide: boolean;
-  enableExtraDownforce: boolean;
-  extraDownForce: number;
-  renderScaleMobile: number;
-  mobileSafeFallback: boolean;
-  debugUpdateHzMobile: number;
-  physicsMaxSubSteps: number;
-  physicsSolverIterations: number;
-  ccdSpeedThreshold: number;
-  ccdIterations: number;
-};
-
-type TrialState = "idle" | "running" | "finished";
-type RacePhase = "waiting" | "countdown" | "racing";
-type GameMode = "unselected" | "solo" | "multiplayer";
-
-type GhostSnapshot = {
-  seq: number | undefined;
-  t: number;
-  recvAtMs: number;
-  pos: THREE.Vector3;
-  quat: THREE.Quaternion;
-  vel: THREE.Vector3;
-  hasTrackPose: boolean;
-  trackPos: THREE.Vector3;
-  trackQuat: THREE.Quaternion;
-};
-
-const SNAPSHOT_QUEUE_CAPACITY = 64;
-
-/** Pre-allocated pool of GhostSnapshot objects to avoid per-message GC pressure. */
-const snapshotPool: GhostSnapshot[] = [];
-
-function acquireSnapshot(): GhostSnapshot {
-  return snapshotPool.pop() ?? {
-    seq: undefined,
-    t: 0,
-    recvAtMs: 0,
-    pos: new THREE.Vector3(),
-    quat: new THREE.Quaternion(),
-    vel: new THREE.Vector3(),
-    hasTrackPose: false,
-    trackPos: new THREE.Vector3(),
-    trackQuat: new THREE.Quaternion(),
-  };
-}
-
-function releaseSnapshot(snap: GhostSnapshot): void {
-  snapshotPool.push(snap);
-}
-
-type GhostRenderState = {
-  snapshots: RingBuffer<GhostSnapshot>;
-  mesh: THREE.Mesh;
-  avgSourceDeltaMs: number;
-  jitterMs: number;
-  avgSnapshotAgeMs: number;
-  snapshotAgeJitterMs: number;
-  latestSnapshotAgeMs: number | null;
-  interpolationDelayMs: number;
-  lastSourceSeq: number;
-  lastSourceT: number;
-  lastRecvAtMs: number;
-  hasRendered: boolean;
-  renderedPos: THREE.Vector3;
-  renderedQuat: THREE.Quaternion;
-  droppedOutOfOrderSeqCount: number;
-  droppedStaleTimestampCount: number;
-  droppedTooOldCount: number;
-  timestampCorrectedCount: number;
-  queueOrderViolationCount: number;
-  droppedStaleCount: number;
-};
+import type {
+  CameraPresetId,
+  TuningState,
+  TrialState,
+  RacePhase,
+  GameMode,
+  GhostSnapshot,
+  GhostRenderState,
+  RaceResultPayload,
+} from "./gameTypes";
+import {
+  TIMESTEP,
+  MAX_FRAME_DELTA,
+  LOOK_HEIGHT,
+  LOOK_AHEAD,
+  TOPDOWN_HEIGHT,
+  TOPDOWN_Z_OFFSET,
+  BOARD_TILT_SMOOTH,
+  PIVOT_SMOOTH,
+  TRACK_FLOOR_TOP_Y,
+  PENETRATION_EPSILON,
+  PENETRATION_CORRECTION_BIAS,
+  PENETRATION_CORRECTION_MAX,
+  SIDE_IMPACT_NORMAL_UP_DOT_MAX,
+  SIDE_IMPACT_UPWARD_SPEED_MIN,
+  SIDE_IMPACT_UPWARD_DAMPING,
+  SOURCE_RATE_MS,
+  INTERP_DELAY_MIN_MS,
+  INTERP_DELAY_MAX_MS,
+  INTERP_DELAY_RISE_BLEND,
+  INTERP_DELAY_FALL_BLEND,
+  EXTRAPOLATION_MAX_MS,
+  SNAPSHOT_MAX_AGE_MS,
+  TAB_BACKGROUND_THRESHOLD_MS,
+  SNAPSHOT_QUEUE_CAPACITY,
+  INPUT_LABELS,
+  MOBILE_SAFE_RENDER_SCALE_MIN,
+  MOBILE_SAFE_RENDER_SCALE_MAX,
+  MOBILE_RENDER_SCALE_MIN,
+  MOBILE_RENDER_SCALE_MAX,
+  TUNING_STORAGE_KEY,
+  BEST_TIME_STORAGE_KEY,
+  DEV_JOIN_HOST_KEY,
+  PLAYER_NAME_STORAGE_KEY,
+  COUNTDOWN_LABELS,
+  RESULT_SPARKLES,
+  CAMERA_PRESETS,
+  DRAWER_TABS,
+} from "./gameConstants";
+import {
+  clamp,
+  sanitizeJoinHost,
+  sanitizePlayerName,
+  isEditableEventTarget,
+  isLocalHost,
+  extractHostname,
+  buildCanonicalTuning,
+  sanitizeTuning,
+  loadTuning,
+  getCameraLabel,
+  formatTimeMs,
+  createMarbleTexture,
+  acquireSnapshot,
+  releaseSnapshot,
+} from "./gameUtils";
 
 
-type RaceResultPayload = MessagePayloadMap["race:result"];
 
-const TIMESTEP = 1 / 60;
-const MAX_FRAME_DELTA = 0.1;
-const LOOK_HEIGHT = 1.2;
-const LOOK_AHEAD = 16;
-const TOPDOWN_HEIGHT = 16;
-const TOPDOWN_Z_OFFSET = 2;
-const BOARD_TILT_SMOOTH = 12;
-const PIVOT_SMOOTH = 10;
-const TRACK_FLOOR_TOP_Y = 0.3;
-const PENETRATION_EPSILON = 0.004;
-const PENETRATION_CORRECTION_BIAS = 0;
-const PENETRATION_CORRECTION_MAX = 0.04;
-const SIDE_IMPACT_NORMAL_UP_DOT_MAX = 0.35;
-const SIDE_IMPACT_UPWARD_SPEED_MIN = 0.35;
-const SIDE_IMPACT_UPWARD_DAMPING = 0.35;
-const SOURCE_RATE_MS = 1000 / 15;
-const INTERP_DELAY_MIN_MS = 120;
-const INTERP_DELAY_MAX_MS = 165;
-const INTERP_DELAY_RISE_BLEND = 0.18;
-const INTERP_DELAY_FALL_BLEND = 0.08;
-const EXTRAPOLATION_MAX_MS = 45;
-const SNAPSHOT_MAX_AGE_MS = 2000;
-const TAB_BACKGROUND_THRESHOLD_MS = 500;
-// Pre-computed input source labels indexed by bitmask (keyboard=1, tilt=2, touch=4).
-const INPUT_LABELS = [
-  "none", "keyboard", "tilt", "keyboard+tilt",
-  "touch", "keyboard+touch", "tilt+touch", "keyboard+tilt+touch",
-];
-const MOBILE_SAFE_RENDER_SCALE_MIN = 0.72;
-const MOBILE_SAFE_RENDER_SCALE_MAX = 1;
-const MOBILE_RENDER_SCALE_MIN = 0.75;
-const MOBILE_RENDER_SCALE_MAX = 2;
-const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
-const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
-const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
-const PLAYER_NAME_STORAGE_KEY = "get-tilted:v0.7.2.8:player-name";
-const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
-const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
 
-const DEFAULT_TUNING: TuningState = {
-  gravityG: 20,
-  tiltStrength: 1.63,
-  gyroSensitivity: 1,
-  maxSpeed: 20,
-  maxTiltDeg: 14,
-  maxBoardAngVel: 5,
-  tiltFilterTau: 0.1,
-  linearDamping: 0.06,
-  angularDamping: 0.06,
-  cameraPreset: "chaseCentered",
-  bounce: 0,
-  contactFriction: 0.84,
-  contactRestitution: 0,
-  invertTiltX: true,
-  invertTiltZ: false,
-  invertCameraSide: false,
-  enableExtraDownforce: false,
-  extraDownForce: 0.7,
-  renderScaleMobile: 2,
-  mobileSafeFallback: false,
-  debugUpdateHzMobile: 5,
-  physicsMaxSubSteps: 7,
-  physicsSolverIterations: 24,
-  ccdSpeedThreshold: 0.75,
-  ccdIterations: 20,
-};
-
-const CAMERA_PRESETS: CameraPresetId[] = [
-  "chaseCentered",
-  "chaseRight",
-  "chaseLeft",
-  "isoStandard",
-  "isoFlatter",
-  "topdownPure",
-  "topdownForward",
-  "broadcast",
-];
-
-const DRAWER_TABS: { id: DebugTabId; label: string }[] = [
-  { id: "tuning", label: "Tuning" },
-  { id: "camera", label: "Camera" },
-  { id: "network", label: "Network" },
-  { id: "diagnostics", label: "Diagnostics" },
-];
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function sanitizeJoinHost(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-
-  let next = trimmed.replace(/^https?:\/\//i, "");
-  next = next.split("/")[0] ?? "";
-  next = next.trim();
-  if (!next) return "";
-
-  const hostPattern = /^[A-Za-z0-9.-]+(?::\d+)?$/;
-  return hostPattern.test(next) ? next : "";
-}
-
-function sanitizePlayerName(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, 18);
-}
-
-function isEditableEventTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
-    return false;
-  }
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-    return true;
-  }
-  return target instanceof HTMLElement && target.isContentEditable;
-}
-
-function isLocalHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-}
-
-function extractHostname(host: string): string {
-  return host.replace(/:\d+$/, "");
-}
-
-function isCameraPresetId(value: unknown): value is CameraPresetId {
-  return typeof value === "string" && CAMERA_PRESETS.includes(value as CameraPresetId);
-}
-
-function buildCanonicalTuning(): TuningState {
-  return {
-    ...DEFAULT_TUNING,
-  };
-}
-
-function sanitizeTuning(input: unknown): TuningState {
-  const base = buildCanonicalTuning();
-  if (!input || typeof input !== "object") {
-    return base;
-  }
-
-  const value = input as Partial<TuningState>;
-
-  if (typeof value.gravityG === "number") base.gravityG = clamp(value.gravityG, 8, 24);
-  if (typeof value.tiltStrength === "number") {
-    base.tiltStrength = clamp(value.tiltStrength, 0.5, 2);
-  }
-  if (typeof value.gyroSensitivity === "number") {
-    base.gyroSensitivity = clamp(value.gyroSensitivity, 0.8, 1.2);
-  }
-  if (typeof value.maxSpeed === "number") base.maxSpeed = clamp(value.maxSpeed, 4, 20);
-  if (typeof value.maxTiltDeg === "number") {
-    base.maxTiltDeg = clamp(value.maxTiltDeg, 6, 25);
-  }
-  if (typeof value.maxBoardAngVel === "number") {
-    base.maxBoardAngVel = clamp(value.maxBoardAngVel, 1, 10);
-  }
-  if (typeof value.tiltFilterTau === "number") {
-    base.tiltFilterTau = clamp(value.tiltFilterTau, 0.05, 0.25);
-  }
-  if (typeof value.linearDamping === "number") {
-    base.linearDamping = clamp(value.linearDamping, 0, 0.5);
-  }
-  if (typeof value.angularDamping === "number") {
-    base.angularDamping = clamp(value.angularDamping, 0, 0.5);
-  }
-  if (typeof value.bounce === "number") {
-    const nextBounce = clamp(value.bounce, 0, 0.99);
-    base.bounce = nextBounce;
-    base.contactRestitution = nextBounce;
-  }
-  if (typeof value.contactFriction === "number") {
-    base.contactFriction = clamp(value.contactFriction, 0, 1.1);
-  }
-  if (typeof value.contactRestitution === "number") {
-    const nextRestitution = clamp(value.contactRestitution, 0, 0.99);
-    base.contactRestitution = nextRestitution;
-    if (typeof value.bounce !== "number") {
-      base.bounce = clamp(nextRestitution, 0, 0.99);
-    }
-  }
-  if (isCameraPresetId(value.cameraPreset)) {
-    base.cameraPreset = value.cameraPreset;
-  }
-  if (typeof value.invertTiltX === "boolean") base.invertTiltX = value.invertTiltX;
-  if (typeof value.invertTiltZ === "boolean") base.invertTiltZ = value.invertTiltZ;
-  if (typeof value.invertCameraSide === "boolean") {
-    base.invertCameraSide = value.invertCameraSide;
-  }
-  if (typeof value.enableExtraDownforce === "boolean") {
-    base.enableExtraDownforce = value.enableExtraDownforce;
-  }
-  if (typeof value.extraDownForce === "number") {
-    base.extraDownForce = clamp(value.extraDownForce, 0, 12);
-  }
-  if (typeof value.renderScaleMobile === "number") {
-    base.renderScaleMobile = clamp(value.renderScaleMobile, MOBILE_RENDER_SCALE_MIN, MOBILE_RENDER_SCALE_MAX);
-  }
-  if (typeof value.mobileSafeFallback === "boolean") {
-    base.mobileSafeFallback = value.mobileSafeFallback;
-  }
-  if (typeof value.debugUpdateHzMobile === "number") {
-    base.debugUpdateHzMobile = clamp(value.debugUpdateHzMobile, 2, 15);
-  }
-  if (typeof value.physicsMaxSubSteps === "number") {
-    base.physicsMaxSubSteps = Math.round(clamp(value.physicsMaxSubSteps, 1, 12));
-  }
-  if (typeof value.physicsSolverIterations === "number") {
-    base.physicsSolverIterations = Math.round(clamp(value.physicsSolverIterations, 8, 40));
-  }
-  if (typeof value.ccdSpeedThreshold === "number") {
-    base.ccdSpeedThreshold = clamp(value.ccdSpeedThreshold, 0.05, 4);
-  }
-  if (typeof value.ccdIterations === "number") {
-    base.ccdIterations = Math.round(clamp(value.ccdIterations, 1, 40));
-  }
-
-  return base;
-}
-
-function loadTuning(): TuningState {
-  if (typeof window === "undefined") {
-    return buildCanonicalTuning();
-  }
-
-  const defaultTuning = buildCanonicalTuning();
-  // Each fresh app launch starts from canonical defaults, regardless of prior dev tuning.
-  window.localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(defaultTuning));
-  return defaultTuning;
-}
-
-function getCameraLabel(id: CameraPresetId): string {
-  switch (id) {
-    case "chaseCentered":
-      return "Chase Centered";
-    case "chaseRight":
-      return "Chase Off-Right";
-    case "chaseLeft":
-      return "Chase Off-Left";
-    case "isoStandard":
-      return "Isometric Standard";
-    case "isoFlatter":
-      return "Isometric Flatter";
-    case "topdownPure":
-      return "Top-down Pure";
-    case "topdownForward":
-      return "Top-down Forward";
-    case "broadcast":
-      return "Broadcast";
-    default:
-      return "Unknown";
-  }
-}
-
-function formatTimeMs(ms: number | null): string {
-  if (ms == null || !Number.isFinite(ms)) {
-    return "--";
-  }
-  return `${(ms / 1000).toFixed(2)}s`;
-}
-
-function createMarbleTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 256;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    const fallback = new THREE.CanvasTexture(canvas);
-    fallback.colorSpace = THREE.SRGBColorSpace;
-    fallback.needsUpdate = true;
-    return fallback;
-  }
-
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, "#193145");
-  gradient.addColorStop(0.55, "#1f4f78");
-  gradient.addColorStop(1, "#102235");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const stripeColors = ["#64d2ff", "#2b8be0", "#4cb4ff"];
-  const stripeWidth = canvas.width / 20;
-  for (let i = 0; i < 20; i += 1) {
-    ctx.fillStyle = stripeColors[i % stripeColors.length] ?? "#64d2ff";
-    ctx.fillRect(i * stripeWidth, 0, stripeWidth * 0.7, canvas.height);
-  }
-
-  ctx.fillStyle = "#ff6f61";
-  ctx.fillRect(canvas.width * 0.08, canvas.height * 0.2, canvas.width * 0.1, canvas.height * 0.2);
-  ctx.fillStyle = "#ffd166";
-  ctx.beginPath();
-  ctx.arc(canvas.width * 0.76, canvas.height * 0.7, canvas.height * 0.12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(canvas.width * 0.48, 0, canvas.width * 0.03, canvas.height);
-
-  ctx.strokeStyle = "rgba(0,0,0,0.45)";
-  ctx.lineWidth = 10;
-  ctx.beginPath();
-  ctx.moveTo(canvas.width * 0.15, 0);
-  ctx.lineTo(canvas.width * 0.95, canvas.height);
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(255,255,255,0.5)";
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(0, canvas.height * 0.22);
-  ctx.lineTo(canvas.width, canvas.height * 0.78);
-  ctx.stroke();
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
-  texture.needsUpdate = true;
-  return texture;
-}
 
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
