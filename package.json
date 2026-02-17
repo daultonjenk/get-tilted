@@ -20,7 +20,8 @@
     "tail:worker": "npx wrangler tail get-tilted-backend",
     "build": "npm run build -w shared && npm run build -w client && npm run build -w server && npm run build -w worker",
     "lint": "npm run lint -w client && npm run lint -w server && npm run lint -w shared && npm run lint -w worker",
-    "typecheck": "npm run typecheck -w shared && npm run typecheck -w client && npm run typecheck -w server && npm run typecheck -w worker"
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w client && npm run typecheck -w server && npm run typecheck -w worker",
+    "test": "npm run test -w shared"
   },
   "keywords": [],
   "author": "",
