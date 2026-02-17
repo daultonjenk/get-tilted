@@ -1,22 +1,20 @@
+import {
+  calculateRaceResults,
+  ROOM_MAX_CLIENTS,
+  type MessagePayloadMap,
+  type RaceFinishRecord,
+  type RoomPlayer,
+} from "@get-tilted/shared-protocol";
 import type { WebSocket } from "ws";
 
 type RoomCode = string;
 type PlayerId = string;
-
-export type RoomPlayer = {
-  playerId: string;
-  name?: string;
-};
+type RaceStatePayload = MessagePayloadMap["race:state"];
 
 type RoomEntry = {
   ws: WebSocket;
   playerId: PlayerId;
   name?: string;
-};
-
-type RaceFinishRecord = {
-  elapsedMs: number;
-  finishedAtMs: number;
 };
 
 type RaceResultRecord = {
@@ -48,6 +46,8 @@ export class RoomStore {
 
   private readonly raceResultByRoom = new Map<RoomCode, RaceResultRecord>();
 
+  private readonly lastRaceStateByRoom = new Map<RoomCode, Map<PlayerId, RaceStatePayload>>();
+
   private nextPlayerSeq = 1;
 
   join(
@@ -57,7 +57,7 @@ export class RoomStore {
   ): { size: number; playerId: string } | null {
     this.leave(client);
     const roomClients = this.rooms.get(roomCode) ?? [];
-    if (roomClients.length >= 2) {
+    if (roomClients.length >= ROOM_MAX_CLIENTS) {
       return null;
     }
     const playerId = `P${this.nextPlayerSeq.toString().padStart(4, "0")}`;
@@ -69,7 +69,7 @@ export class RoomStore {
     if (!this.readyByRoom.has(roomCode)) {
       this.readyByRoom.set(roomCode, new Set());
     }
-    if (roomClients.length < 2) {
+    if (roomClients.length < ROOM_MAX_CLIENTS) {
       this.clearCountdownStart(roomCode);
     }
     return { size: roomClients.length, playerId };
@@ -108,7 +108,7 @@ export class RoomStore {
       this.clearRace(roomCode);
       return { size: 0, roomCode, playerId };
     }
-    if (roomClients.length < 2) {
+    if (roomClients.length < ROOM_MAX_CLIENTS) {
       this.clearCountdownStart(roomCode);
       this.clearRace(roomCode);
     }
@@ -140,6 +140,49 @@ export class RoomStore {
       playerId: entry.playerId,
       name: entry.name,
     }));
+  }
+
+  cacheRaceState(roomCode: string, playerId: string, payload: RaceStatePayload): void {
+    let stateMap = this.lastRaceStateByRoom.get(roomCode);
+    if (!stateMap) {
+      stateMap = new Map();
+      this.lastRaceStateByRoom.set(roomCode, stateMap);
+    }
+    stateMap.set(playerId, payload);
+  }
+
+  getLastRaceStates(roomCode: string): Array<{
+    playerId: string;
+    t: number;
+    pos: [number, number, number];
+    quat: [number, number, number, number];
+    vel: [number, number, number];
+    trackPos?: [number, number, number];
+    trackQuat?: [number, number, number, number];
+  }> {
+    const stateMap = this.lastRaceStateByRoom.get(roomCode);
+    if (!stateMap || stateMap.size === 0) return [];
+    const result: Array<{
+      playerId: string;
+      t: number;
+      pos: [number, number, number];
+      quat: [number, number, number, number];
+      vel: [number, number, number];
+      trackPos?: [number, number, number];
+      trackQuat?: [number, number, number, number];
+    }> = [];
+    for (const [pid, state] of stateMap) {
+      result.push({
+        playerId: pid,
+        t: state.t,
+        pos: state.pos,
+        quat: state.quat,
+        vel: state.vel,
+        trackPos: state.trackPos,
+        trackQuat: state.trackQuat,
+      });
+    }
+    return result;
   }
 
   setPlayerName(client: WebSocket, name?: string): boolean {
@@ -246,69 +289,18 @@ export class RoomStore {
 
   getRaceResultSnapshotWithCurrentPlayers(roomCode: string, isFinal: boolean): RaceResultRecord | null {
     const players = this.getPlayers(roomCode);
-    if (players.length === 0) {
-      return null;
-    }
     const finishes = this.finishesByRoom.get(roomCode) ?? new Map<PlayerId, RaceFinishRecord>();
-
-    const results = isFinal
-      ? players.map((player) => {
-          const finish = finishes.get(player.playerId);
-          if (finish && Number.isFinite(finish.elapsedMs)) {
-            return {
-              playerId: player.playerId,
-              status: "finished" as const,
-              elapsedMs: finish.elapsedMs,
-            };
-          }
-          return {
-            playerId: player.playerId,
-            status: "dnf" as const,
-          };
-        })
-      : players
-          .map((player) => {
-            const finish = finishes.get(player.playerId);
-            if (finish && Number.isFinite(finish.elapsedMs)) {
-              return {
-                playerId: player.playerId,
-                status: "finished" as const,
-                elapsedMs: finish.elapsedMs,
-              };
-            }
-            return null;
-          })
-          .filter((entry): entry is { playerId: string; status: "finished"; elapsedMs: number } => {
-            return entry !== null;
-          })
-          .sort((a, b) => a.elapsedMs - b.elapsedMs);
-
-    if (results.length === 0) {
+    const calc = calculateRaceResults(players, finishes, isFinal);
+    if (!calc) {
       return null;
-    }
-
-    const finished = results
-      .filter((entry) => entry.status === "finished")
-      .map((entry) => ({
-        playerId: entry.playerId,
-        elapsedMs: entry.elapsedMs ?? Number.POSITIVE_INFINITY,
-      }))
-      .sort((a, b) => a.elapsedMs - b.elapsedMs);
-
-    let winnerPlayerId: string | undefined;
-    let tie = false;
-    if (finished.length >= 2 && finished[0]?.elapsedMs === finished[1]?.elapsedMs) {
-      tie = true;
-    } else if (finished.length >= 1 && Number.isFinite(finished[0]!.elapsedMs)) {
-      winnerPlayerId = finished[0]!.playerId;
     }
 
     const payload: RaceResultRecord = {
       roomCode,
       isFinal,
-      winnerPlayerId,
-      tie,
-      results,
+      winnerPlayerId: calc.winnerPlayerId,
+      tie: calc.tie,
+      results: calc.results,
     };
     if (isFinal) {
       this.raceResultByRoom.set(roomCode, payload);

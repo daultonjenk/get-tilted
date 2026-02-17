@@ -1,18 +1,19 @@
 import type { IncomingMessage } from "node:http";
 import {
   encodeMessage,
+  generateRoomCode,
   safeParseMessage,
+  COUNTDOWN_STEP_MS,
+  COUNTDOWN_PREROLL_MS,
+  COUNTDOWN_TOTAL_STEPS,
+  ROOM_MAX_CLIENTS,
   type MessagePayloadMap,
 } from "@get-tilted/shared-protocol";
 import type { WebSocket } from "ws";
-import { generateRoomCode } from "./roomCode.js";
 import { RoomStore } from "./roomStore.js";
 
 type SendableSocket = WebSocket & { readyState: number };
 const OPEN_STATE = 1;
-const COUNTDOWN_STEP_MS = 1000;
-const COUNTDOWN_PREROLL_MS = 600;
-const COUNTDOWN_TOTAL_STEPS = 4;
 
 const roomStore = new RoomStore();
 
@@ -54,6 +55,7 @@ function broadcastReadyState(roomCode: string): void {
 function broadcastHelloAck(roomCode: string): void {
   const players = roomStore.getPlayers(roomCode);
   const clients = roomStore.getClients(roomCode);
+  const lastStates = roomStore.getLastRaceStates(roomCode);
   for (const client of clients) {
     const playerId = roomStore.getPlayerId(client);
     if (!playerId) {
@@ -63,6 +65,7 @@ function broadcastHelloAck(roomCode: string): void {
       roomCode,
       playerId,
       players,
+      lastStates: lastStates.length > 0 ? lastStates : undefined,
     });
   }
 }
@@ -182,6 +185,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         if (!playerId || playerId !== parsed.msg.payload.playerId) {
           return;
         }
+        roomStore.cacheRaceState(roomCode, playerId, parsed.msg.payload);
         broadcastToOthers(roomCode, ws, "race:state", parsed.msg.payload);
         return;
       }
@@ -220,8 +224,8 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         }
 
         if (
-          readyPlayerIds.length === 2 &&
-          playerCount === 2 &&
+          playerCount >= ROOM_MAX_CLIENTS &&
+          readyPlayerIds.length === playerCount &&
           typeof roomStore.getCountdownStart(roomCode) !== "number"
         ) {
           const startAtMs = now + COUNTDOWN_PREROLL_MS;
@@ -259,7 +263,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         ) {
           return;
         }
-        broadcastRaceResult(roomCode, roomStore.getFinishCount(roomCode) >= 2);
+        broadcastRaceResult(roomCode, roomStore.getFinishCount(roomCode) >= roomStore.getClientCount(roomCode));
         return;
       }
       default:
