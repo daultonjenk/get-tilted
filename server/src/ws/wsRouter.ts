@@ -1,18 +1,19 @@
 import type { IncomingMessage } from "node:http";
 import {
   encodeMessage,
+  generateRoomCode,
   safeParseMessage,
+  COUNTDOWN_STEP_MS,
+  COUNTDOWN_PREROLL_MS,
+  COUNTDOWN_TOTAL_STEPS,
+  ROOM_MAX_CLIENTS,
   type MessagePayloadMap,
 } from "@get-tilted/shared-protocol";
 import type { WebSocket } from "ws";
-import { generateRoomCode } from "./roomCode.js";
 import { RoomStore } from "./roomStore.js";
 
 type SendableSocket = WebSocket & { readyState: number };
 const OPEN_STATE = 1;
-const COUNTDOWN_STEP_MS = 1000;
-const COUNTDOWN_PREROLL_MS = 600;
-const COUNTDOWN_TOTAL_STEPS = 4;
 
 const roomStore = new RoomStore();
 
@@ -223,8 +224,8 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         }
 
         if (
-          readyPlayerIds.length === 2 &&
-          playerCount === 2 &&
+          playerCount >= ROOM_MAX_CLIENTS &&
+          readyPlayerIds.length === playerCount &&
           typeof roomStore.getCountdownStart(roomCode) !== "number"
         ) {
           const startAtMs = now + COUNTDOWN_PREROLL_MS;
@@ -262,7 +263,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         ) {
           return;
         }
-        broadcastRaceResult(roomCode, roomStore.getFinishCount(roomCode) >= 2);
+        broadcastRaceResult(roomCode, roomStore.getFinishCount(roomCode) >= roomStore.getClientCount(roomCode));
         return;
       }
       default:

@@ -1,7 +1,14 @@
 import {
+  calculateRaceResults,
   encodeMessage,
+  generateRoomCode,
   safeParseMessage,
+  COUNTDOWN_STEP_MS,
+  COUNTDOWN_PREROLL_MS,
+  COUNTDOWN_TOTAL_STEPS,
+  ROOM_MAX_CLIENTS,
   type MessagePayloadMap,
+  type RaceFinishRecord,
 } from "@get-tilted/shared-protocol";
 
 type SocketWithMeta = WebSocket & {
@@ -10,20 +17,9 @@ type SocketWithMeta = WebSocket & {
   playerName?: string;
 };
 
-type RaceFinishRecord = {
-  elapsedMs: number;
-  finishedAtMs: number;
-};
-
 type RaceResultPayload = MessagePayloadMap["race:result"];
 
 const OPEN_STATE = 1;
-const ROOM_MAX_CLIENTS = 2;
-const COUNTDOWN_STEP_MS = 1000;
-const COUNTDOWN_PREROLL_MS = 600;
-const COUNTDOWN_TOTAL_STEPS = 4;
-const ROOM_CODE_LENGTH = 6;
-const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const LOBBY_KEY = "__LOBBY__";
 const ROOM_IDLE_ALARM_MS = 5 * 60 * 1000; // 5 minutes until empty room cleanup
 
@@ -107,7 +103,7 @@ export class RoomDO {
             });
             return;
           }
-          const roomCode = this.generateRoomCode();
+          const roomCode = generateRoomCode();
           this.send(server, "room:created", { roomCode });
           return;
         }
@@ -255,7 +251,7 @@ export class RoomDO {
             elapsedMs: parsed.msg.payload.elapsedMs,
             finishedAtMs: parsed.msg.payload.finishedAtMs,
           });
-          this.broadcastRaceResult(this.finishes.size >= ROOM_MAX_CLIENTS);
+          this.broadcastRaceResult(this.finishes.size >= this.getSocketCount());
           return;
         }
         default:
@@ -454,68 +450,17 @@ export class RoomDO {
     }
 
     const players = this.getPlayers();
-    if (players.length === 0) {
+    const calc = calculateRaceResults(players, this.finishes, isFinal);
+    if (!calc) {
       return;
-    }
-
-    const results = isFinal
-      ? players.map((player) => {
-          const finish = this.finishes.get(player.playerId);
-          if (finish && Number.isFinite(finish.elapsedMs)) {
-            return {
-              playerId: player.playerId,
-              status: "finished" as const,
-              elapsedMs: finish.elapsedMs,
-            };
-          }
-          return {
-            playerId: player.playerId,
-            status: "dnf" as const,
-          };
-        })
-      : players
-          .map((player) => {
-            const finish = this.finishes.get(player.playerId);
-            if (finish && Number.isFinite(finish.elapsedMs)) {
-              return {
-                playerId: player.playerId,
-                status: "finished" as const,
-                elapsedMs: finish.elapsedMs,
-              };
-            }
-            return null;
-          })
-          .filter((entry): entry is { playerId: string; status: "finished"; elapsedMs: number } => {
-            return entry !== null;
-          })
-          .sort((a, b) => a.elapsedMs - b.elapsedMs);
-
-    if (results.length === 0) {
-      return;
-    }
-
-    const finished = results
-      .filter((entry) => entry.status === "finished")
-      .map((entry) => ({
-        playerId: entry.playerId,
-        elapsedMs: entry.elapsedMs ?? Number.POSITIVE_INFINITY,
-      }))
-      .sort((a, b) => a.elapsedMs - b.elapsedMs);
-
-    let winnerPlayerId: string | undefined;
-    let tie = false;
-    if (finished.length >= 2 && finished[0]?.elapsedMs === finished[1]?.elapsedMs) {
-      tie = true;
-    } else if (finished.length >= 1 && Number.isFinite(finished[0]!.elapsedMs)) {
-      winnerPlayerId = finished[0]!.playerId;
     }
 
     const payload: RaceResultPayload = {
       roomCode: this.roomCode,
       isFinal,
-      winnerPlayerId,
-      tie,
-      results,
+      winnerPlayerId: calc.winnerPlayerId,
+      tie: calc.tie,
+      results: calc.results,
     };
     this.broadcast("race:result", payload);
     if (isFinal) {
@@ -531,16 +476,6 @@ export class RoomDO {
     const id = `P${this.nextPlayerSeq.toString().padStart(4, "0")}`;
     this.nextPlayerSeq += 1;
     return id;
-  }
-
-  private generateRoomCode(): string {
-    const bytes = new Uint8Array(ROOM_CODE_LENGTH);
-    crypto.getRandomValues(bytes);
-    let out = "";
-    for (const byte of bytes) {
-      out += ROOM_CODE_CHARS[byte % ROOM_CODE_CHARS.length];
-    }
-    return out;
   }
 
   /** T1-4: Validate that race:state payload values are within expected bounds. */

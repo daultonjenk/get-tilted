@@ -1,3 +1,108 @@
+// ---------------------------------------------------------------------------
+// Shared room / race constants
+// ---------------------------------------------------------------------------
+
+export const ROOM_MAX_CLIENTS = 2;
+export const COUNTDOWN_STEP_MS = 1000;
+export const COUNTDOWN_PREROLL_MS = 600;
+export const COUNTDOWN_TOTAL_STEPS = 4;
+
+const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const ROOM_CODE_LENGTH = 6;
+
+/**
+ * Generate a random room code.  Uses `crypto.getRandomValues` when available
+ * (worker / modern runtimes), falls back to `Math.random`.
+ */
+export function generateRoomCode(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(ROOM_CODE_LENGTH);
+    crypto.getRandomValues(bytes);
+    let out = "";
+    for (const byte of bytes) {
+      out += ROOM_CODE_CHARS[byte % ROOM_CODE_CHARS.length];
+    }
+    return out;
+  }
+  let code = "";
+  for (let i = 0; i < ROOM_CODE_LENGTH; i += 1) {
+    code += ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)];
+  }
+  return code;
+}
+
+export type RaceFinishRecord = {
+  elapsedMs: number;
+  finishedAtMs: number;
+};
+
+export type RoomPlayer = {
+  playerId: string;
+  name?: string;
+};
+
+export type RaceResultEntry = {
+  playerId: string;
+  status: "finished" | "dnf";
+  elapsedMs?: number;
+};
+
+/**
+ * Pure function that computes race results from a player list and finish map.
+ * Used by both server and worker to avoid duplicated business logic.
+ */
+export function calculateRaceResults(
+  players: RoomPlayer[],
+  finishes: ReadonlyMap<string, RaceFinishRecord>,
+  isFinal: boolean,
+): { results: RaceResultEntry[]; winnerPlayerId?: string; tie: boolean } | null {
+  if (players.length === 0) {
+    return null;
+  }
+
+  const results: RaceResultEntry[] = isFinal
+    ? players.map((player) => {
+        const finish = finishes.get(player.playerId);
+        if (finish && Number.isFinite(finish.elapsedMs)) {
+          return { playerId: player.playerId, status: "finished" as const, elapsedMs: finish.elapsedMs };
+        }
+        return { playerId: player.playerId, status: "dnf" as const };
+      })
+    : players
+        .map((player) => {
+          const finish = finishes.get(player.playerId);
+          if (finish && Number.isFinite(finish.elapsedMs)) {
+            return { playerId: player.playerId, status: "finished" as const, elapsedMs: finish.elapsedMs };
+          }
+          return null;
+        })
+        .filter((entry): entry is RaceResultEntry & { status: "finished"; elapsedMs: number } => entry !== null)
+        .sort((a, b) => a.elapsedMs - b.elapsedMs);
+
+  if (results.length === 0) {
+    return null;
+  }
+
+  const finished = results
+    .filter((entry) => entry.status === "finished")
+    .map((entry) => ({ playerId: entry.playerId, elapsedMs: entry.elapsedMs ?? Number.POSITIVE_INFINITY }))
+    .sort((a, b) => a.elapsedMs - b.elapsedMs);
+
+  let winnerPlayerId: string | undefined;
+  let tie = false;
+  if (finished.length >= 2 && finished[0]?.elapsedMs === finished[1]?.elapsedMs) {
+    tie = true;
+  } else if (finished.length >= 1 && Number.isFinite(finished[0]!.elapsedMs)) {
+    winnerPlayerId = finished[0]!.playerId;
+  }
+
+  return { results, winnerPlayerId, tie };
+}
+
+// ---------------------------------------------------------------------------
+// Message types
+// ---------------------------------------------------------------------------
+
 export type MessagePayloadMap = {
   ping: { t: number };
   pong: { t: number; serverNowMs: number };
