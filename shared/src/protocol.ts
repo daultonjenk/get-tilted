@@ -10,6 +10,15 @@ export type MessagePayloadMap = {
     roomCode: string;
     playerId: string;
     players: Array<{ playerId: string; name?: string }>;
+    lastStates?: Array<{
+      playerId: string;
+      t: number;
+      pos: [number, number, number];
+      quat: [number, number, number, number];
+      vel: [number, number, number];
+      trackPos?: [number, number, number];
+      trackQuat?: [number, number, number, number];
+    }>;
   };
   "race:ready": { roomCode: string; playerId: string; ready: boolean };
   "race:ready:state": {

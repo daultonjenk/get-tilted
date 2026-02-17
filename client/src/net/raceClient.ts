@@ -84,7 +84,7 @@ export class RaceClient {
 
   private serverClockOffsetMs = 0;
 
-  private hasClockSync = false;
+  private _hasClockSync = false;
 
   private pingTimer: number | null = null;
 
@@ -129,7 +129,7 @@ export class RaceClient {
         this.resetRaceStateSeq();
         this.stopPingLoop();
         this.serverClockOffsetMs = 0;
-        this.hasClockSync = false;
+        this._hasClockSync = false;
         this.clockOffsetSamples.length = 0;
         this.emitClockOffset();
       } else if (status === "connected") {
@@ -203,6 +203,10 @@ export class RaceClient {
 
   getPlayerId(): string {
     return this.playerId;
+  }
+
+  getHasClockSync(): boolean {
+    return this._hasClockSync;
   }
 
   setPreferredName(name?: string): void {
@@ -578,7 +582,7 @@ export class RaceClient {
       : (sorted[mid - 1]! + sorted[mid]!) * 0.5;
 
     this.serverClockOffsetMs = median;
-    this.hasClockSync = true;
+    this._hasClockSync = true;
     this.emitClockOffset();
   }
 

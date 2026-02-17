@@ -5,6 +5,11 @@ import * as CANNON from "cannon-es";
 import { createTrack } from "./track/createTrack";
 import { RingBuffer } from "./RingBuffer";
 import {
+  debugStore,
+  useDebugStore,
+  useNetStore,
+} from "./debugStore";
+import {
   calibrateCurrent,
   isTiltSupported,
   makeTiltFilter,
@@ -29,30 +34,6 @@ import {
   createMobileGovernor,
   type MobilePerfTier,
 } from "./perf/mobileGovernor";
-
-type MarbleDebug = {
-  cadenceHz: number;
-  posX: number;
-  posY: number;
-  posZ: number;
-  speed: number;
-  angularSpeed: number;
-  verticalSpeed: number;
-  penetrationDepth: number;
-  rawTiltX: number;
-  rawTiltZ: number;
-  tiltX: number;
-  tiltZ: number;
-  gravX: number;
-  gravY: number;
-  gravZ: number;
-  renderScale: number;
-  perfTier: MobilePerfTier | "desktop";
-  cpuFrameMsEma: number;
-  physicsMsEma: number;
-  renderMsEma: number;
-  miscMsEma: number;
-};
 
 type CameraPresetId =
   | "chaseCentered"
@@ -154,26 +135,6 @@ type GhostRenderState = {
   droppedStaleCount: number;
 };
 
-type NetSmoothingDebug = {
-  ghostPlayers: number;
-  avgDelayMs: number;
-  avgJitterMs: number;
-  avgSnapshotAgeMs: number;
-  avgSnapshotAgeJitterMs: number;
-  extrapolatingPlayers: number;
-  droppedStale: number;
-  droppedOutOfOrderSeq: number;
-  droppedStaleTimestamp: number;
-  droppedTooOld: number;
-  timestampCorrected: number;
-  queueOrderViolations: number;
-  snapshotQueueSummary: string;
-  latestSnapshotAgeMs: number | null;
-  serverClockOffsetMs: number;
-  inputSourcesSummary: string;
-  inputIntentX: number;
-  inputIntentZ: number;
-};
 
 type RaceResultPayload = MessagePayloadMap["race:result"];
 
@@ -543,29 +504,8 @@ export function HelloMarble() {
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
   });
-  const [debug, setDebug] = useState<MarbleDebug>({
-    cadenceHz: 0,
-    posX: 0,
-    posY: 0,
-    posZ: 0,
-    speed: 0,
-    angularSpeed: 0,
-    verticalSpeed: 0,
-    penetrationDepth: 0,
-    rawTiltX: 0,
-    rawTiltZ: 0,
-    tiltX: 0,
-    tiltZ: 0,
-    gravX: 0,
-    gravY: -DEFAULT_TUNING.gravityG,
-    gravZ: 0,
-    renderScale: 1,
-    perfTier: "desktop",
-    cpuFrameMsEma: 1000 / 60,
-    physicsMsEma: 0,
-    renderMsEma: 0,
-    miscMsEma: 0,
-  });
+  const debug = useDebugStore();
+  const netSmoothing = useNetStore();
   const [netStatus, setNetStatus] = useState<WSStatus>("disconnected");
   const [netError, setNetError] = useState<string | null>(null);
   const [joinTiming, setJoinTiming] = useState<JoinTimingSnapshot | null>(null);
@@ -598,26 +538,6 @@ export function HelloMarble() {
   const [playerNameInput, setPlayerNameInput] = useState(() => {
     if (typeof window === "undefined") return "";
     return sanitizePlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "");
-  });
-  const [netSmoothing, setNetSmoothing] = useState<NetSmoothingDebug>({
-    ghostPlayers: 0,
-    avgDelayMs: 0,
-    avgJitterMs: 0,
-    avgSnapshotAgeMs: 0,
-    avgSnapshotAgeJitterMs: 0,
-    extrapolatingPlayers: 0,
-    droppedStale: 0,
-    droppedOutOfOrderSeq: 0,
-    droppedStaleTimestamp: 0,
-    droppedTooOld: 0,
-    timestampCorrected: 0,
-    queueOrderViolations: 0,
-    snapshotQueueSummary: "none",
-    latestSnapshotAgeMs: null,
-    serverClockOffsetMs: 0,
-    inputSourcesSummary: "none",
-    inputIntentX: 0,
-    inputIntentZ: 0,
   });
 
   const tiltStatusRef = useRef(tiltStatus);
@@ -1161,6 +1081,33 @@ export function HelloMarble() {
               scene.remove(ghostState.mesh);
               ghostState.mesh.geometry.dispose();
               ghostPlayers.delete(playerId);
+            }
+
+            // T2-8: Seed ghost snapshot queues from cached lastStates on reconnection.
+            // This prevents ghosts from freezing until the next live race:state arrives.
+            const lastStates = message.payload.lastStates;
+            if (lastStates && lastStates.length > 0) {
+              const nowMs = Date.now();
+              for (const entry of lastStates) {
+                if (entry.playerId === message.payload.playerId) continue;
+                const ghostState = getOrCreateGhostState(entry.playerId);
+                const snap = acquireSnapshot();
+                snap.seq = undefined;
+                snap.t = entry.t;
+                snap.recvAtMs = nowMs;
+                snap.pos.set(...entry.pos);
+                snap.quat.set(...entry.quat);
+                snap.vel.set(...entry.vel);
+                if (entry.trackPos && entry.trackQuat) {
+                  snap.hasTrackPose = true;
+                  snap.trackPos.set(...entry.trackPos);
+                  snap.trackQuat.set(...entry.trackQuat);
+                } else {
+                  snap.hasTrackPose = false;
+                }
+                const evicted = ghostState.snapshots.push(snap);
+                if (evicted) releaseSnapshot(evicted);
+              }
             }
           }
           return;
@@ -2355,8 +2302,7 @@ export function HelloMarble() {
         if (trialStartAt != null) {
           setTrialCurrentMs(nowMs - trialStartAt);
         }
-        setDebug((prev) => ({
-          ...prev,
+        debugStore.updateDebug({
           cadenceHz: Math.round(1000 / Math.max(cadenceMsEma, 0.0001)),
           posX: marbleBody.position.x,
           posY: marbleBody.position.y,
@@ -2378,8 +2324,8 @@ export function HelloMarble() {
           physicsMsEma,
           renderMsEma,
           miscMsEma,
-        }));
-        setNetSmoothing({
+        });
+        debugStore.updateNet({
           ghostPlayers: ghostCount,
           avgDelayMs,
           avgJitterMs,

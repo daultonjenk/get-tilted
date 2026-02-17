@@ -49,6 +49,9 @@ export class RoomDO {
   /** Per-player timestamp of last accepted race:state message (for rate limiting). */
   private lastRaceStateAt = new Map<string, number>();
 
+  /** Cached last race:state payload per player for reconnection recovery. */
+  private lastRaceState = new Map<string, MessagePayloadMap["race:state"]>();
+
   private readyPlayerIds = new Set<string>();
 
   private countdownStartAtMs: number | null = null;
@@ -180,6 +183,9 @@ export class RoomDO {
           if (!this.isRaceStateInBounds(parsed.msg.payload)) {
             return;
           }
+
+          // T2-8: Cache last state per player for reconnection recovery.
+          this.lastRaceState.set(server.playerId, parsed.msg.payload);
 
           this.broadcastToOthers(server, "race:state", parsed.msg.payload);
           return;
@@ -392,6 +398,27 @@ export class RoomDO {
       return;
     }
     const players = this.getPlayers();
+    // T2-8: Build lastStates array for reconnection recovery.
+    const lastStates: Array<{
+      playerId: string;
+      t: number;
+      pos: [number, number, number];
+      quat: [number, number, number, number];
+      vel: [number, number, number];
+      trackPos?: [number, number, number];
+      trackQuat?: [number, number, number, number];
+    }> = [];
+    for (const [pid, state] of this.lastRaceState) {
+      lastStates.push({
+        playerId: pid,
+        t: state.t,
+        pos: state.pos,
+        quat: state.quat,
+        vel: state.vel,
+        trackPos: state.trackPos,
+        trackQuat: state.trackQuat,
+      });
+    }
     for (const socket of this.sockets) {
       if (!socket.playerId) {
         continue;
@@ -400,6 +427,7 @@ export class RoomDO {
         roomCode: this.roomCode,
         playerId: socket.playerId,
         players,
+        lastStates: lastStates.length > 0 ? lastStates : undefined,
       });
     }
   }
@@ -417,6 +445,7 @@ export class RoomDO {
     this.finishes.clear();
     this.raceResult = null;
     this.readyPlayerIds.clear();
+    this.lastRaceState.clear();
   }
 
   private broadcastRaceResult(isFinal: boolean): void {

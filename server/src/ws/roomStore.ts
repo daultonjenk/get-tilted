@@ -1,7 +1,9 @@
+import type { MessagePayloadMap } from "@get-tilted/shared-protocol";
 import type { WebSocket } from "ws";
 
 type RoomCode = string;
 type PlayerId = string;
+type RaceStatePayload = MessagePayloadMap["race:state"];
 
 export type RoomPlayer = {
   playerId: string;
@@ -47,6 +49,8 @@ export class RoomStore {
   private readonly finishesByRoom = new Map<RoomCode, Map<PlayerId, RaceFinishRecord>>();
 
   private readonly raceResultByRoom = new Map<RoomCode, RaceResultRecord>();
+
+  private readonly lastRaceStateByRoom = new Map<RoomCode, Map<PlayerId, RaceStatePayload>>();
 
   private nextPlayerSeq = 1;
 
@@ -140,6 +144,49 @@ export class RoomStore {
       playerId: entry.playerId,
       name: entry.name,
     }));
+  }
+
+  cacheRaceState(roomCode: string, playerId: string, payload: RaceStatePayload): void {
+    let stateMap = this.lastRaceStateByRoom.get(roomCode);
+    if (!stateMap) {
+      stateMap = new Map();
+      this.lastRaceStateByRoom.set(roomCode, stateMap);
+    }
+    stateMap.set(playerId, payload);
+  }
+
+  getLastRaceStates(roomCode: string): Array<{
+    playerId: string;
+    t: number;
+    pos: [number, number, number];
+    quat: [number, number, number, number];
+    vel: [number, number, number];
+    trackPos?: [number, number, number];
+    trackQuat?: [number, number, number, number];
+  }> {
+    const stateMap = this.lastRaceStateByRoom.get(roomCode);
+    if (!stateMap || stateMap.size === 0) return [];
+    const result: Array<{
+      playerId: string;
+      t: number;
+      pos: [number, number, number];
+      quat: [number, number, number, number];
+      vel: [number, number, number];
+      trackPos?: [number, number, number];
+      trackQuat?: [number, number, number, number];
+    }> = [];
+    for (const [pid, state] of stateMap) {
+      result.push({
+        playerId: pid,
+        t: state.t,
+        pos: state.pos,
+        quat: state.quat,
+        vel: state.vel,
+        trackPos: state.trackPos,
+        trackQuat: state.trackQuat,
+      });
+    }
+    return result;
   }
 
   setPlayerName(client: WebSocket, name?: string): boolean {

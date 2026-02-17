@@ -7,8 +7,10 @@ export class RingBuffer<T> {
   private head = 0;
   private tail = 0;
   private count = 0;
+  private readonly capacity: number;
 
-  constructor(private readonly capacity: number) {
+  constructor(capacity: number) {
+    this.capacity = capacity;
     this.buf = new Array<T | undefined>(capacity);
   }
 

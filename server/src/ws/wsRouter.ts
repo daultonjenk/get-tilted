@@ -54,6 +54,7 @@ function broadcastReadyState(roomCode: string): void {
 function broadcastHelloAck(roomCode: string): void {
   const players = roomStore.getPlayers(roomCode);
   const clients = roomStore.getClients(roomCode);
+  const lastStates = roomStore.getLastRaceStates(roomCode);
   for (const client of clients) {
     const playerId = roomStore.getPlayerId(client);
     if (!playerId) {
@@ -63,6 +64,7 @@ function broadcastHelloAck(roomCode: string): void {
       roomCode,
       playerId,
       players,
+      lastStates: lastStates.length > 0 ? lastStates : undefined,
     });
   }
 }
@@ -182,6 +184,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         if (!playerId || playerId !== parsed.msg.payload.playerId) {
           return;
         }
+        roomStore.cacheRaceState(roomCode, playerId, parsed.msg.payload);
         broadcastToOthers(roomCode, ws, "race:state", parsed.msg.payload);
         return;
       }
