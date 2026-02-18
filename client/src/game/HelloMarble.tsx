@@ -117,11 +117,12 @@ const MAX_LOBBY_SLOTS = ROOM_MAX_CLIENTS;
 const OFF_COURSE_RESPAWN_DELAY_MS = 1000;
 const GHOST_SPIN_STEP_MAX_RAD = Math.PI * 0.85;
 const WALL_CONTAINMENT_EPSILON = 0.015;
-const WALL_SQUEEZE_TRIGGER_MARGIN = 0.14;
-const WALL_SQUEEZE_CONTACT_PADDING_X = 0.08;
-const WALL_SQUEEZE_CONTACT_PADDING_Z = 0.12;
-const WALL_SQUEEZE_POP_CLEARANCE_Z = 0.22;
+const WALL_SQUEEZE_WALL_CONTACT_EPSILON = 0.01;
+const WALL_SQUEEZE_CONTACT_PADDING_X = 0.01;
+const WALL_SQUEEZE_CONTACT_PADDING_Z = 0.02;
+const WALL_SQUEEZE_POP_CLEARANCE_Z = 0.16;
 const WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED = 2.6;
+const WALL_SQUEEZE_CONFIRM_FRAMES = 2;
 type MenuScreen = "main" | "options";
 
 function readStoredToggle(key: string, defaultValue: boolean): boolean {
@@ -677,6 +678,7 @@ export function HelloMarble() {
     let latestVerticalSpeed = 0;
     let latestPenetrationDepth = 0;
     let offCourseSinceMs: number | null = null;
+    let squeezeBlockedFrames = 0;
     let accumulator = 0;
     let disposed = false;
 
@@ -819,7 +821,9 @@ export function HelloMarble() {
           : track.containmentLocal.mainHalfX;
       clampMarbleWithinSideWalls(containmentHalfX);
 
-      if (Math.abs(marblePosLocalToBoard.x) < containmentHalfX - WALL_SQUEEZE_TRIGGER_MARGIN) {
+      const distanceToWall = containmentHalfX - Math.abs(marblePosLocalToBoard.x);
+      if (distanceToWall > WALL_SQUEEZE_WALL_CONTACT_EPSILON) {
+        squeezeBlockedFrames = 0;
         return;
       }
 
@@ -870,8 +874,14 @@ export function HelloMarble() {
       }
 
       if (!Number.isFinite(bestDistanceZ)) {
+        squeezeBlockedFrames = 0;
         return;
       }
+      squeezeBlockedFrames += 1;
+      if (squeezeBlockedFrames < WALL_SQUEEZE_CONFIRM_FRAMES) {
+        return;
+      }
+      squeezeBlockedFrames = 0;
 
       const escapeDirection = marblePosLocalToBoard.z >= bestObstacleLocalZ ? 1 : -1;
       const targetX = clamp(
@@ -1512,6 +1522,7 @@ export function HelloMarble() {
       trialStartAt = null;
       prevMarbleZ = marbleBody.position.z;
       offCourseSinceMs = null;
+      squeezeBlockedFrames = 0;
       syncLocalRenderSnapshotsFromBodies();
       setTrialState("idle");
       setTrialCurrentMs(null);
@@ -1991,52 +2002,59 @@ export function HelloMarble() {
         const scale = currentTuning.maxSpeed / speed;
         marbleBody.velocity.scale(scale, marbleBody.velocity);
       }
-      const expectedMarbleCenterYOnFloor = marbleRadius + TRACK_FLOOR_TOP_Y;
-      const computePenetrationDepth = (): number => {
-        updateMarblePosLocalToBoard();
-        return Math.max(0, expectedMarbleCenterYOnFloor - marblePosLocalToBoard.y);
-      };
-      let penetrationDepth = computePenetrationDepth();
-      if (penetrationDepth > PENETRATION_EPSILON) {
-        tempQuatA.set(
-          boardBody.quaternion.x,
-          boardBody.quaternion.y,
-          boardBody.quaternion.z,
-          boardBody.quaternion.w,
-        );
-        boardUpWorld.set(0, 1, 0).applyQuaternion(tempQuatA).normalize();
-        const correction = Math.min(
-          penetrationDepth + PENETRATION_CORRECTION_BIAS,
-          PENETRATION_CORRECTION_MAX,
-        );
-        marbleBody.position.x += boardUpWorld.x * correction;
-        marbleBody.position.y += boardUpWorld.y * correction;
-        marbleBody.position.z += boardUpWorld.z * correction;
-
-        const inwardSpeed =
-          marbleBody.velocity.x * boardUpWorld.x +
-          marbleBody.velocity.y * boardUpWorld.y +
-          marbleBody.velocity.z * boardUpWorld.z;
-        if (inwardSpeed < 0) {
-          marbleBody.velocity.x -= boardUpWorld.x * inwardSpeed;
-          marbleBody.velocity.y -= boardUpWorld.y * inwardSpeed;
-          marbleBody.velocity.z -= boardUpWorld.z * inwardSpeed;
-        }
-
-        marbleBody.aabbNeedsUpdate = true;
-        marbleBody.updateAABB();
-        penetrationDepth = computePenetrationDepth();
-      }
-      latestPenetrationDepth = penetrationDepth;
-      latestAngularSpeed = marbleBody.angularVelocity.length();
-      latestVerticalSpeed = marbleBody.velocity.y;
-
+      updateMarblePosLocalToBoard();
       const outBounds = track.offCourseBoundsLocal;
-      const isOffCourseByBounds =
+      let isOffCourseByBounds =
         marblePosLocalToBoard.x < outBounds.minX ||
         marblePosLocalToBoard.x > outBounds.maxX ||
         marblePosLocalToBoard.z < outBounds.minZ ||
         marblePosLocalToBoard.z > outBounds.maxZ;
+      const expectedMarbleCenterYOnFloor = marbleRadius + TRACK_FLOOR_TOP_Y;
+      const computePenetrationDepth = (): number =>
+        Math.max(0, expectedMarbleCenterYOnFloor - marblePosLocalToBoard.y);
+      let penetrationDepth = 0;
+      if (!isOffCourseByBounds) {
+        penetrationDepth = computePenetrationDepth();
+        if (penetrationDepth > PENETRATION_EPSILON) {
+          tempQuatA.set(
+            boardBody.quaternion.x,
+            boardBody.quaternion.y,
+            boardBody.quaternion.z,
+            boardBody.quaternion.w,
+          );
+          boardUpWorld.set(0, 1, 0).applyQuaternion(tempQuatA).normalize();
+          const correction = Math.min(
+            penetrationDepth + PENETRATION_CORRECTION_BIAS,
+            PENETRATION_CORRECTION_MAX,
+          );
+          marbleBody.position.x += boardUpWorld.x * correction;
+          marbleBody.position.y += boardUpWorld.y * correction;
+          marbleBody.position.z += boardUpWorld.z * correction;
+
+          const inwardSpeed =
+            marbleBody.velocity.x * boardUpWorld.x +
+            marbleBody.velocity.y * boardUpWorld.y +
+            marbleBody.velocity.z * boardUpWorld.z;
+          if (inwardSpeed < 0) {
+            marbleBody.velocity.x -= boardUpWorld.x * inwardSpeed;
+            marbleBody.velocity.y -= boardUpWorld.y * inwardSpeed;
+            marbleBody.velocity.z -= boardUpWorld.z * inwardSpeed;
+          }
+
+          marbleBody.aabbNeedsUpdate = true;
+          marbleBody.updateAABB();
+          updateMarblePosLocalToBoard();
+          penetrationDepth = computePenetrationDepth();
+        }
+        isOffCourseByBounds =
+          marblePosLocalToBoard.x < outBounds.minX ||
+          marblePosLocalToBoard.x > outBounds.maxX ||
+          marblePosLocalToBoard.z < outBounds.minZ ||
+          marblePosLocalToBoard.z > outBounds.maxZ;
+      }
+      latestPenetrationDepth = penetrationDepth;
+      latestAngularSpeed = marbleBody.angularVelocity.length();
+      latestVerticalSpeed = marbleBody.velocity.y;
       if (!isRaceFinishedLocal) {
         if (isOffCourseByBounds) {
           if (offCourseSinceMs == null) {

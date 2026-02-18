@@ -70,9 +70,10 @@ type ObstacleActor = {
 type MovingObstacleSpec = {
   width: number;
   length: number;
-  speedHz: number;
-  phase: number;
-  laneScale?: number;
+  minSpeedHz: number;
+  maxSpeedHz: number;
+  laneMinScale: number;
+  laneMaxScale: number;
 };
 
 const TRACK_W = 9;
@@ -90,22 +91,29 @@ const WALL_CLEARANCE = 0.2;
 const OFF_COURSE_MARGIN = 1.1;
 const OFF_COURSE_Z_MARGIN = 2.4;
 
-const MOVING_OBSTACLE_H = 2.25 / 3;
-const MOVING_OBSTACLE_LONG_W = 5.0;
-const MOVING_OBSTACLE_LONG_L = 1.85;
-const MOVING_OBSTACLE_SHORT_W = 3.1;
-const MOVING_OBSTACLE_SHORT_L = 0.6;
-const MOVING_OBSTACLE_MEDIUM_W = 4.2;
-const MOVING_OBSTACLE_MEDIUM_L = 1.1;
+const MOVING_OBSTACLE_HEIGHT_SCALE = 1.2;
+const MOVING_OBSTACLE_WIDTH_SCALE = 1.18;
+const MOVING_OBSTACLE_LENGTH_SCALE = 0.25;
+const MOVING_OBSTACLE_H = (2.25 / 3) * MOVING_OBSTACLE_HEIGHT_SCALE;
+const MOVING_OBSTACLE_LONG_W = 5.0 * MOVING_OBSTACLE_WIDTH_SCALE;
+const MOVING_OBSTACLE_LONG_L = 1.85 * MOVING_OBSTACLE_LENGTH_SCALE;
+const MOVING_OBSTACLE_SHORT_W = 3.1 * MOVING_OBSTACLE_WIDTH_SCALE;
+const MOVING_OBSTACLE_SHORT_L = 0.6 * MOVING_OBSTACLE_LENGTH_SCALE;
+const MOVING_OBSTACLE_MEDIUM_W = 4.2 * MOVING_OBSTACLE_WIDTH_SCALE;
+const MOVING_OBSTACLE_MEDIUM_L = 1.1 * MOVING_OBSTACLE_LENGTH_SCALE;
 
-const FINAL_WALL_W = 8.8;
+const FINAL_WALL_W = 11.2;
 const FINAL_WALL_H = 3.6;
-const FINAL_WALL_DEPTH = 1.3;
+const FINAL_WALL_DEPTH = 0.52;
 const FINAL_WALL_HOLE_DIAMETER = MARBLE_RADIUS * 2 * 1.15;
 const FINAL_WALL_HOLE_R = FINAL_WALL_HOLE_DIAMETER / 2;
 const FINAL_WALL_HOLE_Y = -FINAL_WALL_H / 2 + FINAL_WALL_HOLE_R;
 const FINAL_WALL_HOLE_X = [-2.55, 0, 2.55];
 const FINAL_WALL_CURVE_SEGMENTS = 40;
+const DEFAULT_OBSTACLE_SEED = "track-v0.7.16.0";
+const START_BACK_WALL_PADDING = 0.03;
+const STATIC_GAP_WALL_H = 3.1;
+const STATIC_GAP_WALL_DEPTH = 0.42;
 
 // Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
@@ -125,6 +133,30 @@ const SEGMENTS: SegmentDef[] = [
 
 function degToRad(value: number): number {
   return (value * Math.PI) / 180;
+}
+
+function hashSeed(seed: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function makeSeededRandom(seed: string): () => number {
+  let state = hashSeed(seed) || 1;
+  return () => {
+    state += 0x6d2b79f5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function lerp(min: number, max: number, alpha: number): number {
+  return min + (max - min) * alpha;
 }
 
 function createTrackSurfaceTexture(): THREE.Texture {
@@ -252,7 +284,8 @@ function computeContainmentHalfX(trackWidth: number): number {
 }
 
 export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
-  void opts?.seed;
+  const obstacleSeed = opts?.seed ?? DEFAULT_OBSTACLE_SEED;
+  const obstacleRandom = makeSeededRandom(obstacleSeed);
 
   const group = new THREE.Group();
   group.name = "track";
@@ -272,10 +305,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
   const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
   const obstacleMaterial = new THREE.MeshStandardMaterial({
-    map: trackSurfaceTexture,
-    color: 0xffffff,
+    color: 0xff0000,
     transparent: true,
     opacity: 0.75,
+    roughness: 0.4,
+    metalness: 0.02,
   });
 
   let currentYawDeg = 0;
@@ -394,8 +428,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       position: localPos,
       rotation: new THREE.Euler(0, 0, 0, "XYZ"),
       material: obstacleMaterial,
-      uvScale: [Math.max(obstacleWidth, 1), Math.max(obstacleLength, 1)],
-      outline: { color: 0x000000, scale: 1.002 },
+      outline: { color: 0x330000, scale: 1.002 },
     });
 
     const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
@@ -421,39 +454,58 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     movingObstacleBodies.push(body);
   };
 
-  const addFinalThreeHoleWall = (z: number): void => {
-    const y = FLOOR_THICK / 2 + FINAL_WALL_H / 2;
-
+  const addGapWall = (params: {
+    z: number;
+    width: number;
+    height: number;
+    depth: number;
+    trackWidth: number;
+    circleHoles?: Array<{ x: number; y: number; r: number }>;
+    bottomSlots?: Array<{ x: number; width: number; height: number }>;
+  }): void => {
+    const y = FLOOR_THICK / 2 + params.height / 2;
     const wallShape = new THREE.Shape();
-    const halfW = FINAL_WALL_W / 2;
-    const halfH = FINAL_WALL_H / 2;
+    const halfW = params.width / 2;
+    const halfH = params.height / 2;
     wallShape.moveTo(-halfW, -halfH);
     wallShape.lineTo(halfW, -halfH);
     wallShape.lineTo(halfW, halfH);
     wallShape.lineTo(-halfW, halfH);
     wallShape.closePath();
 
-    for (const holeX of FINAL_WALL_HOLE_X) {
+    for (const hole of params.circleHoles ?? []) {
       const holePath = new THREE.Path();
-      holePath.absarc(holeX, FINAL_WALL_HOLE_Y, FINAL_WALL_HOLE_R, 0, Math.PI * 2, false);
+      holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI * 2, false);
+      wallShape.holes.push(holePath);
+    }
+
+    for (const slot of params.bottomSlots ?? []) {
+      const slotHalfW = slot.width / 2;
+      const slotTop = -halfH + slot.height;
+      const holePath = new THREE.Path();
+      holePath.moveTo(slot.x - slotHalfW, -halfH);
+      holePath.lineTo(slot.x + slotHalfW, -halfH);
+      holePath.lineTo(slot.x + slotHalfW, slotTop);
+      holePath.lineTo(slot.x - slotHalfW, slotTop);
+      holePath.closePath();
       wallShape.holes.push(holePath);
     }
 
     const wallGeometry = new THREE.ExtrudeGeometry(wallShape, {
-      depth: FINAL_WALL_DEPTH,
+      depth: params.depth,
       bevelEnabled: false,
       curveSegments: FINAL_WALL_CURVE_SEGMENTS,
       steps: 1,
     });
-    wallGeometry.translate(0, 0, -FINAL_WALL_DEPTH / 2);
+    wallGeometry.translate(0, 0, -params.depth / 2);
 
     const wallMesh = new THREE.Mesh(wallGeometry, obstacleMaterial);
-    wallMesh.position.set(0, y, z);
+    wallMesh.position.set(0, y, params.z);
     wallMesh.castShadow = false;
     wallMesh.receiveShadow = true;
     const edgeLines = new THREE.LineSegments(
       new THREE.EdgesGeometry(wallGeometry),
-      new THREE.LineBasicMaterial({ color: 0x000000 }),
+      new THREE.LineBasicMaterial({ color: 0x330000 }),
     );
     edgeLines.scale.set(1.002, 1.002, 1.002);
     wallMesh.add(edgeLines);
@@ -465,11 +517,22 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     registerObstacleActor({
       visual: wallMesh,
       body: wallBody,
-      localPos: new THREE.Vector3(0, y, z),
-      trackWidth: FINISH_WIDTH,
-      obstacleWidth: FINAL_WALL_W,
+      localPos: new THREE.Vector3(0, y, params.z),
+      trackWidth: params.trackWidth,
+      obstacleWidth: params.width,
       phase: 0,
       speedHz: 0,
+    });
+  };
+
+  const addFinalThreeHoleWall = (z: number): void => {
+    addGapWall({
+      z,
+      width: FINAL_WALL_W,
+      height: FINAL_WALL_H,
+      depth: FINAL_WALL_DEPTH,
+      trackWidth: FINISH_WIDTH,
+      circleHoles: FINAL_WALL_HOLE_X.map((x) => ({ x, y: FINAL_WALL_HOLE_Y, r: FINAL_WALL_HOLE_R })),
     });
   };
 
@@ -516,6 +579,16 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   };
 
   addSegment({ length: START_LENGTH, slopeDeg: 0 });
+  const startBackWallWidth = TRACK_W - (RAIL_INSET * 2 + RAIL_THICK);
+  const startBackWallY = RAIL_H / 2 - FLOOR_THICK / 2 + RAIL_FLOOR_OVERLAP;
+  const startBackWallZ = startTopBackPoint.z + RAIL_THICK / 2 + START_BACK_WALL_PADDING;
+  addPart(group, boardBody, {
+    size: new THREE.Vector3(startBackWallWidth, RAIL_H, RAIL_THICK),
+    position: new THREE.Vector3(0, startBackWallY, startBackWallZ),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: railMaterial,
+    uvScale: [Math.max(startBackWallWidth * 0.3, 1), Math.max(RAIL_H, 1)],
+  });
 
   for (const segment of SEGMENTS) {
     currentYawDeg += segment.yawDeg;
@@ -567,110 +640,97 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const trialStartZ = spawn.z + 2;
   const trialFinishZ = pathStartTopPoint.z - 1;
 
-  const mainObstacleCount = 10;
+  const mainObstacleCount = 16;
   const mainStartZ = trialStartZ + 7;
-  const mainEndZ = trialFinishZ - 24;
+  const mainEndZ = trialFinishZ - 25;
   const mainSpan = Math.max(mainEndZ - mainStartZ, 1);
   const mainStep = mainObstacleCount > 1 ? mainSpan / (mainObstacleCount - 1) : 0;
   const laneAnchor = (obstacleWidth: number, laneScale = 1): number =>
     (TRACK_W / 2 - RAIL_THICK - obstacleWidth / 2 - 0.22) * laneScale;
 
-  // Zone A: long + slow mixed against short + fast.
-  const zoneA: MovingObstacleSpec[] = [
-    { width: MOVING_OBSTACLE_LONG_W, length: MOVING_OBSTACLE_LONG_L, speedHz: 0.1, phase: 0 },
+  const movingObstacleSpecs: MovingObstacleSpec[] = [
+    {
+      width: MOVING_OBSTACLE_LONG_W,
+      length: MOVING_OBSTACLE_LONG_L,
+      minSpeedHz: 0.08,
+      maxSpeedHz: 0.16,
+      laneMinScale: 0.8,
+      laneMaxScale: 0.92,
+    },
     {
       width: MOVING_OBSTACLE_SHORT_W,
       length: MOVING_OBSTACLE_SHORT_L,
-      speedHz: 0.35,
-      phase: Math.PI * 0.5,
+      minSpeedHz: 0.28,
+      maxSpeedHz: 0.47,
+      laneMinScale: 0.82,
+      laneMaxScale: 0.95,
     },
     {
       width: MOVING_OBSTACLE_MEDIUM_W,
       length: MOVING_OBSTACLE_MEDIUM_L,
-      speedHz: 0.14,
-      phase: Math.PI,
+      minSpeedHz: 0.14,
+      maxSpeedHz: 0.31,
+      laneMinScale: 0.8,
+      laneMaxScale: 0.92,
     },
-    {
-      width: MOVING_OBSTACLE_SHORT_W + 0.2,
-      length: MOVING_OBSTACLE_SHORT_L + 0.12,
-      speedHz: 0.39,
-      phase: Math.PI * 1.5,
-    },
-  ];
-  for (let i = 0; i < zoneA.length; i += 1) {
-    const z = mainStartZ + mainStep * i;
-    const obstacle = zoneA[i]!;
-    const side = i % 2 === 0 ? -1 : 1;
-    const x = side * laneAnchor(obstacle.width, obstacle.laneScale);
-    addMovingBlock(
-      new THREE.Vector3(x, FLOOR_THICK / 2 + MOVING_OBSTACLE_H / 2, z),
-      obstacle.phase,
-      obstacle.speedHz,
-      obstacle.width,
-      obstacle.length,
-    );
-  }
-
-  // Zone B: keep alternating lanes with wider speed spread and mixed sizes.
-  const zoneB: MovingObstacleSpec[] = [
     {
       width: MOVING_OBSTACLE_MEDIUM_W + 0.25,
-      length: MOVING_OBSTACLE_MEDIUM_L + 0.2,
-      speedHz: 0.2,
-      phase: 0.2,
-      laneScale: 0.92,
-    },
-    {
-      width: MOVING_OBSTACLE_SHORT_W,
-      length: MOVING_OBSTACLE_SHORT_L,
-      speedHz: 0.41,
-      phase: Math.PI + 0.1,
-      laneScale: 0.88,
-    },
-    {
-      width: MOVING_OBSTACLE_LONG_W - 0.2,
-      length: MOVING_OBSTACLE_LONG_L - 0.05,
-      speedHz: 0.12,
-      phase: 1.1,
-      laneScale: 0.86,
-    },
-    {
-      width: MOVING_OBSTACLE_SHORT_W + 0.1,
-      length: MOVING_OBSTACLE_SHORT_L + 0.15,
-      speedHz: 0.37,
-      phase: Math.PI + 0.85,
-      laneScale: 0.9,
-    },
-    {
-      width: MOVING_OBSTACLE_MEDIUM_W - 0.3,
-      length: MOVING_OBSTACLE_MEDIUM_L - 0.1,
-      speedHz: 0.23,
-      phase: 0.55,
-      laneScale: 0.89,
-    },
-    {
-      width: MOVING_OBSTACLE_SHORT_W - 0.1,
-      length: MOVING_OBSTACLE_SHORT_L + 0.05,
-      speedHz: 0.43,
-      phase: Math.PI + 1.45,
-      laneScale: 0.84,
+      length: MOVING_OBSTACLE_SHORT_L + 0.08,
+      minSpeedHz: 0.2,
+      maxSpeedHz: 0.42,
+      laneMinScale: 0.78,
+      laneMaxScale: 0.9,
     },
   ];
-  for (let i = 0; i < zoneB.length; i += 1) {
-    const z = mainStartZ + mainStep * (4 + i);
-    const obstacle = zoneB[i]!;
+  for (let i = 0; i < mainObstacleCount; i += 1) {
+    const obstacle = movingObstacleSpecs[i % movingObstacleSpecs.length]!;
+    const z = mainStartZ + mainStep * i;
     const side = i % 2 === 0 ? -1 : 1;
-    const x = side * laneAnchor(obstacle.width, obstacle.laneScale);
+    const width = obstacle.width * lerp(0.95, 1.08, obstacleRandom());
+    const length = obstacle.length * lerp(0.9, 1.2, obstacleRandom());
+    const speedHz = lerp(obstacle.minSpeedHz, obstacle.maxSpeedHz, obstacleRandom());
+    const phase = obstacleRandom() * Math.PI * 2;
+    const laneScale = lerp(obstacle.laneMinScale, obstacle.laneMaxScale, obstacleRandom());
+    const x = side * laneAnchor(width, laneScale);
     addMovingBlock(
       new THREE.Vector3(x, FLOOR_THICK / 2 + MOVING_OBSTACLE_H / 2, z),
-      obstacle.phase,
-      obstacle.speedHz,
-      obstacle.width,
-      obstacle.length,
+      phase,
+      speedHz,
+      width,
+      length,
     );
   }
 
-  // Zone C: clear line-up section (no obstacles) before the final wall.
+  // Zone C: two static precision walls followed by a clear line-up segment.
+  addGapWall({
+    z: trialFinishZ - 15.2,
+    width: TRACK_W - 0.8,
+    height: STATIC_GAP_WALL_H,
+    depth: STATIC_GAP_WALL_DEPTH,
+    trackWidth: TRACK_W,
+    circleHoles: [
+      {
+        x: -1.45,
+        y: -STATIC_GAP_WALL_H / 2 + MARBLE_RADIUS * 1.16,
+        r: MARBLE_RADIUS * 1.16,
+      },
+    ],
+  });
+  addGapWall({
+    z: trialFinishZ - 10.9,
+    width: TRACK_W - 0.7,
+    height: STATIC_GAP_WALL_H,
+    depth: STATIC_GAP_WALL_DEPTH,
+    trackWidth: TRACK_W,
+    bottomSlots: [
+      {
+        x: 1.45,
+        width: MARBLE_RADIUS * 2 * 1.22,
+        height: MARBLE_RADIUS * 2 * 1.4,
+      },
+    ],
+  });
+
   // Zone D: final static wall with three small circular floor-level holes.
   addFinalThreeHoleWall(trialFinishZ - 6.4);
 
