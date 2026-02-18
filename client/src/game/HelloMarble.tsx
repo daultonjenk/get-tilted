@@ -116,6 +116,12 @@ const defaultSkinId = getDefaultSkinId();
 const MAX_LOBBY_SLOTS = ROOM_MAX_CLIENTS;
 const OFF_COURSE_RESPAWN_DELAY_MS = 1000;
 const GHOST_SPIN_STEP_MAX_RAD = Math.PI * 0.85;
+const WALL_CONTAINMENT_EPSILON = 0.015;
+const WALL_SQUEEZE_TRIGGER_MARGIN = 0.14;
+const WALL_SQUEEZE_CONTACT_PADDING_X = 0.08;
+const WALL_SQUEEZE_CONTACT_PADDING_Z = 0.12;
+const WALL_SQUEEZE_POP_CLEARANCE_Z = 0.22;
+const WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED = 2.6;
 type MenuScreen = "main" | "options";
 
 function readStoredToggle(key: string, defaultValue: boolean): boolean {
@@ -630,11 +636,17 @@ export function HelloMarble() {
     const boardDeltaQuat = new THREE.Quaternion();
     const boardAngularAxis = new THREE.Vector3();
     const boardUpWorld = new THREE.Vector3();
+    const boardRightWorld = new THREE.Vector3();
+    const boardForwardWorld = new THREE.Vector3();
     const contactNormalWorld = new THREE.Vector3();
+    const obstacleLocalPos = new THREE.Vector3();
+    const targetLocalPos = new THREE.Vector3();
+    const targetWorldPos = new THREE.Vector3();
     const ghostTrackUp = new THREE.Vector3();
     const ghostTravelDelta = new THREE.Vector3();
     const ghostSpinAxis = new THREE.Vector3();
     const ghostSpinStepQuat = new THREE.Quaternion();
+    const movingObstacleBodySet = new Set(track.movingObstacleBodies);
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -747,6 +759,161 @@ export function HelloMarble() {
         marbleBody.velocity.z -= boardUpWorld.z * reduceBy;
         break;
       }
+    };
+
+    const updateMarblePosLocalToBoard = (): void => {
+      boardInverseQuatThree.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      ).invert();
+      marblePosLocalToBoard.set(
+        marbleBody.position.x - boardBody.position.x,
+        marbleBody.position.y - boardBody.position.y,
+        marbleBody.position.z - boardBody.position.z,
+      );
+      marblePosLocalToBoard.applyQuaternion(boardInverseQuatThree);
+    };
+
+    const clampMarbleWithinSideWalls = (halfWidth: number): void => {
+      const clampedX = clamp(marblePosLocalToBoard.x, -halfWidth, halfWidth);
+      if (Math.abs(clampedX - marblePosLocalToBoard.x) <= WALL_CONTAINMENT_EPSILON) {
+        return;
+      }
+
+      targetLocalPos.set(clampedX, marblePosLocalToBoard.y, marblePosLocalToBoard.z);
+      targetWorldPos.copy(targetLocalPos).applyQuaternion(boardQuatThree).add(boardPosThree);
+      marbleBody.position.set(targetWorldPos.x, targetWorldPos.y, targetWorldPos.z);
+
+      boardRightWorld.set(1, 0, 0).applyQuaternion(boardQuatThree).normalize();
+      const lateralSpeed =
+        marbleBody.velocity.x * boardRightWorld.x +
+        marbleBody.velocity.y * boardRightWorld.y +
+        marbleBody.velocity.z * boardRightWorld.z;
+      const pushingPastWall = clampedX >= 0 ? lateralSpeed > 0 : lateralSpeed < 0;
+      if (pushingPastWall) {
+        marbleBody.velocity.x -= boardRightWorld.x * lateralSpeed;
+        marbleBody.velocity.y -= boardRightWorld.y * lateralSpeed;
+        marbleBody.velocity.z -= boardRightWorld.z * lateralSpeed;
+      }
+
+      marbleBody.aabbNeedsUpdate = true;
+      marbleBody.updateAABB();
+      updateMarblePosLocalToBoard();
+    };
+
+    const resolveWallSqueezeAgainstObstacle = (): void => {
+      boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
+      boardQuatThree.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      ).normalize();
+      updateMarblePosLocalToBoard();
+
+      const containmentHalfX =
+        marblePosLocalToBoard.z >= track.containmentLocal.finishStartZ
+          ? track.containmentLocal.finishHalfX
+          : track.containmentLocal.mainHalfX;
+      clampMarbleWithinSideWalls(containmentHalfX);
+
+      if (Math.abs(marblePosLocalToBoard.x) < containmentHalfX - WALL_SQUEEZE_TRIGGER_MARGIN) {
+        return;
+      }
+
+      let bestObstacleLocalZ = 0;
+      let bestObstacleHalfLength = 0;
+      let bestDistanceZ = Number.POSITIVE_INFINITY;
+
+      for (const contact of world.contacts) {
+        let obstacleBody: CANNON.Body | null = null;
+        if (contact.bi === marbleBody && movingObstacleBodySet.has(contact.bj)) {
+          obstacleBody = contact.bj;
+        } else if (contact.bj === marbleBody && movingObstacleBodySet.has(contact.bi)) {
+          obstacleBody = contact.bi;
+        }
+        if (!obstacleBody) {
+          continue;
+        }
+
+        const obstacleShape = obstacleBody.shapes[0];
+        if (!(obstacleShape instanceof CANNON.Box)) {
+          continue;
+        }
+
+        obstacleLocalPos.set(
+          obstacleBody.position.x - boardBody.position.x,
+          obstacleBody.position.y - boardBody.position.y,
+          obstacleBody.position.z - boardBody.position.z,
+        );
+        obstacleLocalPos.applyQuaternion(boardInverseQuatThree);
+
+        if (Math.sign(obstacleLocalPos.x) !== Math.sign(marblePosLocalToBoard.x)) {
+          continue;
+        }
+
+        const deltaX = Math.abs(marblePosLocalToBoard.x - obstacleLocalPos.x);
+        const deltaZ = Math.abs(marblePosLocalToBoard.z - obstacleLocalPos.z);
+        const maxDeltaX = obstacleShape.halfExtents.x + marbleRadius + WALL_SQUEEZE_CONTACT_PADDING_X;
+        const maxDeltaZ = obstacleShape.halfExtents.z + marbleRadius + WALL_SQUEEZE_CONTACT_PADDING_Z;
+        if (deltaX > maxDeltaX || deltaZ > maxDeltaZ) {
+          continue;
+        }
+
+        if (deltaZ < bestDistanceZ) {
+          bestDistanceZ = deltaZ;
+          bestObstacleLocalZ = obstacleLocalPos.z;
+          bestObstacleHalfLength = obstacleShape.halfExtents.z;
+        }
+      }
+
+      if (!Number.isFinite(bestDistanceZ)) {
+        return;
+      }
+
+      const escapeDirection = marblePosLocalToBoard.z >= bestObstacleLocalZ ? 1 : -1;
+      const targetX = clamp(
+        marblePosLocalToBoard.x,
+        -containmentHalfX + WALL_CONTAINMENT_EPSILON,
+        containmentHalfX - WALL_CONTAINMENT_EPSILON,
+      );
+      const targetZ =
+        bestObstacleLocalZ +
+        escapeDirection * (bestObstacleHalfLength + marbleRadius + WALL_SQUEEZE_POP_CLEARANCE_Z);
+      targetLocalPos.set(targetX, marblePosLocalToBoard.y, targetZ);
+      targetWorldPos.copy(targetLocalPos).applyQuaternion(boardQuatThree).add(boardPosThree);
+      marbleBody.position.set(targetWorldPos.x, targetWorldPos.y, targetWorldPos.z);
+
+      boardForwardWorld.set(0, 0, 1).applyQuaternion(boardQuatThree).normalize();
+      const forwardSpeed =
+        marbleBody.velocity.x * boardForwardWorld.x +
+        marbleBody.velocity.y * boardForwardWorld.y +
+        marbleBody.velocity.z * boardForwardWorld.z;
+      if (forwardSpeed * escapeDirection < WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED) {
+        const desiredForwardSpeed = escapeDirection * WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED;
+        const deltaForwardSpeed = desiredForwardSpeed - forwardSpeed;
+        marbleBody.velocity.x += boardForwardWorld.x * deltaForwardSpeed;
+        marbleBody.velocity.y += boardForwardWorld.y * deltaForwardSpeed;
+        marbleBody.velocity.z += boardForwardWorld.z * deltaForwardSpeed;
+      }
+
+      boardRightWorld.set(1, 0, 0).applyQuaternion(boardQuatThree).normalize();
+      const lateralSpeed =
+        marbleBody.velocity.x * boardRightWorld.x +
+        marbleBody.velocity.y * boardRightWorld.y +
+        marbleBody.velocity.z * boardRightWorld.z;
+      const pushingPastWall = targetX >= 0 ? lateralSpeed > 0 : lateralSpeed < 0;
+      if (pushingPastWall) {
+        marbleBody.velocity.x -= boardRightWorld.x * lateralSpeed;
+        marbleBody.velocity.y -= boardRightWorld.y * lateralSpeed;
+        marbleBody.velocity.z -= boardRightWorld.z * lateralSpeed;
+      }
+
+      marbleBody.aabbNeedsUpdate = true;
+      marbleBody.updateAABB();
+      updateMarblePosLocalToBoard();
     };
 
     const getOrCreateGhostState = (playerId: string): GhostRenderState => {
@@ -1816,6 +1983,7 @@ export function HelloMarble() {
       const physicsStartMs = performance.now();
       world.step(fixedDt, fixedDt, 1);
       suppressVerticalPopOnSideImpact();
+      resolveWallSqueezeAgainstObstacle();
       const physicsMs = performance.now() - physicsStartMs;
 
       const speed = marbleBody.velocity.length();
@@ -1824,22 +1992,8 @@ export function HelloMarble() {
         marbleBody.velocity.scale(scale, marbleBody.velocity);
       }
       const expectedMarbleCenterYOnFloor = marbleRadius + TRACK_FLOOR_TOP_Y;
-      const refreshMarblePosLocalToBoard = (): void => {
-        boardInverseQuatThree.set(
-          boardBody.quaternion.x,
-          boardBody.quaternion.y,
-          boardBody.quaternion.z,
-          boardBody.quaternion.w,
-        ).invert();
-        marblePosLocalToBoard.set(
-          marbleBody.position.x - boardBody.position.x,
-          marbleBody.position.y - boardBody.position.y,
-          marbleBody.position.z - boardBody.position.z,
-        );
-        marblePosLocalToBoard.applyQuaternion(boardInverseQuatThree);
-      };
       const computePenetrationDepth = (): number => {
-        refreshMarblePosLocalToBoard();
+        updateMarblePosLocalToBoard();
         return Math.max(0, expectedMarbleCenterYOnFloor - marblePosLocalToBoard.y);
       };
       let penetrationDepth = computePenetrationDepth();

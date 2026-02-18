@@ -108,3 +108,21 @@ v0.7.14.0 update:
 - Bumped app version to `0.7.14.0`.
 - Verified: `npm run lint`, `npm run typecheck`, `npm run build`.
 - Playwright skill smoke run is still blocked in this environment (`ERR_MODULE_NOT_FOUND: playwright` for the skill runner script), so browser-automated screenshot validation remains pending.
+
+v0.7.15.0 update:
+- Added wall squeeze handling so the marble no longer gets forced out past side rails when a moving obstacle compresses it against a wall:
+  - Clamp marble X within board-local rail containment bounds (main track + finish section widths).
+  - Detect marble contact with moving obstacle box bodies near side walls and pop the marble around the obstacle along local Z.
+  - Remove outward lateral velocity and add minimum escape-forward velocity to prevent repeated pinning.
+- Increased moving obstacle variation by introducing per-obstacle width/length/speed profiles:
+  - Longer obstacles move slower.
+  - Shorter/smaller obstacles move faster.
+  - Both obstacle zones now mix dimensions and cadence more aggressively.
+- Extended track API returned by `createTrack()` with `movingObstacleBodies` and `containmentLocal` metadata used by the squeeze resolver.
+- Bumped app version to `0.7.15.0`.
+- Verified: `npm run lint`, `npm run typecheck`, `npm run build`.
+- Playwright skill smoke remains blocked in this environment (`ERR_MODULE_NOT_FOUND: playwright` from the skill runner script), so browser screenshot automation is still pending.
+
+Open items / next checks:
+- Manual desktop and mobile feel-pass for squeeze escapes (watch for over-aggressive pop when grazing walls).
+- Optional tuning pass on `WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED` and obstacle speed spread after hands-on playtest.
