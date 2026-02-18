@@ -105,8 +105,9 @@ const MOVING_OBSTACLE_MEDIUM_L = 1.1 * MOVING_OBSTACLE_LENGTH_SCALE;
 const FINAL_WALL_W = 11.2;
 const FINAL_WALL_H = 3.6;
 const FINAL_WALL_DEPTH = 0.13;
-const FINAL_WALL_HOLE_SIZE = MARBLE_RADIUS * 2 * 1.15;
-const FINAL_WALL_HOLE_BASE_HEIGHT = FINAL_WALL_HOLE_SIZE;
+const MARBLE_HOLE_SCALE = 1.15;
+const STANDARD_MARBLE_HOLE_WIDTH = MARBLE_RADIUS * 2 * MARBLE_HOLE_SCALE;
+const STANDARD_MARBLE_HOLE_BASE_HEIGHT = STANDARD_MARBLE_HOLE_WIDTH / 2;
 const FINAL_WALL_HOLE_X = [-2.55, 0, 2.55];
 const FINAL_WALL_CURVE_SEGMENTS = 40;
 const DEFAULT_OBSTACLE_SEED = "track-v0.7.17.0";
@@ -603,8 +604,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       trackWidth: FINISH_WIDTH,
       bottomRoundedTopHoles: FINAL_WALL_HOLE_X.map((x) => ({
         x,
-        width: FINAL_WALL_HOLE_SIZE,
-        baseHeight: FINAL_WALL_HOLE_BASE_HEIGHT,
+        width: STANDARD_MARBLE_HOLE_WIDTH,
+        baseHeight: STANDARD_MARBLE_HOLE_BASE_HEIGHT,
       })),
     });
   };
@@ -822,11 +823,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     height: STATIC_GAP_WALL_H,
     depth: STATIC_GAP_WALL_DEPTH,
     trackWidth: TRACK_W,
-    bottomOpenCircleHoles: [
+    bottomRoundedTopHoles: [
       {
         x: -1.45,
-        y: -STATIC_GAP_WALL_H / 2 + MARBLE_RADIUS * 1.16,
-        r: MARBLE_RADIUS * 1.16,
+        width: STANDARD_MARBLE_HOLE_WIDTH,
+        baseHeight: STANDARD_MARBLE_HOLE_BASE_HEIGHT,
       },
     ],
   });
@@ -845,7 +846,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     ],
   });
 
-  // Zone D: final static wall with three small circular floor-level holes.
+  // Zone D: final static wall with three floor-level marble cutouts.
   addFinalThreeHoleWall(trialFinishZ - 6.4);
 
   addVisualPart(group, {
