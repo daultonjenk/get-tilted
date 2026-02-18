@@ -92,3 +92,19 @@ v0.7.13.0 update:
 - Bumped app version to `0.7.13.0`.
 - Verified: `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test`.
 - Manual playtest still recommended for final difficulty/timing tuning (especially final moving-hole gate cadence).
+
+v0.7.14.0 update:
+- Added explicit `Return to Main Menu` actions to all non-main menu/result overlays:
+  - Options menu, multiplayer lobby, multiplayer race results, and solo race results.
+- Updated options skin selector contrast to black text on a white background (`.menuSelect` + option styling) for readability.
+- Fixed skin fallback/default resolution so unknown/missing selections resolve to preferred `gemini-light-marble`.
+- Implemented client-side ghost spin synthesis during interpolation so remote marbles visibly rotate while moving.
+- Added timed off-course reset logic using board-local track bounds: if the marble remains outside bounds for ~1 second, it respawns.
+- Reworked obstacles/final section:
+  - Reduced moving obstacle height to one-third of prior size.
+  - Set obstacle material to 75% opacity.
+  - Removed pre-final squeeze obstacles to create a clean full-width lineup section.
+  - Replaced final moving-hole gate with a static wall containing 3 small circular floor-level holes sized to ~1.15x marble diameter.
+- Bumped app version to `0.7.14.0`.
+- Verified: `npm run lint`, `npm run typecheck`, `npm run build`.
+- Playwright skill smoke run is still blocked in this environment (`ERR_MODULE_NOT_FOUND: playwright` for the skill runner script), so browser-automated screenshot validation remains pending.

@@ -304,13 +304,19 @@ textarea {
 .menuSelect {
   width: 100%;
   min-height: 44px;
-  border: 2px solid rgb(219 241 255 / 90%);
+  border: 2px solid rgb(30 30 30 / 90%);
   border-radius: 0.6rem;
-  background: linear-gradient(180deg, #0d5184, #0a3f6c);
-  color: #f2f9ff;
+  background: #ffffff;
+  color: #111111;
   font-weight: 800;
   letter-spacing: 0.03em;
   padding: 0.38rem 0.58rem;
+  color-scheme: light;
+}
+
+.menuSelect option {
+  background: #ffffff;
+  color: #111111;
 }
 
 .menuGameTitle {
@@ -522,6 +528,15 @@ textarea {
 .optionsInlineButtons .menuActionButton {
   min-height: 52px;
   font-size: clamp(1rem, 3vw, 1.2rem);
+  border-radius: 0.9rem;
+}
+
+.optionsReturnMainMenuButton,
+.lobbyReturnMainMenuButton,
+.raceResultReturnMainMenuButton {
+  width: 100%;
+  min-height: 54px;
+  font-size: clamp(1rem, 3.2vw, 1.22rem);
   border-radius: 0.9rem;
 }
 

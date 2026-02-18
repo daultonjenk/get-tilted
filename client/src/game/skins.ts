@@ -65,18 +65,20 @@ const skinCatalog: MarbleSkinOption[] =
     ? discoveredSkins
     : [{ id: PREFERRED_DEFAULT_SKIN_ID, label: PREFERRED_DEFAULT_SKIN_LABEL }];
 
+const fallbackSkin: MarbleSkinOption =
+  skinCatalog.find((entry) => entry.id === PREFERRED_DEFAULT_SKIN_ID) ?? skinCatalog[0]!;
+
 export function getSkinCatalog(): MarbleSkinOption[] {
   return skinCatalog;
 }
 
 export function getDefaultSkinId(): string {
-  const preferred = skinCatalog.find((entry) => entry.id === PREFERRED_DEFAULT_SKIN_ID);
-  return preferred?.id ?? skinCatalog[0]!.id;
+  return fallbackSkin.id;
 }
 
 export function resolveSkinById(skinId: string | undefined | null): MarbleSkinOption {
   if (!skinId) {
-    return skinCatalog[0]!;
+    return fallbackSkin;
   }
-  return skinCatalog.find((entry) => entry.id === skinId) ?? skinCatalog[0]!;
+  return skinCatalog.find((entry) => entry.id === skinId) ?? fallbackSkin;
 }

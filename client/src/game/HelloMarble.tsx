@@ -114,6 +114,8 @@ import {
 const skinCatalog = getSkinCatalog();
 const defaultSkinId = getDefaultSkinId();
 const MAX_LOBBY_SLOTS = ROOM_MAX_CLIENTS;
+const OFF_COURSE_RESPAWN_DELAY_MS = 1000;
+const GHOST_SPIN_STEP_MAX_RAD = Math.PI * 0.85;
 type MenuScreen = "main" | "options";
 
 function readStoredToggle(key: string, defaultValue: boolean): boolean {
@@ -629,6 +631,10 @@ export function HelloMarble() {
     const boardAngularAxis = new THREE.Vector3();
     const boardUpWorld = new THREE.Vector3();
     const contactNormalWorld = new THREE.Vector3();
+    const ghostTrackUp = new THREE.Vector3();
+    const ghostTravelDelta = new THREE.Vector3();
+    const ghostSpinAxis = new THREE.Vector3();
+    const ghostSpinStepQuat = new THREE.Quaternion();
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -658,6 +664,7 @@ export function HelloMarble() {
     let latestAngularSpeed = 0;
     let latestVerticalSpeed = 0;
     let latestPenetrationDepth = 0;
+    let offCourseSinceMs: number | null = null;
     let accumulator = 0;
     let disposed = false;
 
@@ -777,6 +784,7 @@ export function HelloMarble() {
         hasRendered: false,
         renderedPos: new THREE.Vector3(),
         renderedQuat: new THREE.Quaternion(),
+        spinQuat: new THREE.Quaternion(),
         droppedOutOfOrderSeqCount: 0,
         droppedStaleTimestampCount: 0,
         droppedTooOldCount: 0,
@@ -860,6 +868,7 @@ export function HelloMarble() {
         playerState.avgSnapshotAgeMs = 0;
         playerState.snapshotAgeJitterMs = 0;
         playerState.hasRendered = false;
+        playerState.spinQuat.identity();
         playerState.mesh.visible = false;
       }
     };
@@ -1335,6 +1344,7 @@ export function HelloMarble() {
       marbleBody.angularVelocity.set(0, 0, 0);
       trialStartAt = null;
       prevMarbleZ = marbleBody.position.z;
+      offCourseSinceMs = null;
       syncLocalRenderSnapshotsFromBodies();
       setTrialState("idle");
       setTrialCurrentMs(null);
@@ -1487,13 +1497,28 @@ export function HelloMarble() {
       state: GhostRenderState,
       worldPos: THREE.Vector3,
       worldQuat: THREE.Quaternion,
+      trackUp: THREE.Vector3,
     ): void => {
+      if (state.hasRendered) {
+        ghostTravelDelta.copy(worldPos).sub(state.renderedPos);
+        const travelDistance = ghostTravelDelta.length();
+        if (travelDistance > 0.0001) {
+          ghostTravelDelta.multiplyScalar(1 / travelDistance);
+          ghostSpinAxis.crossVectors(trackUp, ghostTravelDelta);
+          if (ghostSpinAxis.lengthSq() > 0.000001) {
+            ghostSpinAxis.normalize();
+            const spinAngle = Math.min(travelDistance / marbleRadius, GHOST_SPIN_STEP_MAX_RAD);
+            ghostSpinStepQuat.setFromAxisAngle(ghostSpinAxis, spinAngle);
+            state.spinQuat.premultiply(ghostSpinStepQuat).normalize();
+          }
+        }
+      }
       state.renderedPos.copy(worldPos);
-      state.renderedQuat.copy(worldQuat);
+      state.renderedQuat.copy(state.spinQuat).multiply(worldQuat).normalize();
       state.hasRendered = true;
       state.mesh.visible = true;
       state.mesh.position.copy(worldPos);
-      state.mesh.quaternion.copy(worldQuat);
+      state.mesh.quaternion.copy(state.renderedQuat);
     };
 
     // T1-3: Tab-backgrounding handling — flush stale ghost snapshots on un-background.
@@ -1799,7 +1824,7 @@ export function HelloMarble() {
         marbleBody.velocity.scale(scale, marbleBody.velocity);
       }
       const expectedMarbleCenterYOnFloor = marbleRadius + TRACK_FLOOR_TOP_Y;
-      const computePenetrationDepth = (): number => {
+      const refreshMarblePosLocalToBoard = (): void => {
         boardInverseQuatThree.set(
           boardBody.quaternion.x,
           boardBody.quaternion.y,
@@ -1812,6 +1837,9 @@ export function HelloMarble() {
           marbleBody.position.z - boardBody.position.z,
         );
         marblePosLocalToBoard.applyQuaternion(boardInverseQuatThree);
+      };
+      const computePenetrationDepth = (): number => {
+        refreshMarblePosLocalToBoard();
         return Math.max(0, expectedMarbleCenterYOnFloor - marblePosLocalToBoard.y);
       };
       let penetrationDepth = computePenetrationDepth();
@@ -1848,6 +1876,26 @@ export function HelloMarble() {
       latestPenetrationDepth = penetrationDepth;
       latestAngularSpeed = marbleBody.angularVelocity.length();
       latestVerticalSpeed = marbleBody.velocity.y;
+
+      const outBounds = track.offCourseBoundsLocal;
+      const isOffCourseByBounds =
+        marblePosLocalToBoard.x < outBounds.minX ||
+        marblePosLocalToBoard.x > outBounds.maxX ||
+        marblePosLocalToBoard.z < outBounds.minZ ||
+        marblePosLocalToBoard.z > outBounds.maxZ;
+      if (!isRaceFinishedLocal) {
+        if (isOffCourseByBounds) {
+          if (offCourseSinceMs == null) {
+            offCourseSinceMs = nowMs;
+          } else if (nowMs - offCourseSinceMs >= OFF_COURSE_RESPAWN_DELAY_MS) {
+            respawnMarble(true);
+          }
+        } else {
+          offCourseSinceMs = null;
+        }
+      } else {
+        offCourseSinceMs = null;
+      }
 
       if (
         nowMs - lastRaceSendAt >= SOURCE_RATE_MS &&
@@ -1889,6 +1937,7 @@ export function HelloMarble() {
       }
 
       if (!isRaceFinishedLocal && marbleBody.position.y < track.respawnY) {
+        offCourseSinceMs = null;
         respawnMarble(true);
       }
 
@@ -2085,6 +2134,7 @@ export function HelloMarble() {
 
       boardPosThree.copy(track.group.position);
       boardQuatThree.copy(track.group.quaternion);
+      ghostTrackUp.set(0, 1, 0).applyQuaternion(boardQuatThree).normalize();
 
       let extrapolatingPlayers = 0;
       const interpNowMs = raceClient.getServerNowMs();
@@ -2148,7 +2198,7 @@ export function HelloMarble() {
                 tempQuatA,
               );
             }
-            applyGhostPose(playerState, tempVecA, tempQuatA);
+            applyGhostPose(playerState, tempVecA, tempQuatA, ghostTrackUp);
             continue;
           }
 
@@ -2179,7 +2229,7 @@ export function HelloMarble() {
               tempQuatA,
             );
           }
-          applyGhostPose(playerState, tempVecA, tempQuatA);
+          applyGhostPose(playerState, tempVecA, tempQuatA, ghostTrackUp);
           continue;
         }
 
@@ -2202,7 +2252,7 @@ export function HelloMarble() {
             tempQuatA,
           );
         }
-        applyGhostPose(playerState, tempVecA, tempQuatA);
+        applyGhostPose(playerState, tempVecA, tempQuatA, ghostTrackUp);
       }
 
       const cameraAlpha = 1 - Math.exp(-8 * delta);
@@ -2993,6 +3043,13 @@ export function HelloMarble() {
                   </button>
                 </div>
               ) : null}
+              <button
+                type="button"
+                className="menuActionButton optionsReturnMainMenuButton"
+                onClick={returnToMainMenu}
+              >
+                Return to Main Menu
+              </button>
             </div>
           </div>
         </div>
@@ -3043,6 +3100,13 @@ export function HelloMarble() {
                 START MATCH
               </button>
             </div>
+            <button
+              type="button"
+              className="menuActionButton lobbyReturnMainMenuButton"
+              onClick={returnToMainMenu}
+            >
+              Return to Main Menu
+            </button>
             {joinHandshakePending ? (
               <p className="raceHint">
                 Joining room ({joinStageLabel}
@@ -3119,6 +3183,13 @@ export function HelloMarble() {
                 {localReady ? "UNREADY REMATCH" : "READY FOR REMATCH"}
               </button>
             ) : null}
+            <button
+              type="button"
+              className="menuActionButton raceResultReturnMainMenuButton"
+              onClick={returnToMainMenu}
+            >
+              Return to Main Menu
+            </button>
           </div>
         </div>
       ) : null}
@@ -3131,6 +3202,13 @@ export function HelloMarble() {
             <p>Best: {formatTimeMs(trialBestMs)}</p>
             <button type="button" className="readyButton ready" onClick={restartSoloRace}>
               RESTART RACE
+            </button>
+            <button
+              type="button"
+              className="menuActionButton raceResultReturnMainMenuButton"
+              onClick={returnToMainMenu}
+            >
+              Return to Main Menu
             </button>
           </div>
         </div>

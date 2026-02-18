@@ -77,6 +77,7 @@ export type GhostRenderState = {
   hasRendered: boolean;
   renderedPos: THREE.Vector3;
   renderedQuat: THREE.Quaternion;
+  spinQuat: THREE.Quaternion;
   droppedOutOfOrderSeqCount: number;
   droppedStaleTimestampCount: number;
   droppedTooOldCount: number;

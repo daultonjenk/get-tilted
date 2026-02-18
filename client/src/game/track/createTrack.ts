@@ -11,6 +11,12 @@ export type TrackBuildResult = {
   bodies: CANNON.Body[];
   spawn: CANNON.Vec3;
   respawnY: number;
+  offCourseBoundsLocal: {
+    minX: number;
+    maxX: number;
+    minZ: number;
+    maxZ: number;
+  };
   trialStartZ: number;
   trialFinishZ: number;
   updateMovingObstacles: (
@@ -67,23 +73,21 @@ const FINISH_LENGTH = 10;
 const FINISH_WIDTH = 12;
 const MARKER_THICK = 0.12;
 const WALL_CLEARANCE = 0.2;
+const OFF_COURSE_MARGIN = 1.1;
+const OFF_COURSE_Z_MARGIN = 2.4;
 
 const MOVING_OBSTACLE_W = 4.5;
-const MOVING_OBSTACLE_H = 2.25;
+const MOVING_OBSTACLE_H = 2.25 / 3;
 const MOVING_OBSTACLE_L = 1.0;
 
-const SQUEEZE_OBSTACLE_W = 8.0;
-const SQUEEZE_OBSTACLE_H = 2.8;
-const SQUEEZE_OBSTACLE_L = 1.2;
-const SQUEEZE_HOLE_W = 1.5;
-
-const FINAL_GATE_TOTAL_W = 8.8;
-const FINAL_GATE_TOTAL_H = 3.6;
-const FINAL_GATE_DEPTH = 1.3;
-const FINAL_GATE_HOLE_W = 2.0;
-const FINAL_GATE_HOLE_H = 2.2;
-const FINAL_GATE_TOP_H = FINAL_GATE_TOTAL_H - FINAL_GATE_HOLE_H;
-const FINAL_GATE_SIDE_W = (FINAL_GATE_TOTAL_W - FINAL_GATE_HOLE_W) / 2;
+const FINAL_WALL_W = 8.8;
+const FINAL_WALL_H = 3.6;
+const FINAL_WALL_DEPTH = 1.3;
+const FINAL_WALL_HOLE_DIAMETER = MARBLE_RADIUS * 2 * 1.15;
+const FINAL_WALL_HOLE_R = FINAL_WALL_HOLE_DIAMETER / 2;
+const FINAL_WALL_HOLE_Y = -FINAL_WALL_H / 2 + FINAL_WALL_HOLE_R;
+const FINAL_WALL_HOLE_X = [-2.55, 0, 2.55];
+const FINAL_WALL_CURVE_SEGMENTS = 40;
 
 // Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
@@ -201,6 +205,26 @@ function addPart(group: THREE.Group, boardBody: CANNON.Body, spec: PartSpec): vo
   addCompoundPart(boardBody, spec);
 }
 
+function geometryToTrimesh(geometry: THREE.BufferGeometry): CANNON.Trimesh {
+  const position = geometry.getAttribute("position");
+  const vertices: number[] = [];
+  for (let i = 0; i < position.count; i += 1) {
+    vertices.push(position.getX(i), position.getY(i), position.getZ(i));
+  }
+  const indices: number[] = [];
+  const indexAttr = geometry.getIndex();
+  if (indexAttr) {
+    for (let i = 0; i < indexAttr.count; i += 1) {
+      indices.push(indexAttr.getX(i));
+    }
+  } else {
+    for (let i = 0; i < position.count; i += 1) {
+      indices.push(i);
+    }
+  }
+  return new CANNON.Trimesh(vertices, indices);
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -228,6 +252,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const obstacleMaterial = new THREE.MeshStandardMaterial({
     map: trackSurfaceTexture,
     color: 0xffffff,
+    transparent: true,
+    opacity: 0.75,
   });
 
   let currentYawDeg = 0;
@@ -369,121 +395,55 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     });
   };
 
-  const addStaticSqueezeObstacle = (z: number, holeSide: -1 | 1): void => {
-    const obstacleGroup = new THREE.Group();
-    group.add(obstacleGroup);
+  const addFinalThreeHoleWall = (z: number): void => {
+    const y = FLOOR_THICK / 2 + FINAL_WALL_H / 2;
 
-    const y = FLOOR_THICK / 2 + SQUEEZE_OBSTACLE_H / 2;
-    const minX = -SQUEEZE_OBSTACLE_W / 2;
-    const maxX = SQUEEZE_OBSTACLE_W / 2;
-    const holeCenter = holeSide * (SQUEEZE_OBSTACLE_W / 2 - SQUEEZE_HOLE_W / 2 - 0.55);
-    const leftEdge = holeCenter - SQUEEZE_HOLE_W / 2;
-    const rightEdge = holeCenter + SQUEEZE_HOLE_W / 2;
-    const leftWidth = Math.max(0, leftEdge - minX);
-    const rightWidth = Math.max(0, maxX - rightEdge);
+    const wallShape = new THREE.Shape();
+    const halfW = FINAL_WALL_W / 2;
+    const halfH = FINAL_WALL_H / 2;
+    wallShape.moveTo(-halfW, -halfH);
+    wallShape.lineTo(halfW, -halfH);
+    wallShape.lineTo(halfW, halfH);
+    wallShape.lineTo(-halfW, halfH);
+    wallShape.closePath();
 
-    const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+    for (const holeX of FINAL_WALL_HOLE_X) {
+      const holePath = new THREE.Path();
+      holePath.absarc(holeX, FINAL_WALL_HOLE_Y, FINAL_WALL_HOLE_R, 0, Math.PI * 2, false);
+      wallShape.holes.push(holePath);
+    }
 
-    const addPiece = (width: number, centerX: number) => {
-      if (width <= 0.001) {
-        return;
-      }
-      addVisualPart(obstacleGroup, {
-        size: new THREE.Vector3(width, SQUEEZE_OBSTACLE_H, SQUEEZE_OBSTACLE_L),
-        position: new THREE.Vector3(centerX, 0, 0),
-        rotation: new THREE.Euler(0, 0, 0, "XYZ"),
-        material: obstacleMaterial,
-        uvScale: [Math.max(width, 1), Math.max(SQUEEZE_OBSTACLE_L, 1)],
-        outline: { color: 0x000000, scale: 1.002 },
-      });
-      body.addShape(
-        new CANNON.Box(new CANNON.Vec3(width / 2, SQUEEZE_OBSTACLE_H / 2, SQUEEZE_OBSTACLE_L / 2)),
-        new CANNON.Vec3(centerX, 0, 0),
-      );
-    };
+    const wallGeometry = new THREE.ExtrudeGeometry(wallShape, {
+      depth: FINAL_WALL_DEPTH,
+      bevelEnabled: false,
+      curveSegments: FINAL_WALL_CURVE_SEGMENTS,
+      steps: 1,
+    });
+    wallGeometry.translate(0, 0, -FINAL_WALL_DEPTH / 2);
 
-    addPiece(leftWidth, minX + leftWidth / 2);
-    addPiece(rightWidth, rightEdge + rightWidth / 2);
+    const wallMesh = new THREE.Mesh(wallGeometry, obstacleMaterial);
+    wallMesh.position.set(0, y, z);
+    wallMesh.castShadow = false;
+    wallMesh.receiveShadow = true;
+    const edgeLines = new THREE.LineSegments(
+      new THREE.EdgesGeometry(wallGeometry),
+      new THREE.LineBasicMaterial({ color: 0x000000 }),
+    );
+    edgeLines.scale.set(1.002, 1.002, 1.002);
+    wallMesh.add(edgeLines);
+    group.add(wallMesh);
+
+    const wallBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+    wallBody.addShape(geometryToTrimesh(wallGeometry));
 
     registerObstacleActor({
-      visual: obstacleGroup,
-      body,
-      localPos: new THREE.Vector3(0, y, z),
-      trackWidth: TRACK_W,
-      obstacleWidth: SQUEEZE_OBSTACLE_W,
-      phase: 0,
-      speedHz: 0,
-    });
-  };
-
-  const addFinalMovingHoleGate = (z: number): void => {
-    const y = FLOOR_THICK / 2 + FINAL_GATE_TOTAL_H / 2;
-    const pillarY = -FINAL_GATE_TOTAL_H / 2 + FINAL_GATE_HOLE_H / 2;
-    const topY = FINAL_GATE_TOTAL_H / 2 - FINAL_GATE_TOP_H / 2;
-    const sideX = FINAL_GATE_TOTAL_W / 2 - FINAL_GATE_SIDE_W / 2;
-
-    const topMesh = addVisualPart(group, {
-      size: new THREE.Vector3(FINAL_GATE_TOTAL_W, FINAL_GATE_TOP_H, FINAL_GATE_DEPTH),
-      position: new THREE.Vector3(0, y + topY, z),
-      rotation: new THREE.Euler(0, 0, 0, "XYZ"),
-      material: obstacleMaterial,
-      uvScale: [Math.max(FINAL_GATE_TOTAL_W, 1), Math.max(FINAL_GATE_DEPTH, 1)],
-      outline: { color: 0x000000, scale: 1.002 },
-    });
-    const topBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-    topBody.addShape(
-      new CANNON.Box(new CANNON.Vec3(FINAL_GATE_TOTAL_W / 2, FINAL_GATE_TOP_H / 2, FINAL_GATE_DEPTH / 2)),
-    );
-
-    registerObstacleActor({
-      visual: topMesh,
-      body: topBody,
-      localPos: new THREE.Vector3(0, y + topY, z),
-      trackWidth: FINISH_WIDTH,
-      obstacleWidth: FINAL_GATE_TOTAL_W,
-      phase: 0,
-      speedHz: 0,
-    });
-
-    const movingGroup = new THREE.Group();
-    group.add(movingGroup);
-
-    const addPillarVisual = (x: number): void => {
-      addVisualPart(movingGroup, {
-        size: new THREE.Vector3(FINAL_GATE_SIDE_W, FINAL_GATE_HOLE_H, FINAL_GATE_DEPTH),
-        position: new THREE.Vector3(x, pillarY, 0),
-        rotation: new THREE.Euler(0, 0, 0, "XYZ"),
-        material: obstacleMaterial,
-        uvScale: [Math.max(FINAL_GATE_SIDE_W, 1), Math.max(FINAL_GATE_DEPTH, 1)],
-        outline: { color: 0x000000, scale: 1.002 },
-      });
-    };
-
-    addPillarVisual(-sideX);
-    addPillarVisual(sideX);
-
-    const movingBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-    movingBody.addShape(
-      new CANNON.Box(
-        new CANNON.Vec3(FINAL_GATE_SIDE_W / 2, FINAL_GATE_HOLE_H / 2, FINAL_GATE_DEPTH / 2),
-      ),
-      new CANNON.Vec3(-sideX, pillarY, 0),
-    );
-    movingBody.addShape(
-      new CANNON.Box(
-        new CANNON.Vec3(FINAL_GATE_SIDE_W / 2, FINAL_GATE_HOLE_H / 2, FINAL_GATE_DEPTH / 2),
-      ),
-      new CANNON.Vec3(sideX, pillarY, 0),
-    );
-
-    registerObstacleActor({
-      visual: movingGroup,
-      body: movingBody,
+      visual: wallMesh,
+      body: wallBody,
       localPos: new THREE.Vector3(0, y, z),
       trackWidth: FINISH_WIDTH,
-      obstacleWidth: FINAL_GATE_TOTAL_W,
-      phase: Math.PI * 0.35,
-      speedHz: 0.17,
+      obstacleWidth: FINAL_WALL_W,
+      phase: 0,
+      speedHz: 0,
     });
   };
 
@@ -580,9 +540,9 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const trialStartZ = spawn.z + 2;
   const trialFinishZ = pathStartTopPoint.z - 1;
 
-  const mainObstacleCount = 12;
+  const mainObstacleCount = 10;
   const mainStartZ = trialStartZ + 7;
-  const mainEndZ = trialFinishZ - 14;
+  const mainEndZ = trialFinishZ - 24;
   const mainSpan = Math.max(mainEndZ - mainStartZ, 1);
   const mainStep = mainObstacleCount > 1 ? mainSpan / (mainObstacleCount - 1) : 0;
   const laneAnchorX = TRACK_W / 2 - RAIL_THICK - MOVING_OBSTACLE_W / 2 - 0.35;
@@ -611,12 +571,9 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     );
   }
 
-  // Zone C: two static squeeze obstacles with side holes.
-  addStaticSqueezeObstacle(mainStartZ + mainStep * 10, -1);
-  addStaticSqueezeObstacle(mainStartZ + mainStep * 11, 1);
-
-  // Zone D: final gate is a static-position wall with a moving hole.
-  addFinalMovingHoleGate(trialFinishZ - 3.4);
+  // Zone C: clear line-up section (no obstacles) before the final wall.
+  // Zone D: final static wall with three small circular floor-level holes.
+  addFinalThreeHoleWall(trialFinishZ - 6.4);
 
   addVisualPart(group, {
     size: new THREE.Vector3(TRACK_W + 0.8, MARKER_THICK, 0.45),
@@ -634,11 +591,19 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
   updateMovingObstacles(0, boardBody.position, boardBody.quaternion);
 
+  const offCourseBoundsLocal = {
+    minX: -FINISH_WIDTH / 2 - OFF_COURSE_MARGIN,
+    maxX: FINISH_WIDTH / 2 + OFF_COURSE_MARGIN,
+    minZ: startTopBackPoint.z - OFF_COURSE_Z_MARGIN,
+    maxZ: pathStartTopPoint.z + OFF_COURSE_Z_MARGIN,
+  };
+
   return {
     group,
     bodies: [boardBody, ...obstacleBodies],
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
+    offCourseBoundsLocal,
     trialStartZ,
     trialFinishZ,
     updateMovingObstacles,
