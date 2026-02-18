@@ -105,8 +105,8 @@ const MOVING_OBSTACLE_MEDIUM_L = 1.1 * MOVING_OBSTACLE_LENGTH_SCALE;
 const FINAL_WALL_W = 11.2;
 const FINAL_WALL_H = 3.6;
 const FINAL_WALL_DEPTH = 0.13;
-const FINAL_WALL_HOLE_WIDTH = MARBLE_RADIUS * 2 * 1.28;
-const FINAL_WALL_HOLE_HEIGHT = MARBLE_RADIUS * 2 * 1.15;
+const FINAL_WALL_HOLE_SIZE = MARBLE_RADIUS * 2 * 1.15;
+const FINAL_WALL_HOLE_BASE_HEIGHT = FINAL_WALL_HOLE_SIZE;
 const FINAL_WALL_HOLE_X = [-2.55, 0, 2.55];
 const FINAL_WALL_CURVE_SEGMENTS = 40;
 const DEFAULT_OBSTACLE_SEED = "track-v0.7.17.0";
@@ -506,7 +506,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     trackWidth: number;
     circleHoles?: Array<{ x: number; y: number; r: number }>;
     bottomOpenCircleHoles?: Array<{ x: number; y: number; r: number }>;
-    bottomRoundedTopHoles?: Array<{ x: number; width: number; height: number }>;
+    bottomRoundedTopHoles?: Array<{ x: number; width: number; baseHeight: number }>;
     bottomSlots?: Array<{ x: number; width: number; height: number }>;
   }): void => {
     const y = FLOOR_THICK / 2 + params.height / 2;
@@ -537,8 +537,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
     for (const hole of params.bottomRoundedTopHoles ?? []) {
       const halfHoleW = hole.width / 2;
-      const holeTop = -halfH + hole.height;
-      const capCenterY = holeTop - halfHoleW;
+      const baseTop = -halfH + hole.baseHeight;
+      const capCenterY = baseTop;
       const holePath = new THREE.Path();
       holePath.moveTo(hole.x - halfHoleW, -halfH);
       holePath.lineTo(hole.x + halfHoleW, -halfH);
@@ -603,8 +603,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       trackWidth: FINISH_WIDTH,
       bottomRoundedTopHoles: FINAL_WALL_HOLE_X.map((x) => ({
         x,
-        width: FINAL_WALL_HOLE_WIDTH,
-        height: FINAL_WALL_HOLE_HEIGHT,
+        width: FINAL_WALL_HOLE_SIZE,
+        baseHeight: FINAL_WALL_HOLE_BASE_HEIGHT,
       })),
     });
   };
