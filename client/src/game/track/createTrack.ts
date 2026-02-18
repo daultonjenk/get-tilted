@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
+import trackSurfaceUrl from "../../assets/textures/track/track-surface.png";
 
 export type CreateTrackOptions = {
   seed?: string;
@@ -31,6 +32,10 @@ type PartSpec = {
   rotation: THREE.Euler;
   material: THREE.Material;
   uvScale?: [number, number];
+  outline?: {
+    color: number;
+    scale?: number;
+  };
 };
 
 const TRACK_W = 6;
@@ -39,8 +44,6 @@ const RAIL_THICK = 0.35;
 const RAIL_H = 2.0;
 const RAIL_INSET = 0.15;
 const RAIL_FLOOR_OVERLAP = 0.12;
-const FLOOR_COLOR = 0x2f6b39;
-const RAIL_COLOR = 0x9aa7b2;
 const MARBLE_RADIUS = 0.5;
 const START_LENGTH = 8;
 const FINISH_LENGTH = 10;
@@ -64,36 +67,18 @@ function degToRad(value: number): number {
   return (value * Math.PI) / 180;
 }
 
-function createCheckerFloorMaterial(): THREE.MeshStandardMaterial {
-  const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return new THREE.MeshStandardMaterial({ color: FLOOR_COLOR });
-  }
-
-  const checks = 8;
-  const tile = canvas.width / checks;
-  for (let y = 0; y < checks; y += 1) {
-    for (let x = 0; x < checks; x += 1) {
-      const even = (x + y) % 2 === 0;
-      ctx.fillStyle = even ? "#2f6b39" : "#3f7c49";
-      ctx.fillRect(x * tile, y * tile, tile, tile);
-    }
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
+function createTrackSurfaceTexture(): THREE.Texture {
+  const texture = new THREE.TextureLoader().load(trackSurfaceUrl);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
   texture.needsUpdate = true;
-
-  return new THREE.MeshStandardMaterial({ map: texture });
+  return texture;
 }
 
 function addVisualPart(group: THREE.Group, spec: PartSpec): void {
-  const { size, position, rotation, material, uvScale } = spec;
+  const { size, position, rotation, material, uvScale, outline } = spec;
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
     material,
@@ -111,6 +96,17 @@ function addVisualPart(group: THREE.Group, spec: PartSpec): void {
   mesh.castShadow = false;
   mesh.receiveShadow = true;
   group.add(mesh);
+
+  if (outline) {
+    const edges = new THREE.EdgesGeometry(mesh.geometry);
+    const edgeLines = new THREE.LineSegments(
+      edges,
+      new THREE.LineBasicMaterial({ color: outline.color }),
+    );
+    const outlineScale = outline.scale ?? 1.001;
+    edgeLines.scale.set(outlineScale, outlineScale, outlineScale);
+    mesh.add(edgeLines);
+  }
 }
 
 function addCompoundPart(boardBody: CANNON.Body, spec: PartSpec): void {
@@ -139,15 +135,20 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   boardBody.position.set(0, 0, 0);
   boardBody.quaternion.set(0, 0, 0, 1);
 
-  const floorMaterial = createCheckerFloorMaterial();
+  const trackSurfaceTexture = createTrackSurfaceTexture();
+  const floorMaterial = new THREE.MeshStandardMaterial({ map: trackSurfaceTexture });
   const railMaterial = new THREE.MeshStandardMaterial({
-    color: RAIL_COLOR,
+    map: trackSurfaceTexture,
+    color: 0xffffff,
     transparent: true,
     opacity: 0.35,
   });
   const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
   const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
-  const obstacleMaterial = new THREE.MeshStandardMaterial({ color: 0x536dfe });
+  const obstacleMaterial = new THREE.MeshStandardMaterial({
+    map: trackSurfaceTexture,
+    color: 0xffffff,
+  });
 
   let currentYawDeg = 0;
   let lowestFloorY = 0;
@@ -213,6 +214,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
         position: railCenter,
         rotation,
         material: railMaterial,
+        uvScale: [Math.max(length * 0.3, 1), Math.max(RAIL_H, 1)],
       });
     };
 
@@ -298,6 +300,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       position: new THREE.Vector3(x, y, z),
       rotation: new THREE.Euler(0, 0, 0, "XYZ"),
       material: obstacleMaterial,
+      uvScale: [SLALOM_OBSTACLE_W, SLALOM_OBSTACLE_L],
+      outline: { color: 0x000000, scale: 1.002 },
     });
   }
 

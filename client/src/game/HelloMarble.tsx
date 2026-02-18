@@ -2418,14 +2418,43 @@ export function HelloMarble() {
       mount.removeChild(renderer.domElement);
       renderer.dispose();
       scene.remove(track.group);
+      const disposedTrackTextures = new Set<THREE.Texture>();
       for (const child of track.group.children) {
         if (child instanceof THREE.Mesh) {
+          for (const nested of child.children) {
+            if (nested instanceof THREE.LineSegments) {
+              nested.geometry.dispose();
+              if (Array.isArray(nested.material)) {
+                for (const material of nested.material) {
+                  material.dispose();
+                }
+              } else {
+                nested.material.dispose();
+              }
+            }
+          }
           child.geometry.dispose();
           if (Array.isArray(child.material)) {
             for (const material of child.material) {
+              if (
+                material instanceof THREE.MeshStandardMaterial &&
+                material.map &&
+                !disposedTrackTextures.has(material.map)
+              ) {
+                disposedTrackTextures.add(material.map);
+                material.map.dispose();
+              }
               material.dispose();
             }
           } else {
+            if (
+              child.material instanceof THREE.MeshStandardMaterial &&
+              child.material.map &&
+              !disposedTrackTextures.has(child.material.map)
+            ) {
+              disposedTrackTextures.add(child.material.map);
+              child.material.map.dispose();
+            }
             child.material.dispose();
           }
         }
