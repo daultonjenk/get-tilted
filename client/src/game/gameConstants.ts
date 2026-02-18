@@ -66,6 +66,7 @@ export const DEFAULT_TUNING: TuningState = {
   extraDownForce: 0.7,
   renderScaleMobile: 1,
   mobileSafeFallback: false,
+  legacyTrackController: true,
   localMarbleRenderInterpolation: true,
   localTrackRenderInterpolation: false,
   debugUpdateHzMobile: 5,

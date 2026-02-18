@@ -1316,23 +1316,7 @@ export function HelloMarble() {
     let renderMsEma = 0;
     let miscMsEma = 0;
     let perfTier: MobilePerfTier | "desktop" = mobilePerfGovernor ? "high" : "desktop";
-    const simulateFixedStep = (nowMs: number, fixedDt: number): number => {
-      const currentTuning = tuningRef.current;
-      world.gravity.set(0, -currentTuning.gravityG, 0);
-      solver.iterations = Math.round(currentTuning.physicsSolverIterations);
-      marbleBody.linearDamping = currentTuning.linearDamping;
-      marbleBody.angularDamping = currentTuning.angularDamping;
-      marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
-      marbleBodyWithCcd.ccdIterations = Math.round(currentTuning.ccdIterations);
-      contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
-      contactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
-      track.group.quaternion.set(
-        boardBody.quaternion.x,
-        boardBody.quaternion.y,
-        boardBody.quaternion.z,
-        boardBody.quaternion.w,
-      );
-
+    const resolveNormalizedIntent = (currentTuning: TuningState): TiltSample => {
       let sourceIntent: TiltSample;
       const status = tiltStatusRef.current;
       const touchIntent = touchTiltRef.current;
@@ -1384,8 +1368,23 @@ export function HelloMarble() {
       };
       inputIntentX = normalizedIntent.x;
       inputIntentZ = normalizedIntent.z;
+      return normalizedIntent;
+    };
 
-      const filteredIntent = filter.push(normalizedIntent, fixedDt);
+    const updateTrackController = (
+      currentTuning: TuningState,
+      controllerDt: number,
+      useLegacyDeltaGuard: boolean,
+    ): void => {
+      track.group.quaternion.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
+
+      const normalizedIntent = resolveNormalizedIntent(currentTuning);
+      const filteredIntent = filter.push(normalizedIntent, controllerDt);
       lastFilteredIntent = filteredIntent;
       const maxTiltRad = (currentTuning.maxTiltDeg * Math.PI) / 180;
 
@@ -1393,17 +1392,17 @@ export function HelloMarble() {
         filteredIntent.z * currentTuning.tiltStrength * maxTiltRad;
       const desiredRoll =
         -filteredIntent.x * currentTuning.tiltStrength * maxTiltRad;
-      const maxStep = currentTuning.maxBoardAngVel * fixedDt;
+      const maxStep = currentTuning.maxBoardAngVel * controllerDt;
       currentPitch += clamp(desiredPitch - currentPitch, -maxStep, maxStep);
       currentRoll += clamp(desiredRoll - currentRoll, -maxStep, maxStep);
 
       visualTiltTargetEuler.set(currentPitch, 0, currentRoll);
       visualTiltTargetQuat.setFromEuler(visualTiltTargetEuler);
-      const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * fixedDt);
+      const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * controllerDt);
       track.group.quaternion.slerp(visualTiltTargetQuat, boardTiltAlpha);
 
       rawPivot.set(marbleBody.position.x, 0, marbleBody.position.z);
-      const pivotAlpha = 1 - Math.exp(-PIVOT_SMOOTH * fixedDt);
+      const pivotAlpha = 1 - Math.exp(-PIVOT_SMOOTH * controllerDt);
       pivotSmoothed.x += (rawPivot.x - pivotSmoothed.x) * pivotAlpha;
       pivotSmoothed.y += (rawPivot.y - pivotSmoothed.y) * pivotAlpha;
       pivotSmoothed.z += (rawPivot.z - pivotSmoothed.z) * pivotAlpha;
@@ -1422,49 +1421,144 @@ export function HelloMarble() {
         pivotSmoothed.z - rotatedPivot.z,
       );
 
-      const invDelta = 1 / fixedDt;
-      boardBody.velocity.set(
-        (boardPosition.x - boardPrevPos.x) * invDelta,
-        (boardPosition.y - boardPrevPos.y) * invDelta,
-        (boardPosition.z - boardPrevPos.z) * invDelta,
-      );
+      if (useLegacyDeltaGuard) {
+        if (controllerDt > 0.00001) {
+          const invDelta = 1 / controllerDt;
+          boardBody.velocity.set(
+            (boardPosition.x - boardPrevPos.x) * invDelta,
+            (boardPosition.y - boardPrevPos.y) * invDelta,
+            (boardPosition.z - boardPrevPos.z) * invDelta,
+          );
 
-      boardNextQuat.set(
-        qFinalCannon.x,
-        qFinalCannon.y,
-        qFinalCannon.z,
-        qFinalCannon.w,
-      );
-      boardPrevQuatInv.copy(boardPrevQuat).invert();
-      boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
-      const w = clamp(boardDeltaQuat.w, -1, 1);
-      let angle = 2 * Math.acos(w);
-      if (angle > Math.PI) {
-        angle -= 2 * Math.PI;
-      }
-      const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
-      if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
-        boardAngularAxis.set(
-          boardDeltaQuat.x / sinHalf,
-          boardDeltaQuat.y / sinHalf,
-          boardDeltaQuat.z / sinHalf,
-        );
-        const angularSpeed = angle * invDelta;
-        boardBody.angularVelocity.set(
-          boardAngularAxis.x * angularSpeed,
-          boardAngularAxis.y * angularSpeed,
-          boardAngularAxis.z * angularSpeed,
-        );
+          boardNextQuat.set(
+            qFinalCannon.x,
+            qFinalCannon.y,
+            qFinalCannon.z,
+            qFinalCannon.w,
+          );
+          boardPrevQuatInv.copy(boardPrevQuat).invert();
+          boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
+          const w = clamp(boardDeltaQuat.w, -1, 1);
+          let angle = 2 * Math.acos(w);
+          if (angle > Math.PI) {
+            angle -= 2 * Math.PI;
+          }
+          const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
+          if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
+            boardAngularAxis.set(
+              boardDeltaQuat.x / sinHalf,
+              boardDeltaQuat.y / sinHalf,
+              boardDeltaQuat.z / sinHalf,
+            );
+            const angularSpeed = angle * invDelta;
+            boardBody.angularVelocity.set(
+              boardAngularAxis.x * angularSpeed,
+              boardAngularAxis.y * angularSpeed,
+              boardAngularAxis.z * angularSpeed,
+            );
+          } else {
+            boardBody.angularVelocity.set(0, 0, 0);
+          }
+        } else {
+          boardBody.velocity.set(0, 0, 0);
+          boardBody.angularVelocity.set(0, 0, 0);
+          boardNextQuat.set(
+            qFinalCannon.x,
+            qFinalCannon.y,
+            qFinalCannon.z,
+            qFinalCannon.w,
+          );
+        }
       } else {
-        boardBody.angularVelocity.set(0, 0, 0);
+        const invDelta = 1 / controllerDt;
+        boardBody.velocity.set(
+          (boardPosition.x - boardPrevPos.x) * invDelta,
+          (boardPosition.y - boardPrevPos.y) * invDelta,
+          (boardPosition.z - boardPrevPos.z) * invDelta,
+        );
+
+        boardNextQuat.set(
+          qFinalCannon.x,
+          qFinalCannon.y,
+          qFinalCannon.z,
+          qFinalCannon.w,
+        );
+        boardPrevQuatInv.copy(boardPrevQuat).invert();
+        boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
+        const w = clamp(boardDeltaQuat.w, -1, 1);
+        let angle = 2 * Math.acos(w);
+        if (angle > Math.PI) {
+          angle -= 2 * Math.PI;
+        }
+        const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
+        if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
+          boardAngularAxis.set(
+            boardDeltaQuat.x / sinHalf,
+            boardDeltaQuat.y / sinHalf,
+            boardDeltaQuat.z / sinHalf,
+          );
+          const angularSpeed = angle * invDelta;
+          boardBody.angularVelocity.set(
+            boardAngularAxis.x * angularSpeed,
+            boardAngularAxis.y * angularSpeed,
+            boardAngularAxis.z * angularSpeed,
+          );
+        } else {
+          boardBody.angularVelocity.set(0, 0, 0);
+        }
       }
 
       boardBody.quaternion.copy(qFinalCannon);
       boardBody.position.copy(boardPosition);
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
+      if (useLegacyDeltaGuard) {
+        track.group.position.set(boardPosition.x, boardPosition.y, boardPosition.z);
+      }
       boardPrevPos.copy(boardPosition);
       boardPrevQuat.copy(boardNextQuat);
+    };
+
+    const updateTrackControllerLegacy = (
+      delta: number,
+      currentTuning: TuningState,
+    ): void => {
+      updateTrackController(currentTuning, delta, true);
+      localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
+      localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
+      localRenderCurrBoardPos.set(
+        boardBody.position.x,
+        boardBody.position.y,
+        boardBody.position.z,
+      );
+      localRenderCurrBoardQuat.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
+    };
+
+    const updateTrackControllerFixed = (
+      fixedDt: number,
+      currentTuning: TuningState,
+    ): void => {
+      updateTrackController(currentTuning, fixedDt, false);
+    };
+
+    const simulateFixedStep = (nowMs: number, fixedDt: number): number => {
+      const currentTuning = tuningRef.current;
+      world.gravity.set(0, -currentTuning.gravityG, 0);
+      solver.iterations = Math.round(currentTuning.physicsSolverIterations);
+      marbleBody.linearDamping = currentTuning.linearDamping;
+      marbleBody.angularDamping = currentTuning.angularDamping;
+      marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
+      marbleBodyWithCcd.ccdIterations = Math.round(currentTuning.ccdIterations);
+      contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
+      contactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
+      if (!currentTuning.legacyTrackController) {
+        updateTrackControllerFixed(fixedDt, currentTuning);
+      }
 
       if (currentTuning.enableExtraDownforce) {
         extraDownForceVec.set(0, -currentTuning.extraDownForce, 0);
@@ -1713,13 +1807,20 @@ export function HelloMarble() {
         }
       }
 
+      const useLegacyTrackController = currentTuning.legacyTrackController;
+      if (useLegacyTrackController) {
+        updateTrackControllerLegacy(delta, currentTuning);
+      }
+
       accumulator += delta;
       const maxCatchupSteps = Math.max(1, Math.round(currentTuning.physicsMaxSubSteps));
       let physicsMs = 0;
       let simulatedSteps = 0;
       while (accumulator >= TIMESTEP && simulatedSteps < maxCatchupSteps) {
-        localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
-        localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
+        if (!useLegacyTrackController) {
+          localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
+          localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
+        }
         localRenderPrevMarblePos.copy(localRenderCurrMarblePos);
         localRenderPrevMarbleQuat.copy(localRenderCurrMarbleQuat);
         physicsMs += simulateFixedStep(nowMs, TIMESTEP);
@@ -2877,6 +2978,16 @@ export function HelloMarble() {
                 }
               />
               Mobile Safe Fallback (dynamic governor)
+            </label>
+            <label className="controlLabel controlLabelCheckbox">
+              <input
+                type="checkbox"
+                checked={tuning.legacyTrackController}
+                onChange={(event) =>
+                  updateTuning("legacyTrackController", event.target.checked)
+                }
+              />
+              Legacy Track Controller
             </label>
             <label className="controlLabel controlLabelCheckbox">
               <input
