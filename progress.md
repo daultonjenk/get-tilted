@@ -50,3 +50,9 @@ v0.7.6.0 update:
 - Added `mobileSafeFallback` tuning flag to keep the old dynamic mobile governor available as an explicit fallback path instead of default behavior.
 - Corrected diagnostics to report true frame cadence (`requestAnimationFrame` interval based `Cadence Hz`) and separated CPU work timing as `CPU frame ms (EMA)` to avoid misleading 600+ FPS readings.
 - Updated tuning UI with `Mobile Safe Fallback (dynamic governor)` control and raised `Mobile Render Scale` slider max to `2.0`.
+
+v0.7.7.0 update:
+- Added local marble render smoothing for high-refresh displays while keeping physics at fixed 60 Hz for stable handling.
+- Kept gameplay authority on physics state and only smoothed the local marble mesh render path between fixed-step poses.
+- Added diagnostics for `Physics steps/frame`, `Local marble smoothing`, and `Marble lerp alpha` to validate high-Hz behavior on-device.
+- Updated app version in `client/src/buildInfo.ts` to `0.7.7.0`.
