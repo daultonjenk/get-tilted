@@ -110,10 +110,15 @@ const FINAL_WALL_HOLE_R = FINAL_WALL_HOLE_DIAMETER / 2;
 const FINAL_WALL_HOLE_Y = -FINAL_WALL_H / 2 + FINAL_WALL_HOLE_R;
 const FINAL_WALL_HOLE_X = [-2.55, 0, 2.55];
 const FINAL_WALL_CURVE_SEGMENTS = 40;
-const DEFAULT_OBSTACLE_SEED = "track-v0.7.16.0";
+const DEFAULT_OBSTACLE_SEED = "track-v0.7.17.0";
 const START_BACK_WALL_PADDING = 0.03;
 const STATIC_GAP_WALL_H = 3.1;
 const STATIC_GAP_WALL_DEPTH = 0.42;
+const STATIC_INTERSTITIAL_H = MOVING_OBSTACLE_H * 1.02;
+const STATIC_INTERSTITIAL_CENTER_W = TRACK_W / 5;
+const STATIC_INTERSTITIAL_OFFCENTER_W = TRACK_W * 0.19;
+const STATIC_INTERSTITIAL_WALL_JUT_W = TRACK_W / 6;
+const STATIC_INTERSTITIAL_L = 0.62;
 
 // Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
@@ -394,9 +399,13 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     obstacleWidth: number;
     phase?: number;
     speedHz?: number;
+    lockX?: boolean;
   }): void => {
     const bounds = createBounds(params.trackWidth, params.obstacleWidth);
     const startX = clamp(params.localPos.x, bounds.minX, bounds.maxX);
+    const lockX = params.lockX ?? (params.speedHz ?? 0) === 0;
+    const minX = lockX ? startX : bounds.minX;
+    const maxX = lockX ? startX : bounds.maxX;
     params.visual.position.set(startX, params.localPos.y, params.localPos.z);
     params.body.position.set(startX, params.localPos.y, params.localPos.z);
     params.body.quaternion.set(0, 0, 0, 1);
@@ -408,8 +417,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       body: params.body,
       baseLocalPos: new CANNON.Vec3(startX, params.localPos.y, params.localPos.z),
       localQuat: new CANNON.Quaternion(0, 0, 0, 1),
-      minX: bounds.minX,
-      maxX: bounds.maxX,
+      minX,
+      maxX,
       phase: params.phase ?? 0,
       speedHz: params.speedHz ?? 0,
     });
@@ -452,6 +461,42 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       speedHz,
     });
     movingObstacleBodies.push(body);
+  };
+
+  const addStaticBlock = (
+    localPos: THREE.Vector3,
+    obstacleWidth: number,
+    obstacleLength: number,
+  ): void => {
+    const mesh = addVisualPart(group, {
+      size: new THREE.Vector3(obstacleWidth, STATIC_INTERSTITIAL_H, obstacleLength),
+      position: localPos,
+      rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+      material: obstacleMaterial,
+      outline: { color: 0x330000, scale: 1.002 },
+    });
+
+    const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+    body.addShape(
+      new CANNON.Box(
+        new CANNON.Vec3(
+          obstacleWidth / 2,
+          STATIC_INTERSTITIAL_H / 2,
+          obstacleLength / 2,
+        ),
+      ),
+    );
+
+    registerObstacleActor({
+      visual: mesh,
+      body,
+      localPos,
+      trackWidth: TRACK_W,
+      obstacleWidth,
+      phase: 0,
+      speedHz: 0,
+      lockX: true,
+    });
   };
 
   const addGapWall = (params: {
@@ -682,9 +727,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       laneMaxScale: 0.9,
     },
   ];
+  const movingObstacleZs: number[] = [];
   for (let i = 0; i < mainObstacleCount; i += 1) {
     const obstacle = movingObstacleSpecs[i % movingObstacleSpecs.length]!;
     const z = mainStartZ + mainStep * i;
+    movingObstacleZs.push(z);
     const side = i % 2 === 0 ? -1 : 1;
     const width = obstacle.width * lerp(0.95, 1.08, obstacleRandom());
     const length = obstacle.length * lerp(0.9, 1.2, obstacleRandom());
@@ -696,6 +743,45 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       new THREE.Vector3(x, FLOOR_THICK / 2 + MOVING_OBSTACLE_H / 2, z),
       phase,
       speedHz,
+      width,
+      length,
+    );
+  }
+
+  for (let i = 0; i < movingObstacleZs.length - 1; i += 1) {
+    const z = (movingObstacleZs[i]! + movingObstacleZs[i + 1]!) / 2;
+    const pattern = i % 4;
+    const offCenterSide = i % 2 === 0 ? -1 : 1;
+
+    if (pattern === 0) {
+      const width = STATIC_INTERSTITIAL_CENTER_W * lerp(0.9, 1.08, obstacleRandom());
+      const length = STATIC_INTERSTITIAL_L * lerp(0.9, 1.15, obstacleRandom());
+      addStaticBlock(
+        new THREE.Vector3(0, FLOOR_THICK / 2 + STATIC_INTERSTITIAL_H / 2, z),
+        width,
+        length,
+      );
+      continue;
+    }
+
+    if (pattern === 1) {
+      const width = STATIC_INTERSTITIAL_OFFCENTER_W * lerp(0.9, 1.08, obstacleRandom());
+      const length = STATIC_INTERSTITIAL_L * lerp(0.88, 1.12, obstacleRandom());
+      const x = offCenterSide * lerp(TRACK_W * 0.17, TRACK_W * 0.28, obstacleRandom());
+      addStaticBlock(
+        new THREE.Vector3(x, FLOOR_THICK / 2 + STATIC_INTERSTITIAL_H / 2, z),
+        width,
+        length,
+      );
+      continue;
+    }
+
+    const side = pattern === 2 ? -1 : 1;
+    const width = STATIC_INTERSTITIAL_WALL_JUT_W * lerp(0.9, 1.08, obstacleRandom());
+    const length = STATIC_INTERSTITIAL_L * lerp(0.82, 1.1, obstacleRandom());
+    const x = side * (TRACK_W / 2 - RAIL_THICK - width / 2 - WALL_CLEARANCE * 0.45);
+    addStaticBlock(
+      new THREE.Vector3(x, FLOOR_THICK / 2 + STATIC_INTERSTITIAL_H / 2, z),
       width,
       length,
     );
