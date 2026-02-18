@@ -71,3 +71,12 @@ v0.7.10.0 update:
 - Bumped shared room cap to 4 players and app version to `0.7.10.0`.
 - Verified: `npm run test`, `npm run lint`, `npm run typecheck`, `npm run build`.
 - Note: Playwright smoke client script could not run in this environment because the `playwright` package is not installed for the skill runner script.
+
+v0.7.12.0 in progress:
+- Implemented wider authored track geometry (1.5x width baseline) and refactored obstacles to kinematic moving bodies updated each fixed step.
+- Added slow left/right oscillation for all slalom obstacles and a new larger final obstacle assembly with a bottom-center pass-through hole and side bypass paths.
+- Added track API hooks (`updateMovingObstacles`, `setMovingObstacleMaterial`) and wired moving obstacles to board contact material.
+- Removed synthetic "Default" skin option and set Gemini Light Marble as the default/fallback selection.
+- Added Options `debug` checkbox (default off, persisted) that gates visibility of the top-right debug drawer.
+- Verified quality gates and tests: `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test` all pass after the v0.7.12.0 changes.
+- Manual browser smoke for moving obstacle behavior and final-hole pass-through remains pending interactive visual playtest.

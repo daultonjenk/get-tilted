@@ -1,5 +1,5 @@
-const DEFAULT_SKIN_ID = "default-generated";
-const DEFAULT_SKIN_LABEL = "Default";
+const PREFERRED_DEFAULT_SKIN_ID = "gemini-light-marble";
+const PREFERRED_DEFAULT_SKIN_LABEL = "Gemini Light Marble";
 
 export type MarbleSkinOption = {
   id: string;
@@ -60,17 +60,18 @@ const discoveredSkins: MarbleSkinOption[] = (() => {
   return options;
 })();
 
-const skinCatalog: MarbleSkinOption[] = [
-  { id: DEFAULT_SKIN_ID, label: DEFAULT_SKIN_LABEL },
-  ...discoveredSkins,
-];
+const skinCatalog: MarbleSkinOption[] =
+  discoveredSkins.length > 0
+    ? discoveredSkins
+    : [{ id: PREFERRED_DEFAULT_SKIN_ID, label: PREFERRED_DEFAULT_SKIN_LABEL }];
 
 export function getSkinCatalog(): MarbleSkinOption[] {
   return skinCatalog;
 }
 
 export function getDefaultSkinId(): string {
-  return DEFAULT_SKIN_ID;
+  const preferred = skinCatalog.find((entry) => entry.id === PREFERRED_DEFAULT_SKIN_ID);
+  return preferred?.id ?? skinCatalog[0]!.id;
 }
 
 export function resolveSkinById(skinId: string | undefined | null): MarbleSkinOption {
@@ -79,4 +80,3 @@ export function resolveSkinById(skinId: string | undefined | null): MarbleSkinOp
   }
   return skinCatalog.find((entry) => entry.id === skinId) ?? skinCatalog[0]!;
 }
-

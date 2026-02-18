@@ -83,6 +83,7 @@ import {
   GYRO_ENABLED_STORAGE_KEY,
   MUSIC_ENABLED_STORAGE_KEY,
   SOUND_ENABLED_STORAGE_KEY,
+  DEBUG_MENU_ENABLED_STORAGE_KEY,
   COUNTDOWN_LABELS,
   RESULT_SPARKLES,
   CAMERA_PRESETS,
@@ -222,6 +223,9 @@ export function HelloMarble() {
   );
   const [soundEnabled, setSoundEnabled] = useState(() =>
     readStoredToggle(SOUND_ENABLED_STORAGE_KEY, true),
+  );
+  const [debugMenuEnabled, setDebugMenuEnabled] = useState(() =>
+    readStoredToggle(DEBUG_MENU_ENABLED_STORAGE_KEY, false),
   );
 
   const tiltStatusRef = useRef(tiltStatus);
@@ -419,6 +423,11 @@ export function HelloMarble() {
   }, [soundEnabled]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(DEBUG_MENU_ENABLED_STORAGE_KEY, debugMenuEnabled ? "1" : "0");
+  }, [debugMenuEnabled]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -496,6 +505,7 @@ export function HelloMarble() {
     const boardMat = new CANNON.Material("board");
     const marbleMat = new CANNON.Material("marble");
     boardBody.material = boardMat;
+    track.setMovingObstacleMaterial(boardMat);
 
     const contactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
       friction: tuningRef.current.contactFriction,
@@ -506,6 +516,9 @@ export function HelloMarble() {
       frictionEquationRelaxation: 5,
     });
     world.addContactMaterial(contactMat);
+    for (const body of track.bodies.slice(1)) {
+      world.addBody(body);
+    }
 
     const marbleRadius = 0.5;
     const marbleBody = new CANNON.Body({
@@ -1768,6 +1781,7 @@ export function HelloMarble() {
       if (!currentTuning.legacyTrackController) {
         updateTrackControllerFixed(fixedDt, currentTuning);
       }
+      track.updateMovingObstacles(fixedDt, boardBody.position, boardBody.quaternion);
 
       if (currentTuning.enableExtraDownforce) {
         extraDownForceVec.set(0, -currentTuning.extraDownForce, 0);
@@ -2960,6 +2974,15 @@ export function HelloMarble() {
                   onChange={(event) => setSoundEnabled(event.target.checked)}
                 />
               </label>
+              <label className="optionsToggleRow" htmlFor="optionsDebugEnabled">
+                <span>debug</span>
+                <input
+                  id="optionsDebugEnabled"
+                  type="checkbox"
+                  checked={debugMenuEnabled}
+                  onChange={(event) => setDebugMenuEnabled(event.target.checked)}
+                />
+              </label>
               {gyroEnabled ? (
                 <div className="optionsInlineButtons">
                   <button type="button" className="menuActionButton" onClick={() => void enableTiltRef.current()}>
@@ -3128,7 +3151,7 @@ export function HelloMarble() {
           Recalibrate
         </button>
       ) : null}
-      {showMultiplayerNetworkUi || gameMode === "solo" ? (
+      {(showMultiplayerNetworkUi || gameMode === "solo") && debugMenuEnabled ? (
         <DebugDrawer
           open={drawerOpen}
           onToggle={() => setDrawerOpen((open) => !open)}

@@ -45,6 +45,7 @@ export const MARBLE_SKIN_STORAGE_KEY = "get-tilted:v0.7.9.0:marble-skin";
 export const GYRO_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:gyro-enabled";
 export const MUSIC_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:music-enabled";
 export const SOUND_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:sound-enabled";
+export const DEBUG_MENU_ENABLED_STORAGE_KEY = "get-tilted:v0.7.12.0:debug-menu-enabled";
 
 export const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 export const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);
