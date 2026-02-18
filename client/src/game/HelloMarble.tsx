@@ -88,6 +88,7 @@ import {
   RESULT_SPARKLES,
   CAMERA_PRESETS,
   DRAWER_TABS,
+  DEFAULT_TUNING,
 } from "./gameConstants";
 import {
   clamp,
@@ -125,6 +126,7 @@ const WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED = 2.6;
 const WALL_SQUEEZE_CONFIRM_FRAMES = 2;
 const MOVING_OBSTACLE_CONTACT_FRICTION = 0.02;
 type MenuScreen = "main" | "options";
+type OptionsSubmenu = "root" | "controls" | "camera";
 
 function readStoredToggle(key: string, defaultValue: boolean): boolean {
   if (typeof window === "undefined") {
@@ -200,6 +202,7 @@ export function HelloMarble() {
   const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "unselected";
   const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
   const [menuScreen, setMenuScreen] = useState<MenuScreen>("main");
+  const [optionsSubmenu, setOptionsSubmenu] = useState<OptionsSubmenu>("root");
   const [roomCode, setRoomCode] = useState("");
   const [localPlayerId, setLocalPlayerId] = useState("");
   const [hostPlayerId, setHostPlayerId] = useState("");
@@ -2442,91 +2445,99 @@ export function HelloMarble() {
 
       const cameraAlpha = 1 - Math.exp(-8 * delta);
       const sideSign = currentTuning.invertCameraSide ? -1 : 1;
+      const zoomDistanceScale = 1 / clamp(currentTuning.cameraZoom, 0.7, 1.4);
+      const heightBias = currentTuning.cameraHeightBias;
+      const pitchLookAheadBias = clamp(-heightBias * 0.6, -5, 5);
+      const nextFov = clamp(currentTuning.cameraFov, 50, 90);
+      if (Math.abs(camera.fov - nextFov) > 0.01) {
+        camera.fov = nextFov;
+        camera.updateProjectionMatrix();
+      }
       switch (currentTuning.cameraPreset) {
         case "chaseCentered": {
-          cameraTarget.set(0, 7.5, marbleMesh.position.z - 10);
+          cameraTarget.set(0, 7.5 + heightBias, marbleMesh.position.z - 10 * zoomDistanceScale);
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.x = 0;
-          camera.position.y = 7.5;
-          lookTarget.set(0, LOOK_HEIGHT, marbleMesh.position.z + LOOK_AHEAD);
+          camera.position.y = 7.5 + heightBias;
+          lookTarget.set(0, LOOK_HEIGHT + heightBias * 0.15, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
           break;
         }
         case "chaseRight": {
           const side = 4 * sideSign;
-          cameraTarget.set(side, 7.5, marbleMesh.position.z - 10);
+          cameraTarget.set(side * zoomDistanceScale, 7.5 + heightBias, marbleMesh.position.z - 10 * zoomDistanceScale);
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 7.5;
-          lookTarget.set(side, LOOK_HEIGHT, marbleMesh.position.z + LOOK_AHEAD);
+          camera.position.y = 7.5 + heightBias;
+          lookTarget.set(side * zoomDistanceScale, LOOK_HEIGHT + heightBias * 0.15, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
           break;
         }
         case "chaseLeft": {
           const side = -4 * sideSign;
-          cameraTarget.set(side, 7.5, marbleMesh.position.z - 10);
+          cameraTarget.set(side * zoomDistanceScale, 7.5 + heightBias, marbleMesh.position.z - 10 * zoomDistanceScale);
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 7.5;
-          lookTarget.set(side, LOOK_HEIGHT, marbleMesh.position.z + LOOK_AHEAD);
+          camera.position.y = 7.5 + heightBias;
+          lookTarget.set(side * zoomDistanceScale, LOOK_HEIGHT + heightBias * 0.15, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
           break;
         }
         case "isoStandard": {
           cameraTarget.set(
-            marbleMesh.position.x + 4 * sideSign,
-            14,
-            marbleMesh.position.z - 8,
+            marbleMesh.position.x + 4 * sideSign * zoomDistanceScale,
+            14 + heightBias,
+            marbleMesh.position.z - 8 * zoomDistanceScale,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 14;
-          lookTarget.set(marbleMesh.position.x, 0, marbleMesh.position.z + LOOK_AHEAD);
+          camera.position.y = 14 + heightBias;
+          lookTarget.set(marbleMesh.position.x, heightBias * 0.1, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
           break;
         }
         case "isoFlatter": {
           cameraTarget.set(
-            marbleMesh.position.x + 4 * sideSign,
-            11,
-            marbleMesh.position.z - 10,
+            marbleMesh.position.x + 4 * sideSign * zoomDistanceScale,
+            11 + heightBias,
+            marbleMesh.position.z - 10 * zoomDistanceScale,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 11;
+          camera.position.y = 11 + heightBias;
           lookTarget.set(
             marbleMesh.position.x,
-            0,
-            marbleMesh.position.z + LOOK_AHEAD + 4,
+            heightBias * 0.1,
+            marbleMesh.position.z + LOOK_AHEAD + 4 + pitchLookAheadBias,
           );
           break;
         }
         case "topdownPure": {
           cameraTarget.set(
             marbleMesh.position.x,
-            TOPDOWN_HEIGHT,
-            marbleMesh.position.z - TOPDOWN_Z_OFFSET,
+            TOPDOWN_HEIGHT + heightBias,
+            marbleMesh.position.z - TOPDOWN_Z_OFFSET * zoomDistanceScale,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = TOPDOWN_HEIGHT;
-          lookTarget.set(marbleMesh.position.x, 0, marbleMesh.position.z);
+          camera.position.y = TOPDOWN_HEIGHT + heightBias;
+          lookTarget.set(marbleMesh.position.x, heightBias * 0.08, marbleMesh.position.z + pitchLookAheadBias * 0.2);
           break;
         }
         case "topdownForward": {
           cameraTarget.set(
             marbleMesh.position.x,
-            TOPDOWN_HEIGHT,
-            marbleMesh.position.z - TOPDOWN_Z_OFFSET,
+            TOPDOWN_HEIGHT + heightBias,
+            marbleMesh.position.z - TOPDOWN_Z_OFFSET * zoomDistanceScale,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = TOPDOWN_HEIGHT;
-          lookTarget.set(marbleMesh.position.x, 0, marbleMesh.position.z + 6);
+          camera.position.y = TOPDOWN_HEIGHT + heightBias;
+          lookTarget.set(marbleMesh.position.x, heightBias * 0.08, marbleMesh.position.z + 6 + pitchLookAheadBias * 0.4);
           break;
         }
         case "broadcast": {
           cameraTarget.set(
-            marbleMesh.position.x + 6 * sideSign,
-            18,
-            marbleMesh.position.z - 12,
+            marbleMesh.position.x + 6 * sideSign * zoomDistanceScale,
+            18 + heightBias,
+            marbleMesh.position.z - 12 * zoomDistanceScale,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 18;
+          camera.position.y = 18 + heightBias;
           lookTarget.set(
-            marbleMesh.position.x + sideSign,
-            0,
-            marbleMesh.position.z + LOOK_AHEAD,
+            marbleMesh.position.x + sideSign * zoomDistanceScale,
+            heightBias * 0.12,
+            marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias,
           );
           break;
         }
@@ -2729,6 +2740,9 @@ export function HelloMarble() {
     !gyroEnabled || !tiltStatus.supported || tiltStatus.permission === "denied";
   const showModePicker = gameMode === "unselected" && menuScreen === "main";
   const showOptionsMenu = gameMode === "unselected" && menuScreen === "options";
+  const showingOptionsRoot = showOptionsMenu && optionsSubmenu === "root";
+  const showingOptionsControls = showOptionsMenu && optionsSubmenu === "controls";
+  const showingOptionsCamera = showOptionsMenu && optionsSubmenu === "camera";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
   const showSoloResult = gameMode === "solo" && trialState === "finished";
   const multiplayerRaceInProgress =
@@ -2752,6 +2766,21 @@ export function HelloMarble() {
     tiltStatus.supported &&
     tiltStatus.enabled &&
     tiltStatus.permission === "granted";
+  const showMobileInRaceCameraControls =
+    gameplayUiVisible &&
+    isMobile &&
+    gyroEnabled &&
+    racePhase === "racing" &&
+    trialState !== "finished";
+  const optionsTitleLabel = (() => {
+    if (showingOptionsRoot) {
+      return "Options";
+    }
+    if (showingOptionsControls) {
+      return "Controls";
+    }
+    return "Camera";
+  })();
   const creatingLobby =
     gameMode === "multiplayer" &&
     !roomCode &&
@@ -2891,6 +2920,32 @@ export function HelloMarble() {
       return { ...prev, [key]: value };
     });
   };
+
+  const cycleCameraPreset = () => {
+    const currentIndex = CAMERA_PRESETS.indexOf(tuning.cameraPreset);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % CAMERA_PRESETS.length : 0;
+    updateTuning("cameraPreset", CAMERA_PRESETS[nextIndex]!);
+  };
+
+  const resetCameraOptionsToDefault = () => {
+    updateTuning("cameraPreset", DEFAULT_TUNING.cameraPreset);
+    updateTuning("cameraZoom", DEFAULT_TUNING.cameraZoom);
+    updateTuning("cameraFov", DEFAULT_TUNING.cameraFov);
+    updateTuning("cameraHeightBias", DEFAULT_TUNING.cameraHeightBias);
+  };
+
+  const handleOptionsBack = () => {
+    if (optionsSubmenu === "root") {
+      setMenuScreen("main");
+      return;
+    }
+    setOptionsSubmenu("root");
+  };
+
+  const gyroPermissionWorking =
+    tiltStatus.supported &&
+    tiltStatus.permission === "granted" &&
+    tiltStatus.enabled;
 
   const copySettings = async () => {
     const payload = JSON.stringify(tuning, null, 2);
@@ -3050,6 +3105,7 @@ export function HelloMarble() {
       raceClientRef.current?.createRoom();
     }
     if (nextMode === "unselected") {
+      setOptionsSubmenu("root");
       setMenuScreen("main");
     }
     setRacePhase("waiting");
@@ -3133,7 +3189,10 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
-                onClick={() => setMenuScreen("options")}
+                onClick={() => {
+                  setOptionsSubmenu("root");
+                  setMenuScreen("options");
+                }}
               >
                 Options
               </button>
@@ -3148,11 +3207,11 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="lobbyBackButton optionsBackButton"
-                onClick={() => setMenuScreen("main")}
+                onClick={handleOptionsBack}
               >
                 {"< Back"}
               </button>
-              <p className="raceOverlayTitle optionsTitle">Options</p>
+              <p className="raceOverlayTitle optionsTitle">{optionsTitleLabel}</p>
             </div>
             <div className="optionsPanel">
               <label className="optionsField" htmlFor="optionsPlayerName">
@@ -3182,15 +3241,139 @@ export function HelloMarble() {
                   ))}
                 </select>
               </label>
-              <label className="optionsToggleRow" htmlFor="optionsGyroEnabled">
-                <span>Gyro Controls</span>
-                <input
-                  id="optionsGyroEnabled"
-                  type="checkbox"
-                  checked={gyroEnabled}
-                  onChange={(event) => handleGyroSettingChange(event.target.checked)}
-                />
-              </label>
+              {showingOptionsRoot ? (
+                <div className="optionsInlineButtons">
+                  <button
+                    type="button"
+                    className="menuActionButton optionsMenuButton"
+                    onClick={() => setOptionsSubmenu("controls")}
+                  >
+                    Controls
+                  </button>
+                  <button
+                    type="button"
+                    className="menuActionButton optionsMenuButton"
+                    onClick={() => setOptionsSubmenu("camera")}
+                  >
+                    Camera
+                  </button>
+                </div>
+              ) : null}
+              {showingOptionsControls ? (
+                <div className="optionsSubmenuPanel">
+                  <label className="optionsToggleRow" htmlFor="optionsGyroEnabled">
+                    <span>Gyro Enabled</span>
+                    <input
+                      id="optionsGyroEnabled"
+                      type="checkbox"
+                      checked={gyroEnabled}
+                      onChange={(event) => handleGyroSettingChange(event.target.checked)}
+                    />
+                  </label>
+                  <label className="optionsToggleRow" htmlFor="optionsMirrorX">
+                    <span>Mirror X</span>
+                    <input
+                      id="optionsMirrorX"
+                      type="checkbox"
+                      checked={tuning.invertTiltX}
+                      onChange={(event) => updateTuning("invertTiltX", event.target.checked)}
+                    />
+                  </label>
+                  <label className="optionsToggleRow" htmlFor="optionsMirrorY">
+                    <span>Mirror Y</span>
+                    <input
+                      id="optionsMirrorY"
+                      type="checkbox"
+                      checked={tuning.invertTiltZ}
+                      onChange={(event) => updateTuning("invertTiltZ", event.target.checked)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="menuActionButton optionsSubmenuActionButton"
+                    onClick={() => calibrateTiltRef.current()}
+                  >
+                    Calibrate Gyro
+                  </button>
+                  <button
+                    type="button"
+                    className="menuActionButton optionsSubmenuActionButton"
+                    onClick={() => void enableTiltRef.current()}
+                  >
+                    Gyro Permissions: {gyroPermissionWorking ? "WORKING" : "NOT WORKING"}
+                  </button>
+                </div>
+              ) : null}
+              {showingOptionsCamera ? (
+                <div className="optionsSubmenuPanel">
+                  <label className="optionsField" htmlFor="optionsCameraPreset">
+                    <span className="optionsFieldLabel">Camera Type</span>
+                    <select
+                      id="optionsCameraPreset"
+                      className="menuSelect"
+                      value={tuning.cameraPreset}
+                      onChange={(event) =>
+                        updateTuning("cameraPreset", event.target.value as CameraPresetId)
+                      }
+                    >
+                      {CAMERA_PRESETS.map((preset) => (
+                        <option key={preset} value={preset}>
+                          {getCameraLabel(preset)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="optionsSliderField" htmlFor="optionsCameraZoom">
+                    <span className="optionsFieldLabel">
+                      Camera Zoom Level ({tuning.cameraZoom.toFixed(2)})
+                    </span>
+                    <input
+                      id="optionsCameraZoom"
+                      type="range"
+                      min={0.7}
+                      max={1.4}
+                      step={0.01}
+                      value={tuning.cameraZoom}
+                      onChange={(event) => updateTuning("cameraZoom", Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="optionsSliderField" htmlFor="optionsCameraFov">
+                    <span className="optionsFieldLabel">FOV ({Math.round(tuning.cameraFov)})</span>
+                    <input
+                      id="optionsCameraFov"
+                      type="range"
+                      min={50}
+                      max={90}
+                      step={1}
+                      value={tuning.cameraFov}
+                      onChange={(event) => updateTuning("cameraFov", Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="optionsSliderField" htmlFor="optionsCameraHeight">
+                    <span className="optionsFieldLabel">
+                      Camera Height ({tuning.cameraHeightBias.toFixed(1)})
+                    </span>
+                    <input
+                      id="optionsCameraHeight"
+                      type="range"
+                      min={-6}
+                      max={8}
+                      step={0.1}
+                      value={tuning.cameraHeightBias}
+                      onChange={(event) =>
+                        updateTuning("cameraHeightBias", Number(event.target.value))
+                      }
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="menuActionButton optionsSubmenuActionButton"
+                    onClick={resetCameraOptionsToDefault}
+                  >
+                    Reset to Default
+                  </button>
+                </div>
+              ) : null}
               <label className="optionsToggleRow" htmlFor="optionsMusicEnabled">
                 <span>Music</span>
                 <input
@@ -3218,23 +3401,6 @@ export function HelloMarble() {
                   onChange={(event) => setDebugMenuEnabled(event.target.checked)}
                 />
               </label>
-              {gyroEnabled ? (
-                <div className="optionsInlineButtons">
-                  <button type="button" className="menuActionButton" onClick={() => void enableTiltRef.current()}>
-                    Enable Tilt Controls
-                  </button>
-                  <button type="button" className="menuActionButton" onClick={() => calibrateTiltRef.current()}>
-                    Calibrate
-                  </button>
-                </div>
-              ) : null}
-              <button
-                type="button"
-                className="menuActionButton optionsReturnMainMenuButton"
-                onClick={returnToMainMenu}
-              >
-                Return to Main Menu
-              </button>
             </div>
           </div>
         </div>
@@ -3404,6 +3570,44 @@ export function HelloMarble() {
             {countdownToken}
           </div>
         </div>
+      ) : null}
+      {showMobileInRaceCameraControls ? (
+        <>
+          <div className="inRaceCameraControls" aria-hidden={false}>
+            <div className="inRaceCameraSlider inRaceCameraSliderLeft">
+              <p>Zoom</p>
+              <input
+                type="range"
+                min={0.7}
+                max={1.4}
+                step={0.01}
+                value={tuning.cameraZoom}
+                onChange={(event) => updateTuning("cameraZoom", Number(event.target.value))}
+                aria-label="Camera zoom"
+              />
+            </div>
+            <div className="inRaceCameraSlider inRaceCameraSliderRight">
+              <p>Height</p>
+              <input
+                type="range"
+                min={-6}
+                max={8}
+                step={0.1}
+                value={tuning.cameraHeightBias}
+                onChange={(event) => updateTuning("cameraHeightBias", Number(event.target.value))}
+                aria-label="Camera height and angle"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="mobileCycleCameraButton"
+            onClick={cycleCameraPreset}
+            aria-label="Cycle camera type"
+          >
+            C
+          </button>
+        </>
       ) : null}
       {showFloatingGyroCalibrateButton ? (
         <button

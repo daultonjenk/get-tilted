@@ -79,6 +79,9 @@ export const DEFAULT_TUNING: TuningState = {
   physicsSolverIterations: 24,
   ccdSpeedThreshold: 0.75,
   ccdIterations: 20,
+  cameraZoom: 1,
+  cameraFov: 65,
+  cameraHeightBias: 0,
 };
 
 export const CAMERA_PRESETS: CameraPresetId[] = [

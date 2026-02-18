@@ -41,6 +41,9 @@ export type TuningState = {
   physicsSolverIterations: number;
   ccdSpeedThreshold: number;
   ccdIterations: number;
+  cameraZoom: number;
+  cameraFov: number;
+  cameraHeightBias: number;
 };
 
 export type TrialState = "idle" | "running" | "finished";

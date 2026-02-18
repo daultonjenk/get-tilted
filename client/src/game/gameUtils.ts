@@ -154,6 +154,15 @@ export function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.ccdIterations === "number") {
     base.ccdIterations = Math.round(clamp(value.ccdIterations, 1, 40));
   }
+  if (typeof value.cameraZoom === "number") {
+    base.cameraZoom = clamp(value.cameraZoom, 0.7, 1.4);
+  }
+  if (typeof value.cameraFov === "number") {
+    base.cameraFov = clamp(value.cameraFov, 50, 90);
+  }
+  if (typeof value.cameraHeightBias === "number") {
+    base.cameraHeightBias = clamp(value.cameraHeightBias, -6, 8);
+  }
 
   return base;
 }
