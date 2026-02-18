@@ -544,7 +544,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       holePath.moveTo(hole.x - halfHoleW, -halfH);
       holePath.lineTo(hole.x + halfHoleW, -halfH);
       holePath.lineTo(hole.x + halfHoleW, capCenterY);
-      holePath.absarc(hole.x, capCenterY, halfHoleW, 0, Math.PI, true);
+      holePath.absarc(hole.x, capCenterY, halfHoleW, 0, Math.PI, false);
       holePath.closePath();
       wallShape.holes.push(holePath);
     }
