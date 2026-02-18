@@ -32,6 +32,7 @@ type PartSpec = {
   rotation: THREE.Euler;
   material: THREE.Material;
   uvScale?: [number, number];
+  uvProjection?: "default" | "floorSegment";
   outline?: {
     color: number;
     scale?: number;
@@ -77,12 +78,52 @@ function createTrackSurfaceTexture(): THREE.Texture {
   return texture;
 }
 
+function applyFloorSegmentUv(geometry: THREE.BoxGeometry, size: THREE.Vector3): void {
+  const position = geometry.getAttribute("position");
+  const normal = geometry.getAttribute("normal");
+  const uv = geometry.getAttribute("uv");
+  const sideTileWorldUnits = 2;
+
+  for (let i = 0; i < uv.count; i += 1) {
+    const px = position.getX(i);
+    const py = position.getY(i);
+    const pz = position.getZ(i);
+    const nx = Math.abs(normal.getX(i));
+    const ny = Math.abs(normal.getY(i));
+    const nz = Math.abs(normal.getZ(i));
+
+    if (ny >= nx && ny >= nz) {
+      // Top/bottom faces: stretch one texture across the whole floor segment.
+      uv.setXY(i, px / size.x + 0.5, pz / size.z + 0.5);
+      continue;
+    }
+
+    if (nx >= nz) {
+      // Side faces: tile by world units so edge grain doesn't get over-stretched.
+      uv.setXY(
+        i,
+        (pz + size.z / 2) / sideTileWorldUnits,
+        (py + size.y / 2) / sideTileWorldUnits,
+      );
+      continue;
+    }
+
+    uv.setXY(
+      i,
+      (px + size.x / 2) / sideTileWorldUnits,
+      (py + size.y / 2) / sideTileWorldUnits,
+    );
+  }
+  uv.needsUpdate = true;
+}
+
 function addVisualPart(group: THREE.Group, spec: PartSpec): void {
-  const { size, position, rotation, material, uvScale, outline } = spec;
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size.x, size.y, size.z),
-    material,
-  );
+  const { size, position, rotation, material, uvScale, uvProjection, outline } = spec;
+  const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+  const mesh = new THREE.Mesh(geometry, material);
+  if (uvProjection === "floorSegment") {
+    applyFloorSegmentUv(geometry, size);
+  }
   if (uvScale) {
     const geom = mesh.geometry;
     const uv = geom.getAttribute("uv");
@@ -195,7 +236,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       position: floorCenter,
       rotation,
       material: floorMaterial,
-      uvScale: [width, length],
+      uvProjection: "floorSegment",
     });
 
     lowestFloorY = Math.min(lowestFloorY, floorCenter.y);
