@@ -104,7 +104,7 @@ const MOVING_OBSTACLE_MEDIUM_L = 1.1 * MOVING_OBSTACLE_LENGTH_SCALE;
 
 const FINAL_WALL_W = 11.2;
 const FINAL_WALL_H = 3.6;
-const FINAL_WALL_DEPTH = 0.52;
+const FINAL_WALL_DEPTH = 0.13;
 const FINAL_WALL_HOLE_DIAMETER = MARBLE_RADIUS * 2 * 1.15;
 const FINAL_WALL_HOLE_R = FINAL_WALL_HOLE_DIAMETER / 2;
 const FINAL_WALL_HOLE_Y = -FINAL_WALL_H / 2 + FINAL_WALL_HOLE_R;
@@ -113,7 +113,7 @@ const FINAL_WALL_CURVE_SEGMENTS = 40;
 const DEFAULT_OBSTACLE_SEED = "track-v0.7.17.0";
 const START_BACK_WALL_PADDING = 0.03;
 const STATIC_GAP_WALL_H = 3.1;
-const STATIC_GAP_WALL_DEPTH = 0.42;
+const STATIC_GAP_WALL_DEPTH = 0.105;
 const STATIC_INTERSTITIAL_H = MOVING_OBSTACLE_H * 1.02;
 const STATIC_INTERSTITIAL_CENTER_W = TRACK_W / 5;
 const STATIC_INTERSTITIAL_OFFCENTER_W = TRACK_W * 0.19;
@@ -506,6 +506,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     depth: number;
     trackWidth: number;
     circleHoles?: Array<{ x: number; y: number; r: number }>;
+    bottomOpenCircleHoles?: Array<{ x: number; y: number; r: number }>;
     bottomSlots?: Array<{ x: number; width: number; height: number }>;
   }): void => {
     const y = FLOOR_THICK / 2 + params.height / 2;
@@ -521,6 +522,16 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     for (const hole of params.circleHoles ?? []) {
       const holePath = new THREE.Path();
       holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI * 2, false);
+      wallShape.holes.push(holePath);
+    }
+
+    for (const hole of params.bottomOpenCircleHoles ?? []) {
+      const holePath = new THREE.Path();
+      holePath.moveTo(hole.x - hole.r, -halfH);
+      holePath.lineTo(hole.x + hole.r, -halfH);
+      holePath.lineTo(hole.x + hole.r, hole.y);
+      holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI, true);
+      holePath.closePath();
       wallShape.holes.push(holePath);
     }
 
@@ -577,7 +588,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       height: FINAL_WALL_H,
       depth: FINAL_WALL_DEPTH,
       trackWidth: FINISH_WIDTH,
-      circleHoles: FINAL_WALL_HOLE_X.map((x) => ({ x, y: FINAL_WALL_HOLE_Y, r: FINAL_WALL_HOLE_R })),
+      bottomOpenCircleHoles: FINAL_WALL_HOLE_X.map((x) => ({
+        x,
+        y: FINAL_WALL_HOLE_Y,
+        r: FINAL_WALL_HOLE_R,
+      })),
     });
   };
 
@@ -794,7 +809,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     height: STATIC_GAP_WALL_H,
     depth: STATIC_GAP_WALL_DEPTH,
     trackWidth: TRACK_W,
-    circleHoles: [
+    bottomOpenCircleHoles: [
       {
         x: -1.45,
         y: -STATIC_GAP_WALL_H / 2 + MARBLE_RADIUS * 1.16,
