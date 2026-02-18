@@ -60,7 +60,7 @@ export const DEFAULT_TUNING: TuningState = {
   tiltFilterTau: 0.1,
   linearDamping: 0.2,
   angularDamping: 0.50,
-  cameraPreset: "chaseCentered",
+  cameraPreset: "broadcast",
   bounce: 0,
   contactFriction: 0.84,
   contactRestitution: 0,
