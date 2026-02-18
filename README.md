@@ -64,9 +64,10 @@ Tilt permissions are introduced in v0.3. iOS Safari requires a user gesture befo
 
 ## Custom marble skins
 
-Drop custom skin files into:
+Final placement (required):
 
-- `client/src/assets/skins/`
+- Put completed skin files in `client/src/assets/skins/`.
+- Example: `client/src/assets/skins/my-team-skin.png`
 
 Supported formats:
 
@@ -78,11 +79,16 @@ Supported formats:
 Texture sizing and quality:
 
 - Use an exact `2:1` aspect ratio (equirectangular sphere map).
+- Valid examples: `1024x512`, `2048x1024`, `4096x2048`.
+- Invalid examples: `500x400`, `600x200` (not `2:1`).
 - Recommended: `2048x1024` for crisp details on high-density screens.
-- Minimum: `1024x512`.
-- DPI metadata does not affect in-game sharpness in WebGL; pixel dimensions do.
+- Minimum recommended: `1024x512`.
+- DPI/PPI metadata does not control WebGL sharpness; pixel dimensions do.
+- If your art tool asks for DPI, use `300 DPI` for print/editor consistency, but runtime quality still depends on pixel size.
 - Export in sRGB color space.
 - Prefer lossless PNG, or high-quality lossy export (`JPEG/WebP` quality `90+`).
+- File size target: keep each skin at or below `2 MB` for fast loads on phones.
+- Soft upper bound: avoid files above `8 MB` (not blocked by code, but bad for load time/memory).
 
 Authoring guidance:
 
@@ -96,6 +102,12 @@ How to use in game:
 2. Restart `npm run dev` (or rebuild) so Vite re-indexes new files.
 3. Open the main title screen and use the `Marble Skin` dropdown.
 4. Skin choice is saved locally and synced to other players in multiplayer.
+
+Default skin reference PNG:
+
+- `output/skins/default-marble-reference-512x256.png`
+- This is the built-in marble pattern exported at `512x256` (exact `2:1` map).
+- Use it as a starting template, then save your edited version into `client/src/assets/skins/`.
 
 Template preview PDF:
 

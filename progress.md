@@ -57,3 +57,8 @@ v0.7.9.0 update:
 - Synced skin selection through multiplayer metadata (`room:join` and `race:hello`) and render remote ghost marbles with per-player skins.
 - Added `scripts/generate_marble_skin_pdf.py` and generated `output/pdf/marble-skin-template.pdf` (template + wrap preview pages).
 - Updated root `README.md` with skin file requirements (2:1 ratio, recommended dimensions, color/export guidance, and usage flow).
+
+v0.7.9.1 update:
+- Expanded `README.md` skin docs with explicit valid/invalid dimensions, DPI behavior, and concrete file-size guidance.
+- Added `scripts/export_default_marble_skin_png.py` to export the built-in marble texture reference.
+- Generated `output/skins/default-marble-reference-512x256.png` for user-facing reference/editing.
