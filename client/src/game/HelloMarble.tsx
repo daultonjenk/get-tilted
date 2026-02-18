@@ -1730,15 +1730,32 @@ export function HelloMarble() {
         accumulator = 0;
       }
 
-      const renderAlpha = currentTuning.localRenderInterpolation
+      const marbleRenderAlpha = currentTuning.localMarbleRenderInterpolation
         ? clamp(accumulator / TIMESTEP, 0, 1)
         : 1;
-      tempVecA.copy(localRenderPrevBoardPos).lerp(localRenderCurrBoardPos, renderAlpha);
-      tempQuatA.copy(localRenderPrevBoardQuat).slerp(localRenderCurrBoardQuat, renderAlpha);
-      track.group.position.copy(tempVecA);
-      track.group.quaternion.copy(tempQuatA);
-      tempVecB.copy(localRenderPrevMarblePos).lerp(localRenderCurrMarblePos, renderAlpha);
-      tempQuatB.copy(localRenderPrevMarbleQuat).slerp(localRenderCurrMarbleQuat, renderAlpha);
+      const trackRenderAlpha = currentTuning.localTrackRenderInterpolation
+        ? clamp(accumulator / TIMESTEP, 0, 1)
+        : 1;
+      if (currentTuning.localTrackRenderInterpolation) {
+        tempVecA.copy(localRenderPrevBoardPos).lerp(localRenderCurrBoardPos, trackRenderAlpha);
+        tempQuatA.copy(localRenderPrevBoardQuat).slerp(localRenderCurrBoardQuat, trackRenderAlpha);
+        track.group.position.copy(tempVecA);
+        track.group.quaternion.copy(tempQuatA);
+      } else {
+        track.group.position.set(
+          boardBody.position.x,
+          boardBody.position.y,
+          boardBody.position.z,
+        );
+        track.group.quaternion.set(
+          boardBody.quaternion.x,
+          boardBody.quaternion.y,
+          boardBody.quaternion.z,
+          boardBody.quaternion.w,
+        );
+      }
+      tempVecB.copy(localRenderPrevMarblePos).lerp(localRenderCurrMarblePos, marbleRenderAlpha);
+      tempQuatB.copy(localRenderPrevMarbleQuat).slerp(localRenderCurrMarbleQuat, marbleRenderAlpha);
       marbleMesh.position.copy(tempVecB);
       marbleMesh.quaternion.copy(tempQuatB);
 
@@ -2864,12 +2881,22 @@ export function HelloMarble() {
             <label className="controlLabel controlLabelCheckbox">
               <input
                 type="checkbox"
-                checked={tuning.localRenderInterpolation}
+                checked={tuning.localMarbleRenderInterpolation}
                 onChange={(event) =>
-                  updateTuning("localRenderInterpolation", event.target.checked)
+                  updateTuning("localMarbleRenderInterpolation", event.target.checked)
                 }
               />
-              Local Render Interpolation
+              Marble Render Interpolation
+            </label>
+            <label className="controlLabel controlLabelCheckbox">
+              <input
+                type="checkbox"
+                checked={tuning.localTrackRenderInterpolation}
+                onChange={(event) =>
+                  updateTuning("localTrackRenderInterpolation", event.target.checked)
+                }
+              />
+              Track Render Interpolation
             </label>
             <label className="controlLabel">
               Mobile Debug Hz

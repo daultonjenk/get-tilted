@@ -33,7 +33,8 @@ export type TuningState = {
   extraDownForce: number;
   renderScaleMobile: number;
   mobileSafeFallback: boolean;
-  localRenderInterpolation: boolean;
+  localMarbleRenderInterpolation: boolean;
+  localTrackRenderInterpolation: boolean;
   debugUpdateHzMobile: number;
   physicsMaxSubSteps: number;
   physicsSolverIterations: number;

@@ -63,7 +63,9 @@ export function sanitizeTuning(input: unknown): TuningState {
     return base;
   }
 
-  const value = input as Partial<TuningState>;
+  const value = input as Partial<TuningState> & {
+    localRenderInterpolation?: unknown;
+  };
 
   if (typeof value.gravityG === "number") base.gravityG = clamp(value.gravityG, 8, 24);
   if (typeof value.tiltStrength === "number") {
@@ -124,7 +126,15 @@ export function sanitizeTuning(input: unknown): TuningState {
     base.mobileSafeFallback = value.mobileSafeFallback;
   }
   if (typeof value.localRenderInterpolation === "boolean") {
-    base.localRenderInterpolation = value.localRenderInterpolation;
+    // Backward compatibility for old presets/imports.
+    base.localMarbleRenderInterpolation = value.localRenderInterpolation;
+    base.localTrackRenderInterpolation = value.localRenderInterpolation;
+  }
+  if (typeof value.localMarbleRenderInterpolation === "boolean") {
+    base.localMarbleRenderInterpolation = value.localMarbleRenderInterpolation;
+  }
+  if (typeof value.localTrackRenderInterpolation === "boolean") {
+    base.localTrackRenderInterpolation = value.localTrackRenderInterpolation;
   }
   if (typeof value.debugUpdateHzMobile === "number") {
     base.debugUpdateHzMobile = clamp(value.debugUpdateHzMobile, 2, 15);
