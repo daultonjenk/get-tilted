@@ -9,6 +9,7 @@ import {
 export type RacePlayer = {
   playerId: string;
   name?: string;
+  skinId?: string;
 };
 
 export type RemoteRaceState = {
@@ -73,6 +74,7 @@ export class RaceClient {
 
   private playerId = "";
   private preferredName: string | undefined;
+  private preferredSkinId: string | undefined;
 
   private readonly messageListeners = new Set<MessageListener>();
 
@@ -100,6 +102,7 @@ export class RaceClient {
     | {
         roomCode: string;
         name?: string;
+        skinId?: string;
         handshakeSent: boolean;
       }
     | null = null;
@@ -152,6 +155,7 @@ export class RaceClient {
         this.pendingJoin = {
           roomCode: message.payload.roomCode,
           name: this.preferredName,
+          skinId: this.preferredSkinId,
           handshakeSent: false,
         };
         this.startJoinAttempt(message.payload.roomCode);
@@ -220,6 +224,17 @@ export class RaceClient {
     }
   }
 
+  setPreferredSkinId(skinId?: string): void {
+    const normalized = skinId?.trim();
+    this.preferredSkinId = normalized ? normalized : undefined;
+    if (this.pendingJoin) {
+      this.pendingJoin.skinId = this.preferredSkinId;
+    }
+    if (this.roomCode && this.ws.getStatus() === "connected") {
+      this.sendHello(this.preferredName, this.roomCode, this.preferredSkinId);
+    }
+  }
+
   createRoom(): void {
     this.resetRaceStateSeq();
     this.pendingCreateRoom = true;
@@ -233,18 +248,24 @@ export class RaceClient {
     this.flushPendingActions();
   }
 
-  joinRoom(roomCode: string, name?: string): void {
+  joinRoom(roomCode: string, name?: string, skinId?: string): void {
     const normalized = roomCode.trim().toUpperCase();
     const resolvedName = name ?? this.preferredName;
+    const resolvedSkinId = skinId ?? this.preferredSkinId;
     this.resetRaceStateSeq();
     this.roomCode = normalized;
-    this.pendingJoin = { roomCode: normalized, name: resolvedName, handshakeSent: false };
+    this.pendingJoin = {
+      roomCode: normalized,
+      name: resolvedName,
+      skinId: resolvedSkinId,
+      handshakeSent: false,
+    };
     this.startJoinAttempt(normalized);
     this.ws.connect(this.getRoomSocketUrl(normalized));
     this.flushPendingActions();
   }
 
-  sendHello(name?: string, roomCode = this.roomCode): void {
+  sendHello(name?: string, roomCode = this.roomCode, skinId = this.preferredSkinId): void {
     if (!roomCode) {
       return;
     }
@@ -252,6 +273,7 @@ export class RaceClient {
       roomCode,
       playerId: this.playerId || undefined,
       name,
+      skinId,
     });
   }
 
@@ -410,8 +432,9 @@ export class RaceClient {
     this.ws.send("room:join", {
       roomCode: this.pendingJoin.roomCode,
       name: this.pendingJoin.name,
+      skinId: this.pendingJoin.skinId,
     });
-    this.sendHello(this.pendingJoin.name, this.pendingJoin.roomCode);
+    this.sendHello(this.pendingJoin.name, this.pendingJoin.roomCode, this.pendingJoin.skinId);
 
     if (!this.joinAttemptState || this.joinAttemptState.roomCode !== this.pendingJoin.roomCode) {
       this.startJoinAttempt(this.pendingJoin.roomCode);

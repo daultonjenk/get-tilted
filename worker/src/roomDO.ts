@@ -15,6 +15,7 @@ type SocketWithMeta = WebSocket & {
   roomCode?: string | null;
   playerId?: string;
   playerName?: string;
+  playerSkinId?: string;
 };
 
 type RaceResultPayload = MessagePayloadMap["race:result"];
@@ -134,6 +135,7 @@ export class RoomDO {
             server.playerId = this.createPlayerId();
           }
           server.playerName = parsed.msg.payload.name;
+          server.playerSkinId = parsed.msg.payload.skinId;
           server.roomCode = normalized;
           this.broadcastRoomState();
           this.broadcastHelloAck();
@@ -157,6 +159,7 @@ export class RoomDO {
             return;
           }
           server.playerName = parsed.msg.payload.name;
+          server.playerSkinId = parsed.msg.payload.skinId;
           this.broadcastHelloAck();
           return;
         }
@@ -356,13 +359,17 @@ export class RoomDO {
     return count;
   }
 
-  private getPlayers(): Array<{ playerId: string; name?: string }> {
-    const players: Array<{ playerId: string; name?: string }> = [];
+  private getPlayers(): Array<{ playerId: string; name?: string; skinId?: string }> {
+    const players: Array<{ playerId: string; name?: string; skinId?: string }> = [];
     for (const socket of this.sockets) {
       if (!socket.playerId) {
         continue;
       }
-      players.push({ playerId: socket.playerId, name: socket.playerName });
+      players.push({
+        playerId: socket.playerId,
+        name: socket.playerName,
+        skinId: socket.playerSkinId,
+      });
     }
     return players;
   }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
+import type { ChangeEvent, MouseEvent } from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { createTrack } from "./track/createTrack";
@@ -19,7 +19,11 @@ import {
   type TiltState,
 } from "./input/tilt";
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
-import { RaceClient, type JoinTimingSnapshot } from "../net/raceClient";
+import {
+  RaceClient,
+  type JoinTimingSnapshot,
+  type RacePlayer,
+} from "../net/raceClient";
 import { APP_VERSION, BUILD_ID } from "../buildInfo";
 import type { TypedMessage } from "@get-tilted/shared-protocol";
 import {
@@ -75,6 +79,7 @@ import {
   BEST_TIME_STORAGE_KEY,
   DEV_JOIN_HOST_KEY,
   PLAYER_NAME_STORAGE_KEY,
+  MARBLE_SKIN_STORAGE_KEY,
   COUNTDOWN_LABELS,
   RESULT_SPARKLES,
   CAMERA_PRESETS,
@@ -96,10 +101,14 @@ import {
   acquireSnapshot,
   releaseSnapshot,
 } from "./gameUtils";
+import {
+  getDefaultSkinId,
+  getSkinCatalog,
+  resolveSkinById,
+} from "./skins";
 
-
-
-
+const skinCatalog = getSkinCatalog();
+const defaultSkinId = getDefaultSkinId();
 
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -165,9 +174,7 @@ export function HelloMarble() {
   const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
   const [roomCode, setRoomCode] = useState("");
   const [localPlayerId, setLocalPlayerId] = useState("");
-  const [playersInRoom, setPlayersInRoom] = useState<Array<{ playerId: string; name?: string }>>(
-    [],
-  );
+  const [playersInRoom, setPlayersInRoom] = useState<RacePlayer[]>([]);
   const [readyPlayerIds, setReadyPlayerIds] = useState<string[]>([]);
   const [localReady, setLocalReady] = useState(false);
   const [racePhase, setRacePhase] = useState<RacePhase>("waiting");
@@ -184,12 +191,18 @@ export function HelloMarble() {
     if (typeof window === "undefined") return "";
     return sanitizePlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "");
   });
+  const [selectedMarbleSkinId, setSelectedMarbleSkinId] = useState(() => {
+    if (typeof window === "undefined") return defaultSkinId;
+    const stored = window.localStorage.getItem(MARBLE_SKIN_STORAGE_KEY);
+    return resolveSkinById(stored).id;
+  });
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
   const tuningRef = useRef(tuning);
   const raceClientRef = useRef<RaceClient | null>(null);
   const playerNameRef = useRef(playerNameInput);
+  const selectedMarbleSkinIdRef = useRef(selectedMarbleSkinId);
   const localPlayerIdRef = useRef(localPlayerId);
   const autoJoinRoomCodeRef = useRef(autoJoinRoomCode);
   const gameModeRef = useRef(gameMode);
@@ -205,6 +218,7 @@ export function HelloMarble() {
   const soloStartSequenceRef = useRef(0);
   const freezeMarbleRef = useRef<() => void>(() => {});
   const unfreezeMarbleRef = useRef<() => void>(() => {});
+  const applyLocalSkinRef = useRef<(skinId: string) => void>(() => {});
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -292,6 +306,14 @@ export function HelloMarble() {
   }, [playerNameInput]);
 
   useEffect(() => {
+    selectedMarbleSkinIdRef.current = selectedMarbleSkinId;
+    raceClientRef.current?.setPreferredSkinId(
+      selectedMarbleSkinId === defaultSkinId ? undefined : selectedMarbleSkinId,
+    );
+    applyLocalSkinRef.current(selectedMarbleSkinId);
+  }, [selectedMarbleSkinId]);
+
+  useEffect(() => {
     gameModeRef.current = gameMode;
   }, [gameMode]);
 
@@ -339,6 +361,15 @@ export function HelloMarble() {
     }
     window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, sanitized);
   }, [playerNameInput]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (selectedMarbleSkinId === defaultSkinId) {
+      window.localStorage.removeItem(MARBLE_SKIN_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(MARBLE_SKIN_STORAGE_KEY, selectedMarbleSkinId);
+  }, [selectedMarbleSkinId]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -448,7 +479,31 @@ export function HelloMarble() {
 
     const marbleSegments = 32;
     const ghostSegments = 24;
+    const textureLoader = new THREE.TextureLoader();
+    const configureSkinTexture = (texture: THREE.Texture): THREE.Texture => {
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 8;
+      texture.needsUpdate = true;
+      return texture;
+    };
+    const loadTextureForSkinId = (skinId: string): Promise<THREE.Texture | null> => {
+      const resolved = resolveSkinById(skinId);
+      if (!resolved.url) {
+        return Promise.resolve(null);
+      }
+      return new Promise((resolve) => {
+        textureLoader.load(
+          resolved.url!,
+          (texture) => resolve(configureSkinTexture(texture)),
+          undefined,
+          () => resolve(null),
+        );
+      });
+    };
     const marbleTexture = createMarbleTexture();
+    let localSkinRequestSeq = 0;
     const marbleMesh = new THREE.Mesh(
       new THREE.SphereGeometry(marbleRadius, marbleSegments, marbleSegments),
       new THREE.MeshStandardMaterial({
@@ -459,11 +514,6 @@ export function HelloMarble() {
       }),
     );
     scene.add(marbleMesh);
-    const ghostMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff9e80,
-      transparent: true,
-      opacity: 0.6,
-    });
     const ghostPlayers = new Map<string, GhostRenderState>();
     let lastRaceSendAt = 0;
     let lastSentRaceStateT = 0;
@@ -549,6 +599,7 @@ export function HelloMarble() {
     let latestVerticalSpeed = 0;
     let latestPenetrationDepth = 0;
     let accumulator = 0;
+    let disposed = false;
 
     const syncLocalRenderSnapshotsFromBodies = () => {
       localRenderPrevBoardPos.set(
@@ -636,15 +687,24 @@ export function HelloMarble() {
       if (existing) {
         return existing;
       }
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xff9e80,
+        transparent: true,
+        opacity: 0.6,
+        roughness: 0.32,
+        metalness: 0.08,
+      });
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(marbleRadius, ghostSegments, ghostSegments),
-        ghostMaterial,
+        material,
       );
       mesh.visible = false;
       scene.add(mesh);
       const next: GhostRenderState = {
         snapshots: new RingBuffer<GhostSnapshot>(SNAPSHOT_QUEUE_CAPACITY),
         mesh,
+        material,
+        skinRequestSeq: 0,
         avgSourceDeltaMs: SOURCE_RATE_MS,
         jitterMs: 0,
         avgSnapshotAgeMs: 0,
@@ -668,6 +728,68 @@ export function HelloMarble() {
       return next;
     };
 
+    const setMaterialTexture = (
+      material: THREE.MeshStandardMaterial,
+      texture: THREE.Texture | null,
+      fallbackColor: number,
+    ) => {
+      const previous = material.map;
+      material.map = texture;
+      if (texture) {
+        material.color.setHex(0xffffff);
+      } else {
+        material.color.setHex(fallbackColor);
+      }
+      material.needsUpdate = true;
+      if (previous && previous !== texture) {
+        previous.dispose();
+      }
+    };
+
+    const applyLocalSkin = (skinId: string): void => {
+      const requestSeq = localSkinRequestSeq + 1;
+      localSkinRequestSeq = requestSeq;
+      const material = marbleMesh.material as THREE.MeshStandardMaterial;
+      void (async () => {
+        const loadedTexture = await loadTextureForSkinId(skinId);
+        if (disposed || requestSeq !== localSkinRequestSeq) {
+          loadedTexture?.dispose();
+          return;
+        }
+        if (loadedTexture) {
+          setMaterialTexture(material, loadedTexture, 0xffffff);
+          return;
+        }
+        setMaterialTexture(material, createMarbleTexture(), 0xffffff);
+      })();
+    };
+
+    const applyGhostSkin = (playerId: string, skinId?: string): void => {
+      const state = getOrCreateGhostState(playerId);
+      if (state.skinId === skinId) {
+        return;
+      }
+      state.skinId = skinId;
+      const requestSeq = state.skinRequestSeq + 1;
+      state.skinRequestSeq = requestSeq;
+      void (async () => {
+        const loadedTexture = skinId ? await loadTextureForSkinId(skinId) : null;
+        if (disposed) {
+          loadedTexture?.dispose();
+          return;
+        }
+        const liveState = ghostPlayers.get(playerId);
+        if (!liveState || liveState.skinRequestSeq !== requestSeq) {
+          loadedTexture?.dispose();
+          return;
+        }
+        setMaterialTexture(liveState.material, loadedTexture, 0xff9e80);
+      })();
+    };
+
+    applyLocalSkinRef.current = applyLocalSkin;
+    applyLocalSkin(selectedMarbleSkinIdRef.current);
+
     const resetGhostSnapshots = (): void => {
       for (const [, playerState] of ghostPlayers) {
         playerState.snapshots.clear();
@@ -685,6 +807,11 @@ export function HelloMarble() {
     const raceClient = new RaceClient();
     raceClientRef.current = raceClient;
     raceClient.setPreferredName(playerNameRef.current || undefined);
+    raceClient.setPreferredSkinId(
+      selectedMarbleSkinIdRef.current === defaultSkinId
+        ? undefined
+        : selectedMarbleSkinIdRef.current,
+    );
     raceClient.onStatusChange((status) => {
       setNetStatus(status);
       if (status === "disconnected") {
@@ -713,7 +840,13 @@ export function HelloMarble() {
       ) {
         autoJoinAttemptedRef.current = true;
         setNetError(null);
-        raceClient.joinRoom(autoJoinRoomCodeRef.current, playerNameRef.current || undefined);
+        raceClient.joinRoom(
+          autoJoinRoomCodeRef.current,
+          playerNameRef.current || undefined,
+          selectedMarbleSkinIdRef.current === defaultSkinId
+            ? undefined
+            : selectedMarbleSkinIdRef.current,
+        );
       }
     });
     raceClient.onError((error) => {
@@ -772,7 +905,18 @@ export function HelloMarble() {
               }
               scene.remove(ghostState.mesh);
               ghostState.mesh.geometry.dispose();
+              if (ghostState.material.map) {
+                ghostState.material.map.dispose();
+              }
+              ghostState.material.dispose();
               ghostPlayers.delete(playerId);
+            }
+
+            for (const player of message.payload.players) {
+              if (player.playerId === message.payload.playerId) {
+                continue;
+              }
+              applyGhostSkin(player.playerId, player.skinId);
             }
 
             // T2-8: Seed ghost snapshot queues from cached lastStates on reconnection.
@@ -976,6 +1120,10 @@ export function HelloMarble() {
           if (ghostState) {
             scene.remove(ghostState.mesh);
             ghostState.mesh.geometry.dispose();
+            if (ghostState.material.map) {
+              ghostState.material.map.dispose();
+            }
+            ghostState.material.dispose();
             ghostPlayers.delete(message.payload.playerId);
           }
           setPlayersInRoom((prev) =>
@@ -1015,7 +1163,13 @@ export function HelloMarble() {
     });
     if (autoJoinRoomCodeRef.current) {
       autoJoinAttemptedRef.current = true;
-      raceClient.joinRoom(autoJoinRoomCodeRef.current, playerNameRef.current || undefined);
+      raceClient.joinRoom(
+        autoJoinRoomCodeRef.current,
+        playerNameRef.current || undefined,
+        selectedMarbleSkinIdRef.current === defaultSkinId
+          ? undefined
+          : selectedMarbleSkinIdRef.current,
+      );
     }
 
     const computeSpawnWorld = (): CANNON.Vec3 => {
@@ -2196,6 +2350,8 @@ export function HelloMarble() {
     animationFrame = window.requestAnimationFrame(tick);
 
     return () => {
+      disposed = true;
+      applyLocalSkinRef.current = () => {};
       window.cancelAnimationFrame(animationFrame);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("keydown", handleKeyDown);
@@ -2222,9 +2378,11 @@ export function HelloMarble() {
       for (const [, playerState] of ghostPlayers) {
         scene.remove(playerState.mesh);
         playerState.mesh.geometry.dispose();
+        if (playerState.material.map) {
+          playerState.material.map.dispose();
+        }
+        playerState.material.dispose();
       }
-      ghostMaterial.dispose();
-      marbleTexture.dispose();
       for (const body of track.bodies) {
         world.removeBody(body);
       }
@@ -2338,6 +2496,10 @@ export function HelloMarble() {
     event.preventDefault();
     event.stopPropagation();
     calibrateTiltRef.current();
+  };
+
+  const handleMenuSkinChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    setSelectedMarbleSkinId(resolveSkinById(event.target.value).id);
   };
 
   const updateTuning = <K extends keyof TuningState>(
@@ -2488,6 +2650,11 @@ export function HelloMarble() {
     if (nextMode === "multiplayer") {
       setDrawerOpen(false);
       raceClientRef.current?.setPreferredName(playerNameRef.current || undefined);
+      raceClientRef.current?.setPreferredSkinId(
+        selectedMarbleSkinIdRef.current === defaultSkinId
+          ? undefined
+          : selectedMarbleSkinIdRef.current,
+      );
       raceClientRef.current?.createRoom();
     }
     setRacePhase("waiting");
@@ -2550,6 +2717,23 @@ export function HelloMarble() {
               <h1 className="menuGameTitle">Get Tilted</h1>
             </div>
             <p className="menuIntroText">Choose a mode to begin.</p>
+            <div className="menuSelectWrap">
+              <label className="menuSelectLabel" htmlFor="menuSkinSelect">
+                Marble Skin
+              </label>
+              <select
+                id="menuSkinSelect"
+                className="menuSelect"
+                value={selectedMarbleSkinId}
+                onChange={handleMenuSkinChange}
+              >
+                {skinCatalog.map((skin) => (
+                  <option key={skin.id} value={skin.id}>
+                    {skin.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="modePickerButtons">
               <button
                 type="button"

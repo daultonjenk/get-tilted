@@ -39,6 +39,7 @@ export type RaceFinishRecord = {
 export type RoomPlayer = {
   playerId: string;
   name?: string;
+  skinId?: string;
 };
 
 export type RaceResultEntry = {
@@ -108,13 +109,13 @@ export type MessagePayloadMap = {
   pong: { t: number; serverNowMs: number };
   "room:create": Record<string, never>;
   "room:created": { roomCode: string };
-  "room:join": { roomCode: string; name?: string };
+  "room:join": { roomCode: string; name?: string; skinId?: string };
   "room:state": { roomCode: string; clients: number };
-  "race:hello": { roomCode: string; playerId?: string; name?: string };
+  "race:hello": { roomCode: string; playerId?: string; name?: string; skinId?: string };
   "race:hello:ack": {
     roomCode: string;
     playerId: string;
-    players: Array<{ playerId: string; name?: string }>;
+    players: Array<{ playerId: string; name?: string; skinId?: string }>;
     lastStates?: Array<{
       playerId: string;
       t: number;
@@ -271,14 +272,15 @@ function isOptionalPositiveInteger(value: unknown): value is number | undefined 
 
 function isPlayerList(
   value: unknown,
-): value is Array<{ playerId: string; name?: string }> {
+): value is Array<{ playerId: string; name?: string; skinId?: string }> {
   return (
     Array.isArray(value) &&
     value.every(
       (entry) =>
         isObject(entry) &&
         isString(entry.playerId) &&
-        isOptionalString(entry.name),
+        isOptionalString(entry.name) &&
+        isOptionalString(entry.skinId),
     )
   );
 }
@@ -348,9 +350,12 @@ export function validatePayload<TType extends MessageType>(
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };
       }
-      return isOptionalString(payload.name)
+      if (!isOptionalString(payload.name)) {
+        return { ok: false, error: "Expected optional name string" };
+      }
+      return isOptionalString(payload.skinId)
         ? { ok: true }
-        : { ok: false, error: "Expected optional name string" };
+        : { ok: false, error: "Expected optional skinId string" };
     case "room:state":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };
@@ -365,9 +370,12 @@ export function validatePayload<TType extends MessageType>(
       if (!isOptionalString(payload.playerId)) {
         return { ok: false, error: "Expected optional playerId string" };
       }
-      return isOptionalString(payload.name)
+      if (!isOptionalString(payload.name)) {
+        return { ok: false, error: "Expected optional name string" };
+      }
+      return isOptionalString(payload.skinId)
         ? { ok: true }
-        : { ok: false, error: "Expected optional name string" };
+        : { ok: false, error: "Expected optional skinId string" };
     case "race:hello:ack":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };

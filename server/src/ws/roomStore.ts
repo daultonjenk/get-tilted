@@ -15,6 +15,7 @@ type RoomEntry = {
   ws: WebSocket;
   playerId: PlayerId;
   name?: string;
+  skinId?: string;
 };
 
 type RaceResultRecord = {
@@ -54,6 +55,7 @@ export class RoomStore {
     roomCode: string,
     client: WebSocket,
     name?: string,
+    skinId?: string,
   ): { size: number; playerId: string } | null {
     this.leave(client);
     const roomClients = this.rooms.get(roomCode) ?? [];
@@ -62,7 +64,7 @@ export class RoomStore {
     }
     const playerId = `P${this.nextPlayerSeq.toString().padStart(4, "0")}`;
     this.nextPlayerSeq += 1;
-    roomClients.push({ ws: client, playerId, name });
+    roomClients.push({ ws: client, playerId, name, skinId });
     this.rooms.set(roomCode, roomClients);
     this.clientToRoom.set(client, roomCode);
     this.clientToPlayer.set(client, playerId);
@@ -139,6 +141,7 @@ export class RoomStore {
     return (this.rooms.get(roomCode) ?? []).map((entry) => ({
       playerId: entry.playerId,
       name: entry.name,
+      skinId: entry.skinId,
     }));
   }
 
@@ -185,7 +188,7 @@ export class RoomStore {
     return result;
   }
 
-  setPlayerName(client: WebSocket, name?: string): boolean {
+  setPlayerProfile(client: WebSocket, name?: string, skinId?: string): boolean {
     const roomCode = this.clientToRoom.get(client);
     if (!roomCode) {
       return false;
@@ -199,6 +202,7 @@ export class RoomStore {
       return false;
     }
     entry.name = name;
+    entry.skinId = skinId;
     return true;
   }
 

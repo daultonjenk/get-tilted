@@ -62,6 +62,9 @@ export type GhostSnapshot = {
 export type GhostRenderState = {
   snapshots: RingBuffer<GhostSnapshot>;
   mesh: THREE.Mesh;
+  material: THREE.MeshStandardMaterial;
+  skinId?: string;
+  skinRequestSeq: number;
   avgSourceDeltaMs: number;
   jitterMs: number;
   avgSnapshotAgeMs: number;

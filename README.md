@@ -62,6 +62,47 @@ v0.1 does not use tilt yet. For mobile smoke testing:
 
 Tilt permissions are introduced in v0.3. iOS Safari requires a user gesture before calling motion permission APIs.
 
+## Custom marble skins
+
+Drop custom skin files into:
+
+- `client/src/assets/skins/`
+
+Supported formats:
+
+- `.png` (recommended)
+- `.jpg`
+- `.jpeg`
+- `.webp`
+
+Texture sizing and quality:
+
+- Use an exact `2:1` aspect ratio (equirectangular sphere map).
+- Recommended: `2048x1024` for crisp details on high-density screens.
+- Minimum: `1024x512`.
+- DPI metadata does not affect in-game sharpness in WebGL; pixel dimensions do.
+- Export in sRGB color space.
+- Prefer lossless PNG, or high-quality lossy export (`JPEG/WebP` quality `90+`).
+
+Authoring guidance:
+
+- Left and right edges of the image meet at a seam on the sphere, so make them tile cleanly.
+- Place important logos/text near the center band (around 25%-75% image height).
+- Avoid critical detail near top/bottom edges because poles compress/stretch there.
+
+How to use in game:
+
+1. Add the image file to `client/src/assets/skins/`.
+2. Restart `npm run dev` (or rebuild) so Vite re-indexes new files.
+3. Open the main title screen and use the `Marble Skin` dropdown.
+4. Skin choice is saved locally and synced to other players in multiplayer.
+
+Template preview PDF:
+
+- `output/pdf/marble-skin-template.pdf`
+- Page 1 shows paint guides.
+- Page 2 shows a sphere wrap preview.
+
 ## Host/join race note
 
 Host/join via QR is available in the debug drawer `Network` tab.

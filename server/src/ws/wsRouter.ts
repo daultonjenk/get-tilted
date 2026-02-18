@@ -134,7 +134,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         return;
       }
       case "room:join": {
-        const { roomCode, name } = parsed.msg.payload;
+        const { roomCode, name, skinId } = parsed.msg.payload;
         if (!roomStore.exists(roomCode)) {
           send(ws as SendableSocket, "error", {
             code: "ROOM_NOT_FOUND",
@@ -142,7 +142,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
           });
           return;
         }
-        const joinResult = roomStore.join(roomCode, ws, name);
+        const joinResult = roomStore.join(roomCode, ws, name, skinId);
         if (!joinResult) {
           send(ws as SendableSocket, "error", {
             code: "ROOM_FULL",
@@ -172,7 +172,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
           });
           return;
         }
-        roomStore.setPlayerName(ws, parsed.msg.payload.name);
+        roomStore.setPlayerProfile(ws, parsed.msg.payload.name, parsed.msg.payload.skinId);
         broadcastHelloAck(roomCode);
         return;
       }

@@ -41,6 +41,7 @@ export const TUNING_STORAGE_KEY = "get-tilted:v0.3.7:tuning";
 export const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 export const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 export const PLAYER_NAME_STORAGE_KEY = "get-tilted:v0.7.2.8:player-name";
+export const MARBLE_SKIN_STORAGE_KEY = "get-tilted:v0.7.9.0:marble-skin";
 
 export const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 export const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);

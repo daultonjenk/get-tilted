@@ -186,6 +186,22 @@ describe("encodeMessage / safeParseMessage", () => {
     }
   });
 
+  it("round-trips a race:hello message with optional skin", () => {
+    const payload = {
+      roomCode: "ABC123",
+      playerId: "P0001",
+      name: "Player One",
+      skinId: "checkered-red",
+    };
+    const encoded = encodeMessage("race:hello", payload);
+    const parsed = safeParseMessage(encoded);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.msg.type).toBe("race:hello");
+      expect(parsed.msg.payload).toEqual(payload);
+    }
+  });
+
   it("rejects invalid JSON", () => {
     const parsed = safeParseMessage("not json{");
     expect(parsed.ok).toBe(false);
