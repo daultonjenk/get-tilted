@@ -25,8 +25,6 @@ export const EXTRAPOLATION_MAX_MS = 45;
 export const SNAPSHOT_MAX_AGE_MS = 2000;
 export const TAB_BACKGROUND_THRESHOLD_MS = 500;
 export const SNAPSHOT_QUEUE_CAPACITY = 64;
-export const LOCAL_SMOOTHING_MIN_CADENCE_HZ = 70;
-export const LOCAL_SMOOTHING_MAX_STEP_BURST = 2;
 
 // Pre-computed input source labels indexed by bitmask (keyboard=1, tilt=2, touch=4).
 export const INPUT_LABELS = [

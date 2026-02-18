@@ -66,8 +66,6 @@ import {
   SNAPSHOT_MAX_AGE_MS,
   TAB_BACKGROUND_THRESHOLD_MS,
   SNAPSHOT_QUEUE_CAPACITY,
-  LOCAL_SMOOTHING_MIN_CADENCE_HZ,
-  LOCAL_SMOOTHING_MAX_STEP_BURST,
   INPUT_LABELS,
   MOBILE_SAFE_RENDER_SCALE_MIN,
   MOBILE_SAFE_RENDER_SCALE_MAX,
@@ -513,28 +511,6 @@ export function HelloMarble() {
     const boardAngularAxis = new THREE.Vector3();
     const boardUpWorld = new THREE.Vector3();
     const contactNormalWorld = new THREE.Vector3();
-    const marbleRenderPrevPos = new THREE.Vector3(
-      marbleBody.position.x,
-      marbleBody.position.y,
-      marbleBody.position.z,
-    );
-    const marbleRenderCurrPos = new THREE.Vector3(
-      marbleBody.position.x,
-      marbleBody.position.y,
-      marbleBody.position.z,
-    );
-    const marbleRenderPrevQuat = new THREE.Quaternion(
-      marbleBody.quaternion.x,
-      marbleBody.quaternion.y,
-      marbleBody.quaternion.z,
-      marbleBody.quaternion.w,
-    );
-    const marbleRenderCurrQuat = new THREE.Quaternion(
-      marbleBody.quaternion.x,
-      marbleBody.quaternion.y,
-      marbleBody.quaternion.z,
-      marbleBody.quaternion.w,
-    );
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -1080,23 +1056,6 @@ export function HelloMarble() {
       marbleBody.wakeUp();
     };
 
-    const syncMarbleRenderSnapshots = () => {
-      marbleRenderPrevPos.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
-      marbleRenderCurrPos.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
-      marbleRenderPrevQuat.set(
-        marbleBody.quaternion.x,
-        marbleBody.quaternion.y,
-        marbleBody.quaternion.z,
-        marbleBody.quaternion.w,
-      );
-      marbleRenderCurrQuat.set(
-        marbleBody.quaternion.x,
-        marbleBody.quaternion.y,
-        marbleBody.quaternion.z,
-        marbleBody.quaternion.w,
-      );
-    };
-
     freezeMarbleRef.current = freezeMarble;
     unfreezeMarbleRef.current = unfreezeMarble;
 
@@ -1110,7 +1069,6 @@ export function HelloMarble() {
       marbleBody.angularVelocity.set(0, 0, 0);
       trialStartAt = null;
       prevMarbleZ = marbleBody.position.z;
-      syncMarbleRenderSnapshots();
       setTrialState("idle");
       setTrialCurrentMs(null);
       if (incrementCounter) {
@@ -1308,10 +1266,6 @@ export function HelloMarble() {
     let renderMsEma = 0;
     let miscMsEma = 0;
     let perfTier: MobilePerfTier | "desktop" = mobilePerfGovernor ? "high" : "desktop";
-    let physicsRemainder = 0;
-    let physicsStepsLastFrame = 0;
-    let marbleLerpAlpha = 1;
-    let marbleSmoothingActive = false;
 
     const tick = (nowMs: number) => {
       const frameStartMs = performance.now();
@@ -1320,14 +1274,12 @@ export function HelloMarble() {
         cadenceMsEma += (rafDeltaMs - cadenceMsEma) * 0.12;
       }
       lastCadenceTimestampMs = nowMs;
-      const cadenceHz = 1000 / Math.max(cadenceMsEma, 0.0001);
       const now = nowMs / 1000;
       let delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
       lastTime = now;
       // T1-3: After un-backgrounding, clamp delta to a single frame to avoid physics jump.
       if (wasBackgrounded) {
         delta = TIMESTEP;
-        physicsRemainder = 0;
         wasBackgrounded = false;
       }
       debugTimer += delta;
@@ -1557,26 +1509,7 @@ export function HelloMarble() {
       }
 
       const physicsStartMs = performance.now();
-      const worldTimeBeforeStep = world.time;
       world.step(TIMESTEP, delta, Math.round(currentTuning.physicsMaxSubSteps));
-      const steppedTime = Math.max(world.time - worldTimeBeforeStep, 0);
-      physicsStepsLastFrame = Math.max(0, Math.round(steppedTime / TIMESTEP));
-      physicsRemainder = clamp(
-        physicsRemainder + delta - physicsStepsLastFrame * TIMESTEP,
-        0,
-        TIMESTEP,
-      );
-      if (physicsStepsLastFrame > 0) {
-        marbleRenderPrevPos.copy(marbleRenderCurrPos);
-        marbleRenderPrevQuat.copy(marbleRenderCurrQuat);
-        marbleRenderCurrPos.set(marbleBody.position.x, marbleBody.position.y, marbleBody.position.z);
-        marbleRenderCurrQuat.set(
-          marbleBody.quaternion.x,
-          marbleBody.quaternion.y,
-          marbleBody.quaternion.z,
-          marbleBody.quaternion.w,
-        );
-      }
       suppressVerticalPopOnSideImpact();
       const physicsMs = performance.now() - physicsStartMs;
 
@@ -1713,30 +1646,17 @@ export function HelloMarble() {
       }
       prevMarbleZ = marbleZ;
 
-      marbleSmoothingActive =
-        cadenceHz >= LOCAL_SMOOTHING_MIN_CADENCE_HZ &&
-        physicsStepsLastFrame <= LOCAL_SMOOTHING_MAX_STEP_BURST;
-      marbleLerpAlpha = marbleSmoothingActive
-        ? clamp(physicsRemainder / TIMESTEP, 0, 1)
-        : 1;
-      if (marbleSmoothingActive) {
-        tempVecA.copy(marbleRenderPrevPos).lerp(marbleRenderCurrPos, marbleLerpAlpha);
-        tempQuatA.copy(marbleRenderPrevQuat).slerp(marbleRenderCurrQuat, marbleLerpAlpha);
-        marbleMesh.position.copy(tempVecA);
-        marbleMesh.quaternion.copy(tempQuatA);
-      } else {
-        marbleMesh.position.set(
-          marbleBody.position.x,
-          marbleBody.position.y,
-          marbleBody.position.z,
-        );
-        marbleMesh.quaternion.set(
-          marbleBody.quaternion.x,
-          marbleBody.quaternion.y,
-          marbleBody.quaternion.z,
-          marbleBody.quaternion.w,
-        );
-      }
+      marbleMesh.position.set(
+        marbleBody.position.x,
+        marbleBody.position.y,
+        marbleBody.position.z,
+      );
+      marbleMesh.quaternion.set(
+        marbleBody.quaternion.x,
+        marbleBody.quaternion.y,
+        marbleBody.quaternion.z,
+        marbleBody.quaternion.w,
+      );
 
       boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
       boardQuatThree.set(
@@ -2028,10 +1948,7 @@ export function HelloMarble() {
           setTrialCurrentMs(nowMs - trialStartAt);
         }
         debugStore.updateDebug({
-          cadenceHz: Math.round(cadenceHz),
-          physicsStepsLastFrame,
-          marbleLerpAlpha,
-          marbleSmoothingActive,
+          cadenceHz: Math.round(1000 / Math.max(cadenceMsEma, 0.0001)),
           posX: marbleBody.position.x,
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
@@ -3289,9 +3206,6 @@ export function HelloMarble() {
           <div className="debugSection">
             <p className="buildIdText">Build ID: {BUILD_ID}</p>
             <p>Cadence Hz: {debug.cadenceHz}</p>
-            <p>Physics steps/frame: {debug.physicsStepsLastFrame}</p>
-            <p>Local marble smoothing: {debug.marbleSmoothingActive ? "on" : "off"}</p>
-            <p>Marble lerp alpha: {debug.marbleLerpAlpha.toFixed(2)}</p>
             <p>Render Scale: {debug.renderScale.toFixed(2)}</p>
             <p>Perf Tier: {debug.perfTier}</p>
             <p>CPU frame ms (EMA): {debug.cpuFrameMsEma.toFixed(2)}</p>

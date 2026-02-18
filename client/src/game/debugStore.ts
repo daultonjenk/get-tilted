@@ -3,9 +3,6 @@ import type { MobilePerfTier } from "./perf/mobileGovernor";
 
 export type MarbleDebug = {
   cadenceHz: number;
-  physicsStepsLastFrame: number;
-  marbleLerpAlpha: number;
-  marbleSmoothingActive: boolean;
   posX: number;
   posY: number;
   posZ: number;
@@ -58,9 +55,6 @@ type Listener = () => void;
 
 const DEFAULT_DEBUG: MarbleDebug = {
   cadenceHz: 0,
-  physicsStepsLastFrame: 0,
-  marbleLerpAlpha: 1,
-  marbleSmoothingActive: false,
   posX: 0,
   posY: 0,
   posZ: 0,
