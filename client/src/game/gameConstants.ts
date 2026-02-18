@@ -42,6 +42,9 @@ export const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 export const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 export const PLAYER_NAME_STORAGE_KEY = "get-tilted:v0.7.2.8:player-name";
 export const MARBLE_SKIN_STORAGE_KEY = "get-tilted:v0.7.9.0:marble-skin";
+export const GYRO_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:gyro-enabled";
+export const MUSIC_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:music-enabled";
+export const SOUND_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:sound-enabled";
 
 export const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 export const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);

@@ -5,7 +5,6 @@ import {
   safeParseMessage,
   COUNTDOWN_STEP_MS,
   COUNTDOWN_PREROLL_MS,
-  COUNTDOWN_TOTAL_STEPS,
   ROOM_MAX_CLIENTS,
   type MessagePayloadMap,
   type RaceFinishRecord,
@@ -58,6 +57,8 @@ export class RoomDO {
   private finishes = new Map<string, RaceFinishRecord>();
 
   private raceResult: RaceResultPayload | null = null;
+
+  private hostPlayerId: string | null = null;
 
   private nextPlayerSeq = 1;
 
@@ -133,6 +134,9 @@ export class RoomDO {
               return;
             }
             server.playerId = this.createPlayerId();
+            if (!this.hostPlayerId) {
+              this.hostPlayerId = server.playerId;
+            }
           }
           server.playerName = parsed.msg.payload.name;
           server.playerSkinId = parsed.msg.payload.skinId;
@@ -212,28 +216,52 @@ export class RoomDO {
             this.countdownStartAtMs = null;
           }
 
-          const now = Date.now();
-          if (
-            this.countdownStartAtMs != null &&
-            now >= this.countdownStartAtMs + COUNTDOWN_STEP_MS * COUNTDOWN_TOTAL_STEPS
-          ) {
-            this.countdownStartAtMs = null;
+          this.broadcastReadyState();
+          return;
+        }
+        case "race:start": {
+          if (!this.roomCode || parsed.msg.payload.roomCode !== this.roomCode) {
+            return;
           }
-
-          if (
-            this.readyPlayerIds.size === ROOM_MAX_CLIENTS &&
-            this.getSocketCount() === ROOM_MAX_CLIENTS &&
-            this.countdownStartAtMs == null
-          ) {
-            const startAtMs = now + COUNTDOWN_PREROLL_MS;
-            this.beginRace(startAtMs);
-            this.broadcast("race:countdown:start", {
-              roomCode: this.roomCode,
-              startAtMs,
-              stepMs: COUNTDOWN_STEP_MS,
+          if (!server.playerId || parsed.msg.payload.playerId !== server.playerId) {
+            return;
+          }
+          if (this.countdownStartAtMs != null) {
+            this.send(server, "error", {
+              code: "RACE_LOCKED",
+              message: "Countdown already started",
             });
+            return;
           }
-
+          if (this.raceActive) {
+            this.send(server, "error", {
+              code: "RACE_ACTIVE",
+              message: "Race already active",
+            });
+            return;
+          }
+          if (!this.hostPlayerId || this.hostPlayerId !== server.playerId) {
+            this.send(server, "error", {
+              code: "NOT_HOST",
+              message: "Only the host can start the match",
+            });
+            return;
+          }
+          if (!this.canStartRace(server.playerId)) {
+            this.send(server, "error", {
+              code: "START_BLOCKED",
+              message: "Need at least 2 players and all joined players ready",
+            });
+            this.broadcastReadyState();
+            return;
+          }
+          const startAtMs = Date.now() + COUNTDOWN_PREROLL_MS;
+          this.beginRace(startAtMs);
+          this.broadcast("race:countdown:start", {
+            roomCode: this.roomCode,
+            startAtMs,
+            stepMs: COUNTDOWN_STEP_MS,
+          });
           this.broadcastReadyState();
           return;
         }
@@ -271,6 +299,9 @@ export class RoomDO {
       if (server.playerId) {
         this.readyPlayerIds.delete(server.playerId);
         this.lastRaceStateAt.delete(server.playerId);
+        if (this.hostPlayerId === server.playerId) {
+          this.hostPlayerId = this.findOldestPlayerId();
+        }
       }
 
       if (
@@ -305,6 +336,7 @@ export class RoomDO {
       }
 
       this.broadcastRoomState();
+      this.broadcastHelloAck();
       this.broadcastReadyState();
       this.scheduleCleanupAlarm();
     });
@@ -400,6 +432,12 @@ export class RoomDO {
     if (!this.roomCode) {
       return;
     }
+    if (!this.hostPlayerId) {
+      this.hostPlayerId = this.findOldestPlayerId();
+    }
+    if (!this.hostPlayerId) {
+      return;
+    }
     const players = this.getPlayers();
     // T2-8: Build lastStates array for reconnection recovery.
     const lastStates: Array<{
@@ -429,6 +467,7 @@ export class RoomDO {
       this.send(socket, "race:hello:ack", {
         roomCode: this.roomCode,
         playerId: socket.playerId,
+        hostPlayerId: this.hostPlayerId,
         players,
         lastStates: lastStates.length > 0 ? lastStates : undefined,
       });
@@ -449,6 +488,9 @@ export class RoomDO {
     this.raceResult = null;
     this.readyPlayerIds.clear();
     this.lastRaceState.clear();
+    if (this.getSocketCount() === 0) {
+      this.hostPlayerId = null;
+    }
   }
 
   private broadcastRaceResult(isFinal: boolean): void {
@@ -483,6 +525,29 @@ export class RoomDO {
     const id = `P${this.nextPlayerSeq.toString().padStart(4, "0")}`;
     this.nextPlayerSeq += 1;
     return id;
+  }
+
+  private canStartRace(playerId: string): boolean {
+    if (this.hostPlayerId !== playerId) {
+      return false;
+    }
+    const players = this.getPlayers();
+    if (players.length < 2) {
+      return false;
+    }
+    if (this.readyPlayerIds.size !== players.length) {
+      return false;
+    }
+    return players.every((entry) => this.readyPlayerIds.has(entry.playerId));
+  }
+
+  private findOldestPlayerId(): string | null {
+    for (const socket of this.sockets) {
+      if (socket.playerId) {
+        return socket.playerId;
+      }
+    }
+    return null;
   }
 
   /** T1-4: Validate that race:state payload values are within expected bounds. */

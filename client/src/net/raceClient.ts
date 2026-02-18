@@ -307,6 +307,16 @@ export class RaceClient {
     });
   }
 
+  sendRaceStart(): void {
+    if (!this.roomCode || !this.playerId) {
+      return;
+    }
+    this.ws.send("race:start", {
+      roomCode: this.roomCode,
+      playerId: this.playerId,
+    });
+  }
+
   sendRaceFinish(elapsedMs: number, finishedAtMs: number): void {
     if (!this.roomCode || !this.playerId) {
       return;

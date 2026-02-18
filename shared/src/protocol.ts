@@ -2,7 +2,7 @@
 // Shared room / race constants
 // ---------------------------------------------------------------------------
 
-export const ROOM_MAX_CLIENTS = 2;
+export const ROOM_MAX_CLIENTS = 4;
 export const COUNTDOWN_STEP_MS = 1000;
 export const COUNTDOWN_PREROLL_MS = 600;
 export const COUNTDOWN_TOTAL_STEPS = 4;
@@ -115,6 +115,7 @@ export type MessagePayloadMap = {
   "race:hello:ack": {
     roomCode: string;
     playerId: string;
+    hostPlayerId: string;
     players: Array<{ playerId: string; name?: string; skinId?: string }>;
     lastStates?: Array<{
       playerId: string;
@@ -127,6 +128,7 @@ export type MessagePayloadMap = {
     }>;
   };
   "race:ready": { roomCode: string; playerId: string; ready: boolean };
+  "race:start": { roomCode: string; playerId: string };
   "race:ready:state": {
     roomCode: string;
     readyPlayerIds: string[];
@@ -199,6 +201,7 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "race:hello",
   "race:hello:ack",
   "race:ready",
+  "race:start",
   "race:ready:state",
   "race:countdown:start",
   "race:finish",
@@ -383,6 +386,9 @@ export function validatePayload<TType extends MessageType>(
       if (!isString(payload.playerId)) {
         return { ok: false, error: "Expected playerId string" };
       }
+      if (!isString(payload.hostPlayerId)) {
+        return { ok: false, error: "Expected hostPlayerId string" };
+      }
       return isPlayerList(payload.players)
         ? { ok: true }
         : { ok: false, error: "Expected players array" };
@@ -396,6 +402,13 @@ export function validatePayload<TType extends MessageType>(
       return isBoolean(payload.ready)
         ? { ok: true }
         : { ok: false, error: "Expected ready boolean" };
+    case "race:start":
+      if (!isString(payload.roomCode)) {
+        return { ok: false, error: "Expected roomCode string" };
+      }
+      return isString(payload.playerId)
+        ? { ok: true }
+        : { ok: false, error: "Expected playerId string" };
     case "race:ready:state":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };

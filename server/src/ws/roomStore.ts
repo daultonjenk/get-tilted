@@ -39,6 +39,8 @@ export class RoomStore {
 
   private readonly readyByRoom = new Map<RoomCode, Set<PlayerId>>();
 
+  private readonly hostByRoom = new Map<RoomCode, PlayerId>();
+
   private readonly countdownStartByRoom = new Map<RoomCode, number>();
 
   private readonly raceActiveByRoom = new Map<RoomCode, boolean>();
@@ -68,6 +70,9 @@ export class RoomStore {
     this.rooms.set(roomCode, roomClients);
     this.clientToRoom.set(client, roomCode);
     this.clientToPlayer.set(client, playerId);
+    if (!this.hostByRoom.has(roomCode)) {
+      this.hostByRoom.set(roomCode, playerId);
+    }
     if (!this.readyByRoom.has(roomCode)) {
       this.readyByRoom.set(roomCode, new Set());
     }
@@ -106,9 +111,16 @@ export class RoomStore {
     if (roomClients.length === 0) {
       this.rooms.delete(roomCode);
       this.readyByRoom.delete(roomCode);
+      this.hostByRoom.delete(roomCode);
       this.clearCountdownStart(roomCode);
       this.clearRace(roomCode);
       return { size: 0, roomCode, playerId };
+    }
+    if (playerId && this.hostByRoom.get(roomCode) === playerId) {
+      const nextHost = roomClients[0]?.playerId;
+      if (nextHost) {
+        this.hostByRoom.set(roomCode, nextHost);
+      }
     }
     if (roomClients.length < ROOM_MAX_CLIENTS) {
       this.clearCountdownStart(roomCode);
@@ -143,6 +155,25 @@ export class RoomStore {
       name: entry.name,
       skinId: entry.skinId,
     }));
+  }
+
+  getHostPlayerId(roomCode: string): string | undefined {
+    return this.hostByRoom.get(roomCode);
+  }
+
+  canStartRace(roomCode: string, playerId: string): boolean {
+    const roomClients = this.rooms.get(roomCode) ?? [];
+    if (roomClients.length < 2) {
+      return false;
+    }
+    if (this.hostByRoom.get(roomCode) !== playerId) {
+      return false;
+    }
+    const readySet = this.readyByRoom.get(roomCode) ?? new Set<PlayerId>();
+    if (readySet.size !== roomClients.length) {
+      return false;
+    }
+    return roomClients.every((entry) => readySet.has(entry.playerId));
   }
 
   cacheRaceState(roomCode: string, playerId: string, payload: RaceStatePayload): void {

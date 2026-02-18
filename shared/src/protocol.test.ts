@@ -142,7 +142,7 @@ describe("calculateRaceResults", () => {
 
 describe("shared constants", () => {
   it("ROOM_MAX_CLIENTS is a positive integer", () => {
-    expect(ROOM_MAX_CLIENTS).toBeGreaterThanOrEqual(2);
+    expect(ROOM_MAX_CLIENTS).toBe(4);
     expect(Number.isInteger(ROOM_MAX_CLIENTS)).toBe(true);
   });
 
@@ -198,6 +198,39 @@ describe("encodeMessage / safeParseMessage", () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       expect(parsed.msg.type).toBe("race:hello");
+      expect(parsed.msg.payload).toEqual(payload);
+    }
+  });
+
+  it("round-trips a race:hello:ack message with host metadata", () => {
+    const payload = {
+      roomCode: "ABC123",
+      playerId: "P0002",
+      hostPlayerId: "P0001",
+      players: [
+        { playerId: "P0001", name: "Host" },
+        { playerId: "P0002", name: "Guest" },
+      ],
+    };
+    const encoded = encodeMessage("race:hello:ack", payload);
+    const parsed = safeParseMessage(encoded);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.msg.type).toBe("race:hello:ack");
+      expect(parsed.msg.payload).toEqual(payload);
+    }
+  });
+
+  it("round-trips a race:start message", () => {
+    const payload = {
+      roomCode: "ABC123",
+      playerId: "P0001",
+    };
+    const encoded = encodeMessage("race:start", payload);
+    const parsed = safeParseMessage(encoded);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.msg.type).toBe("race:start");
       expect(parsed.msg.payload).toEqual(payload);
     }
   });

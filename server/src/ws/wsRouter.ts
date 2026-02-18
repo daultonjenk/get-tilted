@@ -5,8 +5,6 @@ import {
   safeParseMessage,
   COUNTDOWN_STEP_MS,
   COUNTDOWN_PREROLL_MS,
-  COUNTDOWN_TOTAL_STEPS,
-  ROOM_MAX_CLIENTS,
   type MessagePayloadMap,
 } from "@get-tilted/shared-protocol";
 import type { WebSocket } from "ws";
@@ -54,6 +52,10 @@ function broadcastReadyState(roomCode: string): void {
 
 function broadcastHelloAck(roomCode: string): void {
   const players = roomStore.getPlayers(roomCode);
+  const hostPlayerId = roomStore.getHostPlayerId(roomCode);
+  if (!hostPlayerId) {
+    return;
+  }
   const clients = roomStore.getClients(roomCode);
   const lastStates = roomStore.getLastRaceStates(roomCode);
   for (const client of clients) {
@@ -64,6 +66,7 @@ function broadcastHelloAck(roomCode: string): void {
     send(client as SendableSocket, "race:hello:ack", {
       roomCode,
       playerId,
+      hostPlayerId,
       players,
       lastStates: lastStates.length > 0 ? lastStates : undefined,
     });
@@ -210,37 +213,58 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
         if (!updated) {
           return;
         }
-
-        const readyPlayerIds = roomStore.getReadyPlayerIds(roomCode);
-        const playerCount = roomStore.getClientCount(roomCode);
-        const now = Date.now();
-        const activeCountdown = roomStore.getCountdownStart(roomCode);
-        const countdownExpired =
-          typeof activeCountdown === "number" &&
-          now >= activeCountdown + COUNTDOWN_STEP_MS * COUNTDOWN_TOTAL_STEPS;
-
-        if (countdownExpired) {
-          roomStore.clearCountdownStart(roomCode);
+        broadcastReadyState(roomCode);
+        return;
+      }
+      case "race:start": {
+        const roomCode = roomStore.getRoomCode(ws);
+        if (!roomCode || roomCode !== parsed.msg.payload.roomCode) {
+          return;
         }
-
-        if (
-          playerCount >= ROOM_MAX_CLIENTS &&
-          readyPlayerIds.length === playerCount &&
-          typeof roomStore.getCountdownStart(roomCode) !== "number"
-        ) {
-          const startAtMs = now + COUNTDOWN_PREROLL_MS;
-          roomStore.beginRace(roomCode);
-          roomStore.setCountdownStart(roomCode, startAtMs);
-          const clients = roomStore.getClients(roomCode);
-          for (const client of clients) {
-            send(client as SendableSocket, "race:countdown:start", {
-              roomCode,
-              startAtMs,
-              stepMs: COUNTDOWN_STEP_MS,
-            });
-          }
+        const playerId = roomStore.getPlayerId(ws);
+        if (!playerId || playerId !== parsed.msg.payload.playerId) {
+          return;
         }
-
+        if (roomStore.hasCountdown(roomCode)) {
+          send(ws as SendableSocket, "error", {
+            code: "RACE_LOCKED",
+            message: "Countdown already started",
+          });
+          return;
+        }
+        if (roomStore.isRaceActive(roomCode)) {
+          send(ws as SendableSocket, "error", {
+            code: "RACE_ACTIVE",
+            message: "Race already active",
+          });
+          return;
+        }
+        if (roomStore.getHostPlayerId(roomCode) !== playerId) {
+          send(ws as SendableSocket, "error", {
+            code: "NOT_HOST",
+            message: "Only the host can start the match",
+          });
+          return;
+        }
+        if (!roomStore.canStartRace(roomCode, playerId)) {
+          send(ws as SendableSocket, "error", {
+            code: "START_BLOCKED",
+            message: "Need at least 2 players and all joined players ready",
+          });
+          broadcastReadyState(roomCode);
+          return;
+        }
+        const startAtMs = Date.now() + COUNTDOWN_PREROLL_MS;
+        roomStore.beginRace(roomCode);
+        roomStore.setCountdownStart(roomCode, startAtMs);
+        const clients = roomStore.getClients(roomCode);
+        for (const client of clients) {
+          send(client as SendableSocket, "race:countdown:start", {
+            roomCode,
+            startAtMs,
+            stepMs: COUNTDOWN_STEP_MS,
+          });
+        }
         broadcastReadyState(roomCode);
         return;
       }
@@ -303,6 +327,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
 
     const leaveResult = roomStore.leave(ws);
     if (leaveResult.roomCode) {
+      broadcastHelloAck(leaveResult.roomCode);
       broadcastRoomState(leaveResult.roomCode);
       broadcastReadyState(leaveResult.roomCode);
       if (leaveResult.playerId) {

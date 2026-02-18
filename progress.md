@@ -62,3 +62,12 @@ v0.7.9.1 update:
 - Expanded `README.md` skin docs with explicit valid/invalid dimensions, DPI behavior, and concrete file-size guidance.
 - Added `scripts/export_default_marble_skin_png.py` to export the built-in marble texture reference.
 - Generated `output/skins/default-marble-reference-512x256.png` for user-facing reference/editing.
+
+v0.7.10.0 update:
+- Redesigned menu flow with a four-button main menu (`Singleplayer`, `Multiplayer`, `WIP`, `Options`) and moved player customization/settings into a dedicated options overlay.
+- Added options persistence for gyro/music/sound toggles plus player name and marble skin selection (no debug controls in options).
+- Reworked multiplayer lobby UI for 4 slots with per-slot name labels, host star marker, ready-state symbols (check/X/?), and separate `READY` + host-only `START MATCH` actions.
+- Extended protocol and networking for explicit host-driven race start: added `race:start`, `hostPlayerId` in `race:hello:ack`, and server/DO validation that start requires host + 2+ players + all joined players ready.
+- Bumped shared room cap to 4 players and app version to `0.7.10.0`.
+- Verified: `npm run test`, `npm run lint`, `npm run typecheck`, `npm run build`.
+- Note: Playwright smoke client script could not run in this environment because the `playwright` package is not installed for the skill runner script.

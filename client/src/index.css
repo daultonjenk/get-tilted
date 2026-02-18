@@ -13,9 +13,20 @@ body,
 }
 
 body {
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Trebuchet MS", "Verdana", "Tahoma", sans-serif;
   background: #06121f;
   color: #eaf4ff;
+}
+
+:root {
+  --menu-bg-deep: #041229;
+  --menu-bg-mid: #08203e;
+  --menu-blue: #1ca0d9;
+  --menu-blue-dark: #1174a6;
+  --menu-orange: #ff8c2a;
+  --menu-orange-dark: #cc6412;
+  --menu-white: #f1f8ff;
+  --menu-outline: #e8f5ff;
 }
 
 button,
@@ -122,17 +133,26 @@ textarea {
 
 .raceOverlayCard.menuCard {
   width: min(560px, 92vw);
-  padding: clamp(1.1rem, 3vw, 1.9rem);
-  gap: 0.85rem;
+  padding: clamp(1.1rem, 3vw, 1.6rem);
+  gap: 0.95rem;
   align-items: center;
   text-align: center;
+  border: 3px solid rgb(223 243 255 / 92%);
+  border-radius: 1rem;
+  background:
+    radial-gradient(circle at 10% 14%, rgb(48 173 233 / 22%), transparent 46%),
+    radial-gradient(circle at 90% 88%, rgb(255 155 63 / 20%), transparent 50%),
+    linear-gradient(155deg, var(--menu-bg-deep) 0%, var(--menu-bg-mid) 100%);
+  box-shadow:
+    0 18px 34px rgb(1 8 20 / 52%),
+    inset 0 0 0 2px rgb(19 106 154 / 38%);
 }
 
 .multiplayerLobbyCard {
   position: relative;
   width: min(560px, 92vw);
-  padding: clamp(1rem, 2.6vw, 1.5rem) clamp(1rem, 2.6vw, 1.5rem) 1.25rem;
-  gap: 0.7rem;
+  padding: clamp(1rem, 2.6vw, 1.35rem) clamp(0.95rem, 2.6vw, 1.35rem) 1.2rem;
+  gap: 0.82rem;
   align-items: center;
   text-align: center;
 }
@@ -141,26 +161,29 @@ textarea {
   position: absolute;
   top: 0.75rem;
   left: 0.75rem;
-  border: 1px solid #8eb6dc;
-  border-radius: 0.4rem;
-  background: rgb(15 39 67 / 90%);
-  color: #d9ecff;
-  min-height: 34px;
-  padding: 0.3rem 0.55rem;
-  font-size: 0.78rem;
-  font-weight: 700;
+  border: 2px solid rgb(225 243 255 / 80%);
+  border-radius: 0.56rem;
+  background: linear-gradient(180deg, rgb(18 71 111 / 95%), rgb(10 48 84 / 92%));
+  color: #f1f8ff;
+  min-height: 38px;
+  padding: 0.32rem 0.62rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
   cursor: pointer;
 }
 
 .lobbyBackButton:hover {
-  border-color: #b8dcff;
+  border-color: #fff;
 }
 
 .raceOverlayTitle {
-  font-size: 0.98rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  margin: 0.2rem 0 0;
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: #eff7ff;
 }
 
 .lobbyCodeLabel {
@@ -173,184 +196,138 @@ textarea {
 
 .lobbyCodeValue {
   margin: 0;
-  font-size: clamp(2rem, 7vw, 3rem);
+  font-size: clamp(1.8rem, 6.5vw, 2.7rem);
   line-height: 1;
   font-weight: 900;
-  letter-spacing: 0.14em;
-  color: #fff7c7;
+  letter-spacing: 0.12em;
+  color: #ffefcb;
 }
 
 .lobbyQrWrap {
-  width: min(360px, 100%);
-  min-height: 220px;
-  border: 1px solid rgb(155 206 255 / 30%);
-  border-radius: 0.65rem;
-  background: rgb(7 17 31 / 72%);
-  padding: 0.6rem;
+  width: min(310px, 100%);
+  min-height: 200px;
+  border: 3px solid rgb(225 243 255 / 92%);
+  border-radius: 0.82rem;
+  background: rgb(13 38 63 / 72%);
+  padding: 0.5rem;
   display: grid;
   place-items: center;
 }
 
 .lobbyQrImage {
-  width: min(300px, 100%);
+  width: min(290px, 100%);
   aspect-ratio: 1;
-  border-radius: 0.4rem;
+  border: 3px solid rgb(228 244 255 / 95%);
+  border-radius: 0.2rem;
   background: #fff;
 }
 
-.lobbyPlayersSplit {
+.lobbySlotsGrid {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.48rem;
 }
 
-.lobbyPlayerCard {
-  border: 1px solid rgb(155 206 255 / 30%);
-  border-radius: 0.65rem;
-  background: rgb(10 27 46 / 74%);
-  padding: 0.6rem 0.6rem 0.65rem;
+.lobbySlotCard {
+  border: 2px solid rgb(220 241 255 / 95%);
+  border-radius: 0.62rem;
+  background: rgb(10 48 80 / 85%);
+  padding: 0.3rem 0.28rem 0.34rem;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.5rem;
-  min-height: 178px;
+  gap: 0.25rem;
+  min-height: 96px;
 }
 
-.lobbyPlayerNameValue {
-  margin: 0.1rem 0 0;
-  font-size: clamp(1.05rem, 3.9vw, 1.3rem);
+.lobbySlotName {
+  margin: 0.05rem 0 0;
+  min-height: 2.2em;
+  font-size: clamp(0.72rem, 2.5vw, 0.86rem);
   line-height: 1.1;
-  min-height: 1.3em;
-  font-weight: 800;
-  color: #fff7c7;
-  text-transform: uppercase;
+  font-weight: 900;
+  color: #f5fbff;
   text-align: center;
   width: 100%;
   overflow-wrap: anywhere;
 }
 
-.lobbyNameInputWrap {
-  width: 100%;
-  margin-block: auto;
+.hostMarker {
+  margin-left: 0.2rem;
+  color: #ffd564;
+  text-shadow: 0 0 8px rgb(255 213 100 / 70%);
 }
 
-.lobbyCardMidSpacer {
-  width: 100%;
-  margin-block: auto;
-  min-height: 36px;
-}
-
-.lobbyReadyRow {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.55rem;
-  min-height: 46px;
+.lobbySlotIndicator {
+  width: clamp(52px, 15vw, 74px);
+  aspect-ratio: 1;
+  border: 3px solid rgb(224 243 255 / 96%);
+  border-radius: 0.2rem;
+  background: linear-gradient(180deg, #1ba2d9, #1280ba);
+  display: grid;
+  place-items: center;
   margin-top: auto;
-}
-
-.lobbyReadyIndicator {
-  width: clamp(18px, 3.6vw, 22px);
-  height: clamp(18px, 3.6vw, 22px);
-  border-radius: 999px;
-  border: 2px solid rgb(255 255 255 / 25%);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 20%);
-  flex: 0 0 auto;
-}
-
-.lobbyReadyIndicator.ready {
-  background: linear-gradient(145deg, #27b34d, #18903b);
-}
-
-.lobbyReadyIndicator.notReady {
-  background: linear-gradient(145deg, #ff3838, #be0f19);
-}
-
-.lobbyReadyStatus {
-  margin: 0;
-  font-size: clamp(0.9rem, 3vw, 1.05rem);
+  font-size: clamp(1.65rem, 5.3vw, 2.1rem);
   font-weight: 900;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.03em;
   line-height: 1;
-  min-width: 95px;
-  text-align: left;
+  color: #ecf7ff;
 }
 
-.lobbyReadyStatus.ready {
-  color: #eeff72;
+.lobbySlotIndicator.ready {
+  color: #58d755;
 }
 
-.lobbyReadyStatus.notReady {
-  color: #eeff72;
+.lobbySlotIndicator.notReady {
+  color: #ff3244;
 }
 
-.lobbyCenterReadyButton {
-  width: min(280px, 100%);
-  min-height: 64px;
-  margin: 0;
-  font-size: clamp(1.05rem, 3.8vw, 1.3rem);
-  letter-spacing: 0.08em;
+.lobbySlotIndicator.empty {
+  color: #9ca7b0;
 }
 
 .menuTitleWrap {
   display: flex;
   justify-content: center;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.1rem;
 }
 
 .menuIntroText {
   margin: 0;
   max-width: 28ch;
-  color: #dceaf7;
-  font-size: clamp(1rem, 2.7vw, 1.15rem);
-}
-
-.menuSelectWrap {
-  width: min(460px, 100%);
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-top: 0.35rem;
-}
-
-.menuSelectLabel {
-  margin: 0;
-  color: #b9d9fb;
-  font-size: 0.86rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  color: #cae4f7;
+  font-size: clamp(0.95rem, 2.6vw, 1.1rem);
 }
 
 .menuSelect {
   width: 100%;
-  min-height: 42px;
-  border: 1px solid #8aa8c7;
-  border-radius: 0.45rem;
-  background: linear-gradient(145deg, #1f3043, #112033);
-  color: #eaf4ff;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  padding: 0.35rem 0.55rem;
+  min-height: 44px;
+  border: 2px solid rgb(219 241 255 / 90%);
+  border-radius: 0.6rem;
+  background: linear-gradient(180deg, #0d5184, #0a3f6c);
+  color: #f2f9ff;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 0.38rem 0.58rem;
 }
 
 .menuGameTitle {
   margin: 0;
-  font-size: clamp(2.6rem, 9vw, 5rem);
+  font-family: "Impact", "Trebuchet MS", "Arial Black", sans-serif;
+  font-size: clamp(2.9rem, 9.3vw, 5.2rem);
   font-weight: 900;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #fff3bf;
-  text-shadow: 0 4px 10px rgb(0 0 0 / 38%);
+  color: var(--menu-orange);
+  text-shadow: 0 8px 18px rgb(0 0 0 / 46%);
   transform-origin: 50% 55%;
   will-change: transform;
   display: inline-block;
   backface-visibility: hidden;
   -webkit-font-smoothing: antialiased;
-  animation: menu-title-tilt 5.9s cubic-bezier(0.38, 0.02, 0.64, 0.99) infinite alternate;
+  animation: menu-title-tilt 5.4s cubic-bezier(0.38, 0.02, 0.64, 0.99) infinite alternate;
 }
 
 @keyframes menu-title-tilt {
@@ -362,47 +339,36 @@ textarea {
   }
 }
 
-.modeSwitch {
-  display: grid;
+.mainMenuButtonGrid {
+  width: min(440px, 100%);
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.35rem;
-  margin-top: 0.15rem;
-}
-
-.modePickerButtons {
+  gap: 0.72rem;
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.45rem;
-  margin-top: 0.35rem;
+  margin-top: 0.3rem;
 }
 
-.menuCard .modePickerButtons {
-  width: min(540px, 100%);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
-  margin-top: 0.2rem;
-}
-
-.modeButton {
-  border: 1px solid #8aa8c7;
-  border-radius: 0.45rem;
-  min-height: 40px;
-  background: linear-gradient(145deg, #1f3043, #112033);
-  color: #d9ecff;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+.menuActionButton {
+  border: 3px solid var(--menu-outline);
+  border-radius: 1.15rem;
+  min-height: clamp(74px, 13vw, 94px);
+  background: linear-gradient(180deg, var(--menu-blue), var(--menu-blue-dark));
+  color: var(--menu-white);
+  font-size: clamp(1.5rem, 4.3vw, 2.06rem);
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-shadow: 0 2px 0 rgb(0 0 0 / 20%);
+  box-shadow: 0 10px 18px rgb(0 0 0 / 32%);
   cursor: pointer;
 }
 
-.menuCard .modeButton {
-  min-height: 52px;
-  font-size: clamp(1rem, 2.8vw, 1.18rem);
+.menuActionButton:active {
+  transform: translateY(1px);
 }
 
-.modeButton.active {
-  border-color: #8fffad;
-  background: linear-gradient(145deg, #1f9f4d, #0d6631);
-  color: #effff4;
+.menuActionButtonDisabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  filter: saturate(0.72);
 }
 
 .racePlayers {
@@ -427,41 +393,136 @@ textarea {
 }
 
 .raceHint {
-  color: #ffdc8f;
-  font-size: 0.82rem;
-}
-
-.lobbyNameInput {
-  width: 100%;
-  border: 1px solid #9bc6ff;
-  border-radius: 0.45rem;
-  background: #0f2c4d;
-  color: #eaf4ff;
-  padding: 0.35rem 0.5rem;
-  min-height: 36px;
+  color: #ffd89a;
+  font-size: 0.83rem;
+  margin: 0.05rem 0 0;
 }
 
 .readyButton {
-  margin-top: 0.25rem;
-  border: 1px solid #ffe59d;
-  border-radius: 0.45rem;
-  background: linear-gradient(145deg, #8a5a11, #5f3b07);
-  color: #fff6dc;
-  min-height: 44px;
-  padding: 0.55rem 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  margin-top: 0;
+  border: 3px solid var(--menu-outline);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, var(--menu-orange), var(--menu-orange-dark));
+  color: #fff6ea;
+  min-height: 66px;
+  padding: 0.5rem 0.7rem;
+  font-family: "Impact", "Trebuchet MS", "Arial Black", sans-serif;
+  font-size: clamp(1.7rem, 5.3vw, 2.3rem);
+  font-weight: 900;
+  letter-spacing: 0.05em;
   cursor: pointer;
+  text-shadow: 0 2px 0 rgb(0 0 0 / 30%);
 }
 
 .readyButton.ready {
-  background: linear-gradient(145deg, #1f9f4d, #0d6631);
-  border-color: #8fffad;
+  background: linear-gradient(180deg, #3bcf67, #219a48);
+  border-color: #d9ffd8;
 }
 
 .readyButton:disabled {
-  opacity: 0.6;
+  opacity: 0.52;
   cursor: not-allowed;
+}
+
+.lobbyActionsRow {
+  width: 100%;
+  display: grid;
+  gap: 0.72rem;
+  margin-top: 0.15rem;
+}
+
+.lobbyActionButton {
+  width: 100%;
+}
+
+.startMatchButton {
+  font-size: clamp(1.6rem, 5vw, 2.15rem);
+}
+
+.menuHeaderRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.2rem;
+}
+
+.optionsBackButton {
+  top: 0.7rem;
+  left: 0.7rem;
+}
+
+.optionsTitle {
+  margin-top: 0;
+}
+
+.optionsCard {
+  width: min(560px, 92vw);
+}
+
+.optionsPanel {
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.56rem;
+}
+
+.optionsField {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.28rem;
+}
+
+.optionsFieldLabel {
+  color: #e6f5ff;
+  font-size: 0.86rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.optionsTextInput {
+  width: 100%;
+  min-height: 44px;
+  border: 2px solid rgb(220 241 255 / 92%);
+  border-radius: 0.6rem;
+  background: linear-gradient(180deg, #0d5184, #0a3f6c);
+  color: #f1f8ff;
+  font-weight: 700;
+  padding: 0.4rem 0.56rem;
+}
+
+.optionsToggleRow {
+  width: 100%;
+  min-height: 44px;
+  border: 2px solid rgb(219 241 255 / 75%);
+  border-radius: 0.65rem;
+  background: rgb(7 50 84 / 72%);
+  padding: 0.3rem 0.62rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.optionsToggleRow input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  accent-color: #34bde8;
+}
+
+.optionsInlineButtons {
+  width: 100%;
+  display: grid;
+  gap: 0.58rem;
+}
+
+.optionsInlineButtons .menuActionButton {
+  min-height: 52px;
+  font-size: clamp(1rem, 3vw, 1.2rem);
+  border-radius: 0.9rem;
 }
 
 .raceResultCard {
@@ -1016,26 +1077,39 @@ textarea {
     padding: 0.85rem;
   }
 
-  .menuCard .modePickerButtons {
+  .mainMenuButtonGrid {
     grid-template-columns: 1fr;
     width: min(360px, 100%);
   }
 
   .multiplayerLobbyCard {
-    width: min(420px, 100%);
+    width: min(440px, 100%);
   }
 
   .lobbyQrWrap {
-    width: 100%;
+    width: min(260px, 100%);
     min-height: 180px;
   }
 
   .lobbyQrImage {
-    width: min(240px, 100%);
+    width: min(232px, 100%);
   }
 
-  .lobbyPlayersSplit {
-    gap: 0.55rem;
+  .lobbySlotsGrid {
+    gap: 0.32rem;
+  }
+
+  .lobbySlotIndicator {
+    width: clamp(44px, 12vw, 60px);
+  }
+
+  .readyButton {
+    min-height: 58px;
+    font-size: clamp(1.35rem, 4.4vw, 1.75rem);
+  }
+
+  .optionsPanel {
+    width: 100%;
   }
 
   .debugDrawer {

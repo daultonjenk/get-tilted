@@ -25,7 +25,7 @@ import {
   type RacePlayer,
 } from "../net/raceClient";
 import { APP_VERSION, BUILD_ID } from "../buildInfo";
-import type { TypedMessage } from "@get-tilted/shared-protocol";
+import { ROOM_MAX_CLIENTS, type TypedMessage } from "@get-tilted/shared-protocol";
 import {
   resolveDefaultWsUrl,
   resolveWsUrlForHost,
@@ -80,6 +80,9 @@ import {
   DEV_JOIN_HOST_KEY,
   PLAYER_NAME_STORAGE_KEY,
   MARBLE_SKIN_STORAGE_KEY,
+  GYRO_ENABLED_STORAGE_KEY,
+  MUSIC_ENABLED_STORAGE_KEY,
+  SOUND_ENABLED_STORAGE_KEY,
   COUNTDOWN_LABELS,
   RESULT_SPARKLES,
   CAMERA_PRESETS,
@@ -109,6 +112,19 @@ import {
 
 const skinCatalog = getSkinCatalog();
 const defaultSkinId = getDefaultSkinId();
+const MAX_LOBBY_SLOTS = ROOM_MAX_CLIENTS;
+type MenuScreen = "main" | "options";
+
+function readStoredToggle(key: string, defaultValue: boolean): boolean {
+  if (typeof window === "undefined") {
+    return defaultValue;
+  }
+  const stored = window.localStorage.getItem(key);
+  if (stored == null) {
+    return defaultValue;
+  }
+  return stored === "1";
+}
 
 export function HelloMarble() {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -172,8 +188,10 @@ export function HelloMarble() {
   });
   const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "unselected";
   const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
+  const [menuScreen, setMenuScreen] = useState<MenuScreen>("main");
   const [roomCode, setRoomCode] = useState("");
   const [localPlayerId, setLocalPlayerId] = useState("");
+  const [hostPlayerId, setHostPlayerId] = useState("");
   const [playersInRoom, setPlayersInRoom] = useState<RacePlayer[]>([]);
   const [readyPlayerIds, setReadyPlayerIds] = useState<string[]>([]);
   const [localReady, setLocalReady] = useState(false);
@@ -196,10 +214,20 @@ export function HelloMarble() {
     const stored = window.localStorage.getItem(MARBLE_SKIN_STORAGE_KEY);
     return resolveSkinById(stored).id;
   });
+  const [gyroEnabled, setGyroEnabled] = useState(() =>
+    readStoredToggle(GYRO_ENABLED_STORAGE_KEY, true),
+  );
+  const [musicEnabled, setMusicEnabled] = useState(() =>
+    readStoredToggle(MUSIC_ENABLED_STORAGE_KEY, true),
+  );
+  const [soundEnabled, setSoundEnabled] = useState(() =>
+    readStoredToggle(SOUND_ENABLED_STORAGE_KEY, true),
+  );
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
   const tuningRef = useRef(tuning);
+  const gyroEnabledRef = useRef(gyroEnabled);
   const raceClientRef = useRef<RaceClient | null>(null);
   const playerNameRef = useRef(playerNameInput);
   const selectedMarbleSkinIdRef = useRef(selectedMarbleSkinId);
@@ -301,6 +329,10 @@ export function HelloMarble() {
   }, [localPlayerId]);
 
   useEffect(() => {
+    gyroEnabledRef.current = gyroEnabled;
+  }, [gyroEnabled]);
+
+  useEffect(() => {
     playerNameRef.current = playerNameInput;
     raceClientRef.current?.setPreferredName(playerNameInput || undefined);
   }, [playerNameInput]);
@@ -370,6 +402,21 @@ export function HelloMarble() {
     }
     window.localStorage.setItem(MARBLE_SKIN_STORAGE_KEY, selectedMarbleSkinId);
   }, [selectedMarbleSkinId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(GYRO_ENABLED_STORAGE_KEY, gyroEnabled ? "1" : "0");
+  }, [gyroEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(MUSIC_ENABLED_STORAGE_KEY, musicEnabled ? "1" : "0");
+  }, [musicEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SOUND_ENABLED_STORAGE_KEY, soundEnabled ? "1" : "0");
+  }, [soundEnabled]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -815,6 +862,7 @@ export function HelloMarble() {
     raceClient.onStatusChange((status) => {
       setNetStatus(status);
       if (status === "disconnected") {
+        setHostPlayerId("");
         setReadyPlayerIds([]);
         setLocalReady(false);
         setRaceResult(null);
@@ -865,6 +913,7 @@ export function HelloMarble() {
             return;
           }
           setRoomCode(message.payload.roomCode);
+          setHostPlayerId("");
           setNetError(null);
           setReadyPlayerIds([]);
           setLocalReady(false);
@@ -894,6 +943,7 @@ export function HelloMarble() {
           localPlayerIdRef.current = message.payload.playerId;
           setLocalPlayerId(message.payload.playerId);
           setPlayersInRoom(message.payload.players);
+          setHostPlayerId(message.payload.hostPlayerId);
           setRoomCode(message.payload.roomCode);
           setLocalReady(false);
           setNetError(null);
@@ -1475,8 +1525,13 @@ export function HelloMarble() {
       const status = tiltStatusRef.current;
       const touchIntent = touchTiltRef.current;
       const keyboardIntent = getKeyboardIntent();
-      const tiltEnabled = status.enabled && status.permission === "granted" && status.supported;
-      const touchFallbackEnabled = !status.supported || status.permission === "denied";
+      const tiltEnabled =
+        gyroEnabledRef.current &&
+        status.enabled &&
+        status.permission === "granted" &&
+        status.supported;
+      const touchFallbackEnabled =
+        !gyroEnabledRef.current || !status.supported || status.permission === "denied";
       const keyboardActive = keyboardIntent.x !== 0 || keyboardIntent.z !== 0;
 
       if (controlsLockedRef.current) {
@@ -2393,8 +2448,9 @@ export function HelloMarble() {
   }, []);
 
   const showTouchFallback =
-    !tiltStatus.supported || tiltStatus.permission === "denied";
-  const showModePicker = gameMode === "unselected";
+    !gyroEnabled || !tiltStatus.supported || tiltStatus.permission === "denied";
+  const showModePicker = gameMode === "unselected" && menuScreen === "main";
+  const showOptionsMenu = gameMode === "unselected" && menuScreen === "options";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
   const showSoloResult = gameMode === "solo" && trialState === "finished";
   const multiplayerRaceInProgress =
@@ -2407,9 +2463,14 @@ export function HelloMarble() {
   const showMultiplayerNetworkUi =
     multiplayerMenusVisible && !multiplayerRaceInProgress;
   const gameplayUiVisible =
-    !showModePicker && !showRaceLobby && !showMultiplayerResult && !showSoloResult;
+    !showModePicker &&
+    !showOptionsMenu &&
+    !showRaceLobby &&
+    !showMultiplayerResult &&
+    !showSoloResult;
   const showFloatingGyroCalibrateButton =
     gameplayUiVisible &&
+    gyroEnabled &&
     tiltStatus.supported &&
     tiltStatus.enabled &&
     tiltStatus.permission === "granted";
@@ -2418,29 +2479,50 @@ export function HelloMarble() {
     !roomCode &&
     (netStatus === "connecting" || netStatus === "connected");
   const waitingForPlayers = gameMode === "multiplayer" && playersInRoom.length < 2;
-  const twoPlayersInLobby = gameMode === "multiplayer" && playersInRoom.length === 2;
   const showRotateToPortraitOverlay = isMobile && !isPortraitViewport;
   const joinHandshakePending =
     gameMode === "multiplayer" &&
     netStatus !== "disconnected" &&
     joinTiming != null &&
     joinTiming.stage !== "hello_ack";
-  const localPlayer =
-    localPlayerId.length > 0
-      ? playersInRoom.find((player) => player.playerId === localPlayerId)
-      : undefined;
-  const remotePlayer = playersInRoom.find((player) => player.playerId !== localPlayerId);
-  const playerOneName = localPlayer?.name || playerNameInput || "Player 1";
-  const playerTwoName =
-    remotePlayer?.name || remotePlayer?.playerId || (playersInRoom.length > 1 ? "Player 2" : "Waiting...");
-  const playerOneReady = localPlayerId ? readyPlayerIds.includes(localPlayerId) : false;
-  const playerTwoReady = remotePlayer ? readyPlayerIds.includes(remotePlayer.playerId) : false;
+  const isLocalPlayerHost = Boolean(localPlayerId) && localPlayerId === hostPlayerId;
+  const allPlayersReady =
+    playersInRoom.length > 0 &&
+    playersInRoom.every((player) => readyPlayerIds.includes(player.playerId));
   const canToggleLobbyReady =
     netStatus === "connected" &&
     Boolean(roomCode) &&
     Boolean(localPlayerId) &&
-    racePhase === "waiting" &&
-    twoPlayersInLobby;
+    racePhase === "waiting";
+  const canStartMatch =
+    canToggleLobbyReady &&
+    isLocalPlayerHost &&
+    playersInRoom.length >= 2 &&
+    allPlayersReady;
+  const lobbySlots = Array.from({ length: MAX_LOBBY_SLOTS }, (_, index) => {
+    const player = playersInRoom[index];
+    if (!player) {
+      return {
+        slotId: `slot-${index}`,
+        name: "??????",
+        icon: "?",
+        readyClass: "empty",
+        isEmpty: true,
+        isHost: false,
+      };
+    }
+    const isReady = readyPlayerIds.includes(player.playerId);
+    return {
+      slotId: player.playerId,
+      name:
+        player.name ||
+        (player.playerId === localPlayerId ? playerNameInput || "You" : player.playerId),
+      icon: isReady ? "✓" : "✕",
+      readyClass: isReady ? "ready" : "notReady",
+      isEmpty: false,
+      isHost: player.playerId === hostPlayerId,
+    };
+  });
   const joinStageLabel = joinTiming
     ? (() => {
         switch (joinTiming.stage) {
@@ -2500,6 +2582,13 @@ export function HelloMarble() {
 
   const handleMenuSkinChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setSelectedMarbleSkinId(resolveSkinById(event.target.value).id);
+  };
+
+  const handleGyroSettingChange = (enabled: boolean) => {
+    setGyroEnabled(enabled);
+    if (!enabled) {
+      setStatusMessage("Gyro disabled in options. Using fallback controls.");
+    }
   };
 
   const updateTuning = <K extends keyof TuningState>(
@@ -2577,10 +2666,34 @@ export function HelloMarble() {
       return;
     }
     setNetError(null);
-    if (!localReady) {
+    if (!localReady && gyroEnabled) {
       await enableTiltRef.current();
     }
     raceClientRef.current?.sendReady(!localReady);
+  };
+
+  const startMatch = () => {
+    if (gameMode !== "multiplayer") {
+      return;
+    }
+    if (!roomCode || !localPlayerId) {
+      setNetError("Join a room before starting the match.");
+      return;
+    }
+    if (!isLocalPlayerHost) {
+      setNetError("Only the host can start the match.");
+      return;
+    }
+    if (playersInRoom.length < 2) {
+      setNetError("At least 2 players are required.");
+      return;
+    }
+    if (!allPlayersReady) {
+      setNetError("All joined players must be READY.");
+      return;
+    }
+    setNetError(null);
+    raceClientRef.current?.sendRaceStart();
   };
 
   const startSoloRaceSequence = async () => {
@@ -2597,7 +2710,7 @@ export function HelloMarble() {
     resetRef.current();
     freezeMarbleRef.current();
 
-    if (isMobile) {
+    if (isMobile && gyroEnabled) {
       await enableTiltRef.current();
       if (soloStartSequenceRef.current !== sequenceId) {
         return;
@@ -2634,6 +2747,7 @@ export function HelloMarble() {
     setCountdownToken(null);
     setRoomCode("");
     setLocalPlayerId("");
+    setHostPlayerId("");
     setPlayersInRoom([]);
     setReadyPlayerIds([]);
     setLocalReady(false);
@@ -2656,6 +2770,9 @@ export function HelloMarble() {
           : selectedMarbleSkinIdRef.current,
       );
       raceClientRef.current?.createRoom();
+    }
+    if (nextMode === "unselected") {
+      setMenuScreen("main");
     }
     setRacePhase("waiting");
     setControlsLocked(true);
@@ -2716,39 +2833,114 @@ export function HelloMarble() {
             <div className="menuTitleWrap">
               <h1 className="menuGameTitle">Get Tilted</h1>
             </div>
-            <p className="menuIntroText">Choose a mode to begin.</p>
-            <div className="menuSelectWrap">
-              <label className="menuSelectLabel" htmlFor="menuSkinSelect">
-                Marble Skin
-              </label>
-              <select
-                id="menuSkinSelect"
-                className="menuSelect"
-                value={selectedMarbleSkinId}
-                onChange={handleMenuSkinChange}
-              >
-                {skinCatalog.map((skin) => (
-                  <option key={skin.id} value={skin.id}>
-                    {skin.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="modePickerButtons">
+            <p className="menuIntroText">Pick a mode and roll in.</p>
+            <div className="mainMenuButtonGrid">
               <button
                 type="button"
-                className="modeButton"
+                className="menuActionButton"
                 onClick={() => switchGameMode("solo")}
               >
-                Single Player
+                Singleplayer
               </button>
               <button
                 type="button"
-                className="modeButton"
+                className="menuActionButton"
                 onClick={() => switchGameMode("multiplayer")}
               >
                 Multiplayer
               </button>
+              <button type="button" className="menuActionButton menuActionButtonDisabled" disabled>
+                WIP
+              </button>
+              <button
+                type="button"
+                className="menuActionButton"
+                onClick={() => setMenuScreen("options")}
+              >
+                Options
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showOptionsMenu ? (
+        <div className="raceOverlay menuOverlay">
+          <div className="raceOverlayCard menuCard optionsCard">
+            <div className="menuHeaderRow">
+              <button
+                type="button"
+                className="lobbyBackButton optionsBackButton"
+                onClick={() => setMenuScreen("main")}
+              >
+                {"< Back"}
+              </button>
+              <p className="raceOverlayTitle optionsTitle">Options</p>
+            </div>
+            <div className="optionsPanel">
+              <label className="optionsField" htmlFor="optionsPlayerName">
+                <span className="optionsFieldLabel">Player Name</span>
+                <input
+                  id="optionsPlayerName"
+                  className="optionsTextInput"
+                  value={playerNameInput}
+                  onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
+                  placeholder="Enter name"
+                  maxLength={18}
+                  autoComplete="nickname"
+                />
+              </label>
+              <label className="optionsField" htmlFor="menuSkinSelect">
+                <span className="optionsFieldLabel">Marble Skin</span>
+                <select
+                  id="menuSkinSelect"
+                  className="menuSelect"
+                  value={selectedMarbleSkinId}
+                  onChange={handleMenuSkinChange}
+                >
+                  {skinCatalog.map((skin) => (
+                    <option key={skin.id} value={skin.id}>
+                      {skin.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="optionsToggleRow" htmlFor="optionsGyroEnabled">
+                <span>Gyro Controls</span>
+                <input
+                  id="optionsGyroEnabled"
+                  type="checkbox"
+                  checked={gyroEnabled}
+                  onChange={(event) => handleGyroSettingChange(event.target.checked)}
+                />
+              </label>
+              <label className="optionsToggleRow" htmlFor="optionsMusicEnabled">
+                <span>Music</span>
+                <input
+                  id="optionsMusicEnabled"
+                  type="checkbox"
+                  checked={musicEnabled}
+                  onChange={(event) => setMusicEnabled(event.target.checked)}
+                />
+              </label>
+              <label className="optionsToggleRow" htmlFor="optionsSoundEnabled">
+                <span>Sound</span>
+                <input
+                  id="optionsSoundEnabled"
+                  type="checkbox"
+                  checked={soundEnabled}
+                  onChange={(event) => setSoundEnabled(event.target.checked)}
+                />
+              </label>
+              {gyroEnabled ? (
+                <div className="optionsInlineButtons">
+                  <button type="button" className="menuActionButton" onClick={() => void enableTiltRef.current()}>
+                    Enable Tilt Controls
+                  </button>
+                  <button type="button" className="menuActionButton" onClick={() => calibrateTiltRef.current()}>
+                    Calibrate
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -2759,20 +2951,9 @@ export function HelloMarble() {
             <button type="button" className="lobbyBackButton" onClick={returnToMainMenu}>
               {"< Back"}
             </button>
-            <p className="raceOverlayTitle">Multiplayer Lobby</p>
-            <p className="lobbyCodeLabel">Lobby Code</p>
-            <p className="lobbyCodeValue">{roomCode || "----"}</p>
+            <p className="raceOverlayTitle">Multiplayer Lobby {roomCode ? `• ${roomCode}` : ""}</p>
             <div className="lobbyQrWrap">
-              {twoPlayersInLobby ? (
-                <button
-                  type="button"
-                  className={`readyButton lobbyCenterReadyButton ${localReady ? "ready" : ""}`}
-                  onClick={() => void toggleReady()}
-                  disabled={!canToggleLobbyReady}
-                >
-                  {localReady ? "UNREADY" : "READY"}
-                </button>
-              ) : qrImageUrl ? (
+              {qrImageUrl ? (
                 <img className="lobbyQrImage" src={qrImageUrl} alt="Join room QR code" />
               ) : (
                 <p className="raceHint">
@@ -2781,37 +2962,34 @@ export function HelloMarble() {
               )}
             </div>
             {joinHostWarning ? <p className="raceHint">{joinHostWarning}</p> : null}
-            <div className="lobbyPlayersSplit">
-              <div className="lobbyPlayerCard">
-                <p className="lobbyPlayerNameValue">{playerOneName}</p>
-                <div className="lobbyNameInputWrap">
-                  <input
-                    id="lobbyPlayerName"
-                    className="lobbyNameInput"
-                    value={playerNameInput}
-                    onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
-                    placeholder="Enter name"
-                    maxLength={18}
-                    autoComplete="nickname"
-                  />
-                </div>
-                <div className="lobbyReadyRow">
-                  <div className={`lobbyReadyIndicator ${playerOneReady ? "ready" : "notReady"}`} />
-                  <p className={`lobbyReadyStatus ${playerOneReady ? "ready" : "notReady"}`}>
-                    {playerOneReady ? "READY" : "NOT READY"}
+            <div className="lobbySlotsGrid">
+              {lobbySlots.map((slot) => (
+                <div key={slot.slotId} className="lobbySlotCard">
+                  <p className="lobbySlotName">
+                    {slot.name}
+                    {slot.isHost ? <span className="hostMarker">★</span> : null}
                   </p>
+                  <div className={`lobbySlotIndicator ${slot.readyClass}`}>{slot.icon}</div>
                 </div>
-              </div>
-              <div className="lobbyPlayerCard">
-                <p className="lobbyPlayerNameValue">{playerTwoName}</p>
-                <div className="lobbyCardMidSpacer" aria-hidden="true" />
-                <div className="lobbyReadyRow">
-                  <div className={`lobbyReadyIndicator ${playerTwoReady ? "ready" : "notReady"}`} />
-                  <p className={`lobbyReadyStatus ${playerTwoReady ? "ready" : "notReady"}`}>
-                    {playerTwoReady ? "READY" : "NOT READY"}
-                  </p>
-                </div>
-              </div>
+              ))}
+            </div>
+            <div className="lobbyActionsRow">
+              <button
+                type="button"
+                className={`readyButton lobbyActionButton ${localReady ? "ready" : ""}`}
+                onClick={() => void toggleReady()}
+                disabled={!canToggleLobbyReady}
+              >
+                {localReady ? "UNREADY" : "READY"}
+              </button>
+              <button
+                type="button"
+                className="readyButton lobbyActionButton startMatchButton"
+                onClick={startMatch}
+                disabled={!canStartMatch}
+              >
+                START MATCH
+              </button>
             </div>
             {joinHandshakePending ? (
               <p className="raceHint">
@@ -2823,7 +3001,16 @@ export function HelloMarble() {
               </p>
             ) : null}
             {creatingLobby ? <p className="raceHint">Waiting for room code...</p> : null}
-            {waitingForPlayers ? <p className="raceHint">Waiting for second player.</p> : null}
+            {waitingForPlayers ? <p className="raceHint">Waiting for at least one more player.</p> : null}
+            {!isLocalPlayerHost && playersInRoom.length >= 2 ? (
+              <p className="raceHint">Host starts the match once everyone is ready.</p>
+            ) : null}
+            {isLocalPlayerHost && playersInRoom.length >= 2 && !allPlayersReady ? (
+              <p className="raceHint">All joined players must be READY before start.</p>
+            ) : null}
+            {!gyroEnabled ? (
+              <p className="raceHint">Gyro is disabled in Options. Fallback controls are active.</p>
+            ) : null}
             {!tiltStatus.supported ? (
               <p className="raceHint">
                 Tilt unavailable on this device. Fallback controls enabled.
@@ -2862,7 +3049,7 @@ export function HelloMarble() {
             </div>
             <p className="raceHint">
               {raceResult.isFinal
-                ? "Both players press READY to start rematch."
+                ? "All joined players press READY for rematch."
                 : "Waiting for the next marble to finish..."}
             </p>
             {raceResult.isFinal ? (
