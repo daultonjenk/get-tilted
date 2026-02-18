@@ -80,3 +80,15 @@ v0.7.12.0 in progress:
 - Added Options `debug` checkbox (default off, persisted) that gates visibility of the top-right debug drawer.
 - Verified quality gates and tests: `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test` all pass after the v0.7.12.0 changes.
 - Manual browser smoke for moving obstacle behavior and final-hole pass-through remains pending interactive visual playtest.
+
+v0.7.13.0 update:
+- Extended authored track length to roughly 2x prior playable run by expanding straight segment progression.
+- Increased moving obstacle dimensions by ~25% and reorganized obstacle flow into distinct zones:
+  - Zone A (first 4): alternating left/right anchors with alternating speeds.
+  - Zone B (next 6): opposite-direction neighbor patterns with intentionally unsynced phase/speed values.
+  - Zone C: two static squeeze gates using 1.5x marble-width side holes (left then right).
+  - Zone D: final static-position wall gate with a left-right oscillating moving hole.
+- Preserved board-relative kinematic obstacle updates and collider material wiring through existing `updateMovingObstacles`/`setMovingObstacleMaterial` hooks.
+- Bumped app version to `0.7.13.0`.
+- Verified: `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test`.
+- Manual playtest still recommended for final difficulty/timing tuning (especially final moving-hole gate cadence).

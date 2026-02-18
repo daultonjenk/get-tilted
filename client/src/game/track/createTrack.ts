@@ -29,7 +29,6 @@ type SegmentDef = {
   railLeft?: boolean;
   railRight?: boolean;
   width?: number;
-  isFinish?: boolean;
 };
 
 type PartSpec = {
@@ -45,7 +44,7 @@ type PartSpec = {
   };
 };
 
-type MovingObstacle = {
+type ObstacleActor = {
   visual: THREE.Object3D;
   body: CANNON.Body;
   baseLocalPos: CANNON.Vec3;
@@ -67,28 +66,39 @@ const START_LENGTH = 8;
 const FINISH_LENGTH = 10;
 const FINISH_WIDTH = 12;
 const MARKER_THICK = 0.12;
-const SLALOM_COUNT = 6;
-const SLALOM_OBSTACLE_W = 3.6;
-const SLALOM_OBSTACLE_H = 1.8;
-const SLALOM_OBSTACLE_L = 0.8;
-const MOVING_OBSTACLE_SPEED_HZ = 0.18;
 const WALL_CLEARANCE = 0.2;
 
-const FINAL_OBSTACLE_TOTAL_W = 8.4;
-const FINAL_OBSTACLE_TOTAL_H = 3.2;
-const FINAL_OBSTACLE_DEPTH = 1.2;
-const FINAL_OBSTACLE_HOLE_W = 2.0;
-const FINAL_OBSTACLE_HOLE_H = 2.0;
-const FINAL_OBSTACLE_TOP_H = FINAL_OBSTACLE_TOTAL_H - FINAL_OBSTACLE_HOLE_H;
-const FINAL_OBSTACLE_SIDE_W = (FINAL_OBSTACLE_TOTAL_W - FINAL_OBSTACLE_HOLE_W) / 2;
+const MOVING_OBSTACLE_W = 4.5;
+const MOVING_OBSTACLE_H = 2.25;
+const MOVING_OBSTACLE_L = 1.0;
 
+const SQUEEZE_OBSTACLE_W = 8.0;
+const SQUEEZE_OBSTACLE_H = 2.8;
+const SQUEEZE_OBSTACLE_L = 1.2;
+const SQUEEZE_HOLE_W = 1.5;
+
+const FINAL_GATE_TOTAL_W = 8.8;
+const FINAL_GATE_TOTAL_H = 3.6;
+const FINAL_GATE_DEPTH = 1.3;
+const FINAL_GATE_HOLE_W = 2.0;
+const FINAL_GATE_HOLE_H = 2.2;
+const FINAL_GATE_TOP_H = FINAL_GATE_TOTAL_H - FINAL_GATE_HOLE_H;
+const FINAL_GATE_SIDE_W = (FINAL_GATE_TOTAL_W - FINAL_GATE_HOLE_W) / 2;
+
+// Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
-  { length: 9, slopeDeg: 0, yawDeg: 0 },
+  { length: 11, slopeDeg: 0, yawDeg: 0 },
   { length: 10, slopeDeg: 0, yawDeg: 0 },
-  { length: 8, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
+  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
+  { length: 11, slopeDeg: 0, yawDeg: 0 },
   { length: 10, slopeDeg: 0, yawDeg: 0 },
-  { length: 9, slopeDeg: 0, yawDeg: 0 },
-  { length: 8, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
+  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
+  { length: 11, slopeDeg: 0, yawDeg: 0 },
+  { length: 10, slopeDeg: 0, yawDeg: 0 },
+  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
+  { length: 11, slopeDeg: 0, yawDeg: 0 },
+  { length: 10, slopeDeg: 0, yawDeg: 0 },
+  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
 ];
 
 function degToRad(value: number): number {
@@ -120,13 +130,11 @@ function applyFloorSegmentUv(geometry: THREE.BoxGeometry, size: THREE.Vector3): 
     const nz = Math.abs(normal.getZ(i));
 
     if (ny >= nx && ny >= nz) {
-      // Top/bottom faces: stretch one texture across the whole floor segment.
       uv.setXY(i, px / size.x + 0.5, pz / size.z + 0.5);
       continue;
     }
 
     if (nx >= nz) {
-      // Side faces: tile by world units so edge grain doesn't get over-stretched.
       uv.setXY(
         i,
         (pz + size.z / 2) / sideTileWorldUnits,
@@ -193,8 +201,11 @@ function addPart(group: THREE.Group, boardBody: CANNON.Body, spec: PartSpec): vo
   addCompoundPart(boardBody, spec);
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
 export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
-  // Accepted for v0.8 seeded generation; ignored in v0.3.x fixed authored track.
   void opts?.seed;
 
   const group = new THREE.Group();
@@ -222,8 +233,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   let currentYawDeg = 0;
   let lowestFloorY = 0;
 
-  const movingObstacles: MovingObstacle[] = [];
-  const movingObstacleBodies: CANNON.Body[] = [];
+  const obstacleActors: ObstacleActor[] = [];
+  const obstacleBodies: CANNON.Body[] = [];
 
   const startTopBackPoint = new THREE.Vector3(0, FLOOR_THICK / 2, -START_LENGTH / 2);
   const startForward = new THREE.Vector3(0, 0, 1);
@@ -242,24 +253,14 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     railLeft?: boolean;
     railRight?: boolean;
   }) => {
-    const rotation = new THREE.Euler(
-      degToRad(slopeDeg),
-      degToRad(currentYawDeg),
-      0,
-      "XYZ",
-    );
+    const rotation = new THREE.Euler(degToRad(slopeDeg), degToRad(currentYawDeg), 0, "XYZ");
 
     const forward = new THREE.Vector3(0, 0, 1).applyEuler(rotation).normalize();
     const right = new THREE.Vector3(1, 0, 0).applyEuler(rotation).normalize();
     const up = new THREE.Vector3(0, 1, 0).applyEuler(rotation).normalize();
 
-    const segmentEndTopPoint = pathStartTopPoint
-      .clone()
-      .addScaledVector(forward, length);
-    const topCenter = pathStartTopPoint
-      .clone()
-      .add(segmentEndTopPoint)
-      .multiplyScalar(0.5);
+    const segmentEndTopPoint = pathStartTopPoint.clone().addScaledVector(forward, length);
+    const topCenter = pathStartTopPoint.clone().add(segmentEndTopPoint).multiplyScalar(0.5);
     const floorCenter = topCenter.clone().addScaledVector(up, -FLOOR_THICK / 2);
 
     addVisualPart(group, {
@@ -296,144 +297,194 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     pathStartTopPoint.copy(segmentEndTopPoint);
   };
 
-  const createMovingObstacleBounds = (trackWidth: number, obstacleWidth: number): {
-    minX: number;
-    maxX: number;
-  } => {
-    const maxAbsX =
-      trackWidth / 2 - RAIL_THICK - obstacleWidth / 2 - WALL_CLEARANCE;
-    const clamped = Math.max(maxAbsX, 0);
-    return { minX: -clamped, maxX: clamped };
+  const createBounds = (trackWidth: number, obstacleWidth: number): { minX: number; maxX: number } => {
+    const maxAbsX = trackWidth / 2 - RAIL_THICK - obstacleWidth / 2 - WALL_CLEARANCE;
+    const clampedAbs = Math.max(0, maxAbsX);
+    return { minX: -clampedAbs, maxX: clampedAbs };
   };
 
-  const addMovingObstacle = (
+  const registerObstacleActor = (params: {
+    visual: THREE.Object3D;
+    body: CANNON.Body;
+    localPos: THREE.Vector3;
+    trackWidth: number;
+    obstacleWidth: number;
+    phase?: number;
+    speedHz?: number;
+  }): void => {
+    const bounds = createBounds(params.trackWidth, params.obstacleWidth);
+    const startX = clamp(params.localPos.x, bounds.minX, bounds.maxX);
+    params.visual.position.set(startX, params.localPos.y, params.localPos.z);
+    params.body.position.set(startX, params.localPos.y, params.localPos.z);
+    params.body.quaternion.set(0, 0, 0, 1);
+    params.body.aabbNeedsUpdate = true;
+    params.body.updateAABB();
+
+    obstacleActors.push({
+      visual: params.visual,
+      body: params.body,
+      baseLocalPos: new CANNON.Vec3(startX, params.localPos.y, params.localPos.z),
+      localQuat: new CANNON.Quaternion(0, 0, 0, 1),
+      minX: bounds.minX,
+      maxX: bounds.maxX,
+      phase: params.phase ?? 0,
+      speedHz: params.speedHz ?? 0,
+    });
+    obstacleBodies.push(params.body);
+  };
+
+  const addMovingBlock = (
     localPos: THREE.Vector3,
-    size: THREE.Vector3,
     phase: number,
-    speedHz = MOVING_OBSTACLE_SPEED_HZ,
+    speedHz: number,
   ): void => {
     const mesh = addVisualPart(group, {
-      size,
+      size: new THREE.Vector3(MOVING_OBSTACLE_W, MOVING_OBSTACLE_H, MOVING_OBSTACLE_L),
       position: localPos,
       rotation: new THREE.Euler(0, 0, 0, "XYZ"),
       material: obstacleMaterial,
-      uvScale: [Math.max(size.x, 1), Math.max(size.z, 1)],
+      uvScale: [Math.max(MOVING_OBSTACLE_W, 1), Math.max(MOVING_OBSTACLE_L, 1)],
       outline: { color: 0x000000, scale: 1.002 },
     });
-    const halfExtents = new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2);
+
     const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-    body.addShape(new CANNON.Box(halfExtents));
+    body.addShape(
+      new CANNON.Box(
+        new CANNON.Vec3(
+          MOVING_OBSTACLE_W / 2,
+          MOVING_OBSTACLE_H / 2,
+          MOVING_OBSTACLE_L / 2,
+        ),
+      ),
+    );
 
-    const bounds = createMovingObstacleBounds(TRACK_W, size.x);
-    const startX = Math.min(Math.max(localPos.x, bounds.minX), bounds.maxX);
-    const localStart = new CANNON.Vec3(startX, localPos.y, localPos.z);
-    body.position.set(localStart.x, localStart.y, localStart.z);
-    body.quaternion.set(0, 0, 0, 1);
-    body.aabbNeedsUpdate = true;
-    body.updateAABB();
-
-    mesh.position.x = startX;
-
-    movingObstacles.push({
+    registerObstacleActor({
       visual: mesh,
       body,
-      baseLocalPos: localStart,
-      localQuat: new CANNON.Quaternion(0, 0, 0, 1),
-      minX: bounds.minX,
-      maxX: bounds.maxX,
+      localPos,
+      trackWidth: TRACK_W,
+      obstacleWidth: MOVING_OBSTACLE_W,
       phase,
       speedHz,
     });
-    movingObstacleBodies.push(body);
   };
 
-  const addMovingFinalObstacle = (localPos: THREE.Vector3, phase: number): void => {
+  const addStaticSqueezeObstacle = (z: number, holeSide: -1 | 1): void => {
     const obstacleGroup = new THREE.Group();
-    obstacleGroup.position.copy(localPos);
     group.add(obstacleGroup);
 
-    const pillarY = -FINAL_OBSTACLE_TOTAL_H / 2 + FINAL_OBSTACLE_HOLE_H / 2;
-    const topY = FINAL_OBSTACLE_TOTAL_H / 2 - FINAL_OBSTACLE_TOP_H / 2;
-    const sideX = FINAL_OBSTACLE_TOTAL_W / 2 - FINAL_OBSTACLE_SIDE_W / 2;
-
-    const addFinalPiece = (size: THREE.Vector3, position: THREE.Vector3): void => {
-      const mesh = addVisualPart(obstacleGroup, {
-        size,
-        position,
-        rotation: new THREE.Euler(0, 0, 0, "XYZ"),
-        material: obstacleMaterial,
-        uvScale: [Math.max(size.x, 1), Math.max(size.z, 1)],
-        outline: { color: 0x000000, scale: 1.002 },
-      });
-      mesh.castShadow = false;
-    };
-
-    addFinalPiece(
-      new THREE.Vector3(FINAL_OBSTACLE_SIDE_W, FINAL_OBSTACLE_HOLE_H, FINAL_OBSTACLE_DEPTH),
-      new THREE.Vector3(-sideX, pillarY, 0),
-    );
-    addFinalPiece(
-      new THREE.Vector3(FINAL_OBSTACLE_SIDE_W, FINAL_OBSTACLE_HOLE_H, FINAL_OBSTACLE_DEPTH),
-      new THREE.Vector3(sideX, pillarY, 0),
-    );
-    addFinalPiece(
-      new THREE.Vector3(FINAL_OBSTACLE_TOTAL_W, FINAL_OBSTACLE_TOP_H, FINAL_OBSTACLE_DEPTH),
-      new THREE.Vector3(0, topY, 0),
-    );
+    const y = FLOOR_THICK / 2 + SQUEEZE_OBSTACLE_H / 2;
+    const minX = -SQUEEZE_OBSTACLE_W / 2;
+    const maxX = SQUEEZE_OBSTACLE_W / 2;
+    const holeCenter = holeSide * (SQUEEZE_OBSTACLE_W / 2 - SQUEEZE_HOLE_W / 2 - 0.55);
+    const leftEdge = holeCenter - SQUEEZE_HOLE_W / 2;
+    const rightEdge = holeCenter + SQUEEZE_HOLE_W / 2;
+    const leftWidth = Math.max(0, leftEdge - minX);
+    const rightWidth = Math.max(0, maxX - rightEdge);
 
     const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-    body.addShape(
+
+    const addPiece = (width: number, centerX: number) => {
+      if (width <= 0.001) {
+        return;
+      }
+      addVisualPart(obstacleGroup, {
+        size: new THREE.Vector3(width, SQUEEZE_OBSTACLE_H, SQUEEZE_OBSTACLE_L),
+        position: new THREE.Vector3(centerX, 0, 0),
+        rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+        material: obstacleMaterial,
+        uvScale: [Math.max(width, 1), Math.max(SQUEEZE_OBSTACLE_L, 1)],
+        outline: { color: 0x000000, scale: 1.002 },
+      });
+      body.addShape(
+        new CANNON.Box(new CANNON.Vec3(width / 2, SQUEEZE_OBSTACLE_H / 2, SQUEEZE_OBSTACLE_L / 2)),
+        new CANNON.Vec3(centerX, 0, 0),
+      );
+    };
+
+    addPiece(leftWidth, minX + leftWidth / 2);
+    addPiece(rightWidth, rightEdge + rightWidth / 2);
+
+    registerObstacleActor({
+      visual: obstacleGroup,
+      body,
+      localPos: new THREE.Vector3(0, y, z),
+      trackWidth: TRACK_W,
+      obstacleWidth: SQUEEZE_OBSTACLE_W,
+      phase: 0,
+      speedHz: 0,
+    });
+  };
+
+  const addFinalMovingHoleGate = (z: number): void => {
+    const y = FLOOR_THICK / 2 + FINAL_GATE_TOTAL_H / 2;
+    const pillarY = -FINAL_GATE_TOTAL_H / 2 + FINAL_GATE_HOLE_H / 2;
+    const topY = FINAL_GATE_TOTAL_H / 2 - FINAL_GATE_TOP_H / 2;
+    const sideX = FINAL_GATE_TOTAL_W / 2 - FINAL_GATE_SIDE_W / 2;
+
+    const topMesh = addVisualPart(group, {
+      size: new THREE.Vector3(FINAL_GATE_TOTAL_W, FINAL_GATE_TOP_H, FINAL_GATE_DEPTH),
+      position: new THREE.Vector3(0, y + topY, z),
+      rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+      material: obstacleMaterial,
+      uvScale: [Math.max(FINAL_GATE_TOTAL_W, 1), Math.max(FINAL_GATE_DEPTH, 1)],
+      outline: { color: 0x000000, scale: 1.002 },
+    });
+    const topBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+    topBody.addShape(
+      new CANNON.Box(new CANNON.Vec3(FINAL_GATE_TOTAL_W / 2, FINAL_GATE_TOP_H / 2, FINAL_GATE_DEPTH / 2)),
+    );
+
+    registerObstacleActor({
+      visual: topMesh,
+      body: topBody,
+      localPos: new THREE.Vector3(0, y + topY, z),
+      trackWidth: FINISH_WIDTH,
+      obstacleWidth: FINAL_GATE_TOTAL_W,
+      phase: 0,
+      speedHz: 0,
+    });
+
+    const movingGroup = new THREE.Group();
+    group.add(movingGroup);
+
+    const addPillarVisual = (x: number): void => {
+      addVisualPart(movingGroup, {
+        size: new THREE.Vector3(FINAL_GATE_SIDE_W, FINAL_GATE_HOLE_H, FINAL_GATE_DEPTH),
+        position: new THREE.Vector3(x, pillarY, 0),
+        rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+        material: obstacleMaterial,
+        uvScale: [Math.max(FINAL_GATE_SIDE_W, 1), Math.max(FINAL_GATE_DEPTH, 1)],
+        outline: { color: 0x000000, scale: 1.002 },
+      });
+    };
+
+    addPillarVisual(-sideX);
+    addPillarVisual(sideX);
+
+    const movingBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+    movingBody.addShape(
       new CANNON.Box(
-        new CANNON.Vec3(
-          FINAL_OBSTACLE_SIDE_W / 2,
-          FINAL_OBSTACLE_HOLE_H / 2,
-          FINAL_OBSTACLE_DEPTH / 2,
-        ),
+        new CANNON.Vec3(FINAL_GATE_SIDE_W / 2, FINAL_GATE_HOLE_H / 2, FINAL_GATE_DEPTH / 2),
       ),
       new CANNON.Vec3(-sideX, pillarY, 0),
     );
-    body.addShape(
+    movingBody.addShape(
       new CANNON.Box(
-        new CANNON.Vec3(
-          FINAL_OBSTACLE_SIDE_W / 2,
-          FINAL_OBSTACLE_HOLE_H / 2,
-          FINAL_OBSTACLE_DEPTH / 2,
-        ),
+        new CANNON.Vec3(FINAL_GATE_SIDE_W / 2, FINAL_GATE_HOLE_H / 2, FINAL_GATE_DEPTH / 2),
       ),
       new CANNON.Vec3(sideX, pillarY, 0),
     );
-    body.addShape(
-      new CANNON.Box(
-        new CANNON.Vec3(
-          FINAL_OBSTACLE_TOTAL_W / 2,
-          FINAL_OBSTACLE_TOP_H / 2,
-          FINAL_OBSTACLE_DEPTH / 2,
-        ),
-      ),
-      new CANNON.Vec3(0, topY, 0),
-    );
 
-    const bounds = createMovingObstacleBounds(FINISH_WIDTH, FINAL_OBSTACLE_TOTAL_W);
-    const startX = Math.min(Math.max(localPos.x, bounds.minX), bounds.maxX);
-    const localStart = new CANNON.Vec3(startX, localPos.y, localPos.z);
-    body.position.set(localStart.x, localStart.y, localStart.z);
-    body.quaternion.set(0, 0, 0, 1);
-    body.aabbNeedsUpdate = true;
-    body.updateAABB();
-
-    obstacleGroup.position.x = startX;
-
-    movingObstacles.push({
-      visual: obstacleGroup,
-      body,
-      baseLocalPos: localStart,
-      localQuat: new CANNON.Quaternion(0, 0, 0, 1),
-      minX: bounds.minX,
-      maxX: bounds.maxX,
-      phase,
-      speedHz: MOVING_OBSTACLE_SPEED_HZ * 0.85,
+    registerObstacleActor({
+      visual: movingGroup,
+      body: movingBody,
+      localPos: new THREE.Vector3(0, y, z),
+      trackWidth: FINISH_WIDTH,
+      obstacleWidth: FINAL_GATE_TOTAL_W,
+      phase: Math.PI * 0.35,
+      speedHz: 0.17,
     });
-    movingObstacleBodies.push(body);
   };
 
   const tempOffset = new CANNON.Vec3();
@@ -445,8 +496,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     boardPos: CANNON.Vec3,
     boardQuat: CANNON.Quaternion,
   ): void => {
-    for (const obstacle of movingObstacles) {
-      obstacle.phase += fixedDt * obstacle.speedHz * Math.PI * 2;
+    for (const obstacle of obstacleActors) {
+      if (obstacle.speedHz !== 0 && obstacle.maxX > obstacle.minX) {
+        obstacle.phase += fixedDt * obstacle.speedHz * Math.PI * 2;
+      }
+
       const centerX = (obstacle.minX + obstacle.maxX) / 2;
       const amplitude = (obstacle.maxX - obstacle.minX) / 2;
       const localX = centerX + Math.sin(obstacle.phase) * amplitude;
@@ -470,7 +524,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   };
 
   const setMovingObstacleMaterial = (material: CANNON.Material): void => {
-    for (const obstacle of movingObstacles) {
+    for (const obstacle of obstacleActors) {
       obstacle.body.material = material;
     }
   };
@@ -499,24 +553,14 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     }
   }
 
-  const finishSegment: SegmentDef = {
+  addSegment({
     length: FINISH_LENGTH,
     slopeDeg: 0,
-    yawDeg: 0,
     width: FINISH_WIDTH,
-    isFinish: true,
-  };
-
-  currentYawDeg += finishSegment.yawDeg;
-  addSegment({
-    length: finishSegment.length,
-    slopeDeg: finishSegment.slopeDeg,
-    width: finishSegment.width,
     railLeft: true,
     railRight: true,
   });
 
-  // Keep floor visuals segmented, but use one collider slab for seamless rolling.
   const fullFloorLength = pathStartTopPoint.z - startTopBackPoint.z;
   const fullFloorCenterZ = startTopBackPoint.z + fullFloorLength / 2;
   addCompoundPart(boardBody, {
@@ -535,46 +579,55 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     .add(new THREE.Vector3(0, MARBLE_RADIUS + 0.6, 0));
   const trialStartZ = spawn.z + 2;
   const trialFinishZ = pathStartTopPoint.z - 1;
-  const slalomStartZ = trialStartZ + 6;
-  const slalomEndZ = trialFinishZ - 6;
-  const slalomSpan = Math.max(slalomEndZ - slalomStartZ, 1);
 
-  for (let i = 0; i < SLALOM_COUNT; i += 1) {
-    const t = i / (SLALOM_COUNT - 1);
-    const z = slalomStartZ + slalomSpan * t;
+  const mainObstacleCount = 12;
+  const mainStartZ = trialStartZ + 7;
+  const mainEndZ = trialFinishZ - 14;
+  const mainSpan = Math.max(mainEndZ - mainStartZ, 1);
+  const mainStep = mainObstacleCount > 1 ? mainSpan / (mainObstacleCount - 1) : 0;
+  const laneAnchorX = TRACK_W / 2 - RAIL_THICK - MOVING_OBSTACLE_W / 2 - 0.35;
+
+  // Zone A: first 4 obstacles alternate side and speed.
+  const zoneASpeeds = [0.13, 0.22, 0.15, 0.24];
+  const zoneAPhases = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+  for (let i = 0; i < 4; i += 1) {
+    const z = mainStartZ + mainStep * i;
     const side = i % 2 === 0 ? -1 : 1;
-    const x = side * (TRACK_W / 2 - SLALOM_OBSTACLE_W / 2 - 0.35);
-    const y = FLOOR_THICK / 2 + SLALOM_OBSTACLE_H / 2;
+    const x = side * laneAnchorX;
+    addMovingBlock(new THREE.Vector3(x, FLOOR_THICK / 2 + MOVING_OBSTACLE_H / 2, z), zoneAPhases[i]!, zoneASpeeds[i]!);
+  }
 
-    addMovingObstacle(
-      new THREE.Vector3(x, y, z),
-      new THREE.Vector3(SLALOM_OBSTACLE_W, SLALOM_OBSTACLE_H, SLALOM_OBSTACLE_L),
-      t * Math.PI * 1.15,
+  // Zone B: next 6 obstacles move in opposite directions with unsynced phase/speed.
+  const zoneBSpeeds = [0.19, 0.27, 0.17, 0.25, 0.21, 0.29];
+  const zoneBPhases = [0.2, Math.PI + 0.1, 1.1, Math.PI + 0.85, 0.55, Math.PI + 1.45];
+  for (let i = 0; i < 6; i += 1) {
+    const z = mainStartZ + mainStep * (4 + i);
+    const side = i % 2 === 0 ? -1 : 1;
+    const x = side * (laneAnchorX * 0.85);
+    addMovingBlock(
+      new THREE.Vector3(x, FLOOR_THICK / 2 + MOVING_OBSTACLE_H / 2, z),
+      zoneBPhases[i]!,
+      zoneBSpeeds[i]!,
     );
   }
 
-  const finalObstacleY = FLOOR_THICK / 2 + FINAL_OBSTACLE_TOTAL_H / 2;
-  const finalObstacleZ = trialFinishZ - 2.4;
-  addMovingFinalObstacle(new THREE.Vector3(0, finalObstacleY, finalObstacleZ), Math.PI * 0.35);
+  // Zone C: two static squeeze obstacles with side holes.
+  addStaticSqueezeObstacle(mainStartZ + mainStep * 10, -1);
+  addStaticSqueezeObstacle(mainStartZ + mainStep * 11, 1);
+
+  // Zone D: final gate is a static-position wall with a moving hole.
+  addFinalMovingHoleGate(trialFinishZ - 3.4);
 
   addVisualPart(group, {
     size: new THREE.Vector3(TRACK_W + 0.8, MARKER_THICK, 0.45),
-    position: new THREE.Vector3(
-      0,
-      FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01,
-      trialStartZ,
-    ),
+    position: new THREE.Vector3(0, FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01, trialStartZ),
     rotation: new THREE.Euler(0, 0, 0, "XYZ"),
     material: startMarkerMaterial,
   });
 
   addVisualPart(group, {
     size: new THREE.Vector3(FINISH_WIDTH + 1.2, MARKER_THICK, 0.55),
-    position: new THREE.Vector3(
-      0,
-      FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01,
-      trialFinishZ,
-    ),
+    position: new THREE.Vector3(0, FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01, trialFinishZ),
     rotation: new THREE.Euler(0, 0, 0, "XYZ"),
     material: finishMarkerMaterial,
   });
@@ -583,7 +636,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
   return {
     group,
-    bodies: [boardBody, ...movingObstacleBodies],
+    bodies: [boardBody, ...obstacleBodies],
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
     trialStartZ,
