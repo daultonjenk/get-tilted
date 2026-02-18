@@ -497,6 +497,14 @@ export function HelloMarble() {
     const boardQuatThree = new THREE.Quaternion();
     const boardInverseQuatThree = new THREE.Quaternion();
     const marblePosLocalToBoard = new THREE.Vector3();
+    const localRenderPrevBoardPos = new THREE.Vector3();
+    const localRenderPrevBoardQuat = new THREE.Quaternion();
+    const localRenderCurrBoardPos = new THREE.Vector3();
+    const localRenderCurrBoardQuat = new THREE.Quaternion();
+    const localRenderPrevMarblePos = new THREE.Vector3();
+    const localRenderPrevMarbleQuat = new THREE.Quaternion();
+    const localRenderCurrMarblePos = new THREE.Vector3();
+    const localRenderCurrMarbleQuat = new THREE.Quaternion();
     const boardPrevPos = new CANNON.Vec3(0, 0, 0);
     boardPrevPos.copy(boardBody.position);
     const boardPrevQuat = new THREE.Quaternion(
@@ -537,6 +545,45 @@ export function HelloMarble() {
     let inputIntentZ = 0;
     let inputRawIntentX = 0;
     let inputRawIntentZ = 0;
+    let latestAngularSpeed = 0;
+    let latestVerticalSpeed = 0;
+    let latestPenetrationDepth = 0;
+    let accumulator = 0;
+
+    const syncLocalRenderSnapshotsFromBodies = () => {
+      localRenderPrevBoardPos.set(
+        boardBody.position.x,
+        boardBody.position.y,
+        boardBody.position.z,
+      );
+      localRenderCurrBoardPos.copy(localRenderPrevBoardPos);
+      localRenderPrevBoardQuat.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
+      localRenderCurrBoardQuat.copy(localRenderPrevBoardQuat);
+      localRenderPrevMarblePos.set(
+        marbleBody.position.x,
+        marbleBody.position.y,
+        marbleBody.position.z,
+      );
+      localRenderCurrMarblePos.copy(localRenderPrevMarblePos);
+      localRenderPrevMarbleQuat.set(
+        marbleBody.quaternion.x,
+        marbleBody.quaternion.y,
+        marbleBody.quaternion.z,
+        marbleBody.quaternion.w,
+      );
+      localRenderCurrMarbleQuat.copy(localRenderPrevMarbleQuat);
+      track.group.position.copy(localRenderCurrBoardPos);
+      track.group.quaternion.copy(localRenderCurrBoardQuat);
+      marbleMesh.position.copy(localRenderCurrMarblePos);
+      marbleMesh.quaternion.copy(localRenderCurrMarbleQuat);
+      boardPosThree.copy(localRenderCurrBoardPos);
+      boardQuatThree.copy(localRenderCurrBoardQuat);
+    };
 
     const suppressVerticalPopOnSideImpact = () => {
       tempQuatA.set(
@@ -1047,6 +1094,7 @@ export function HelloMarble() {
       marbleBody.updateMassProperties();
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
+      syncLocalRenderSnapshotsFromBodies();
     };
 
     const unfreezeMarble = () => {
@@ -1054,6 +1102,7 @@ export function HelloMarble() {
       marbleBody.mass = 1;
       marbleBody.updateMassProperties();
       marbleBody.wakeUp();
+      syncLocalRenderSnapshotsFromBodies();
     };
 
     freezeMarbleRef.current = freezeMarble;
@@ -1069,6 +1118,7 @@ export function HelloMarble() {
       marbleBody.angularVelocity.set(0, 0, 0);
       trialStartAt = null;
       prevMarbleZ = marbleBody.position.z;
+      syncLocalRenderSnapshotsFromBodies();
       setTrialState("idle");
       setTrialCurrentMs(null);
       if (incrementCounter) {
@@ -1266,44 +1316,8 @@ export function HelloMarble() {
     let renderMsEma = 0;
     let miscMsEma = 0;
     let perfTier: MobilePerfTier | "desktop" = mobilePerfGovernor ? "high" : "desktop";
-
-    const tick = (nowMs: number) => {
-      const frameStartMs = performance.now();
-      if (lastCadenceTimestampMs != null) {
-        const rafDeltaMs = clamp(nowMs - lastCadenceTimestampMs, 1, 250);
-        cadenceMsEma += (rafDeltaMs - cadenceMsEma) * 0.12;
-      }
-      lastCadenceTimestampMs = nowMs;
-      const now = nowMs / 1000;
-      let delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
-      lastTime = now;
-      // T1-3: After un-backgrounding, clamp delta to a single frame to avoid physics jump.
-      if (wasBackgrounded) {
-        delta = TIMESTEP;
-        wasBackgrounded = false;
-      }
-      debugTimer += delta;
-
+    const simulateFixedStep = (nowMs: number, fixedDt: number): number => {
       const currentTuning = tuningRef.current;
-      if (mobileMode && mobilePerfGovernor) {
-        mobilePerfGovernor.setUserScaleCap(
-          clamp(
-            currentTuning.renderScaleMobile,
-            MOBILE_SAFE_RENDER_SCALE_MIN,
-            MOBILE_SAFE_RENDER_SCALE_MAX,
-          ),
-        );
-      } else if (mobileMode) {
-        const nextRenderScale = clamp(
-          currentTuning.renderScaleMobile,
-          MOBILE_RENDER_SCALE_MIN,
-          MOBILE_RENDER_SCALE_MAX,
-        );
-        if (Math.abs(nextRenderScale - lastRenderScale) > 0.001) {
-          lastRenderScale = nextRenderScale;
-          renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
-        }
-      }
       world.gravity.set(0, -currentTuning.gravityG, 0);
       solver.iterations = Math.round(currentTuning.physicsSolverIterations);
       marbleBody.linearDamping = currentTuning.linearDamping;
@@ -1312,51 +1326,12 @@ export function HelloMarble() {
       marbleBodyWithCcd.ccdIterations = Math.round(currentTuning.ccdIterations);
       contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
       contactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
-
-      if (Math.abs(currentTuning.tiltFilterTau - lastFilterTau) > 0.0001) {
-        lastFilterTau = currentTuning.tiltFilterTau;
-        filter = makeTiltFilter({ tau: lastFilterTau });
-        filter.reset(lastFilteredIntent);
-      }
-
-      const countdownStart = countdownStartAtRef.current;
-      if (countdownStart != null) {
-        const stepMs = countdownStepMsRef.current;
-        const elapsedMs = raceClient.getServerNowMs() - countdownStart;
-        if (elapsedMs >= 0 && elapsedMs < stepMs * COUNTDOWN_LABELS.length) {
-          const nextIndex = clamp(
-            Math.floor(elapsedMs / stepMs),
-            0,
-            COUNTDOWN_LABELS.length - 1,
-          );
-          if (nextIndex !== countdownIndexRef.current) {
-            countdownIndexRef.current = nextIndex;
-            setCountdownToken(COUNTDOWN_LABELS[nextIndex] ?? null);
-          }
-          if (!countdownGoHandledRef.current && nextIndex >= COUNTDOWN_LABELS.length - 1) {
-            countdownGoHandledRef.current = true;
-            if (gameModeRef.current === "solo") {
-              unfreezeMarbleRef.current();
-            }
-            setControlsLocked(false);
-            setRacePhase("racing");
-            calibrateTiltRef.current();
-          }
-        } else if (elapsedMs >= stepMs * COUNTDOWN_LABELS.length) {
-          if (!countdownGoHandledRef.current) {
-            countdownGoHandledRef.current = true;
-            if (gameModeRef.current === "solo") {
-              unfreezeMarbleRef.current();
-            }
-            setControlsLocked(false);
-            setRacePhase("racing");
-            calibrateTiltRef.current();
-          }
-          setCountdownStartAtMs(null);
-          setCountdownToken(null);
-          countdownIndexRef.current = -1;
-        }
-      }
+      track.group.quaternion.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
 
       let sourceIntent: TiltSample;
       const status = tiltStatusRef.current;
@@ -1410,7 +1385,7 @@ export function HelloMarble() {
       inputIntentX = normalizedIntent.x;
       inputIntentZ = normalizedIntent.z;
 
-      const filteredIntent = filter.push(normalizedIntent, delta);
+      const filteredIntent = filter.push(normalizedIntent, fixedDt);
       lastFilteredIntent = filteredIntent;
       const maxTiltRad = (currentTuning.maxTiltDeg * Math.PI) / 180;
 
@@ -1418,17 +1393,17 @@ export function HelloMarble() {
         filteredIntent.z * currentTuning.tiltStrength * maxTiltRad;
       const desiredRoll =
         -filteredIntent.x * currentTuning.tiltStrength * maxTiltRad;
-      const maxStep = currentTuning.maxBoardAngVel * delta;
+      const maxStep = currentTuning.maxBoardAngVel * fixedDt;
       currentPitch += clamp(desiredPitch - currentPitch, -maxStep, maxStep);
       currentRoll += clamp(desiredRoll - currentRoll, -maxStep, maxStep);
 
       visualTiltTargetEuler.set(currentPitch, 0, currentRoll);
       visualTiltTargetQuat.setFromEuler(visualTiltTargetEuler);
-      const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * delta);
+      const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * fixedDt);
       track.group.quaternion.slerp(visualTiltTargetQuat, boardTiltAlpha);
 
       rawPivot.set(marbleBody.position.x, 0, marbleBody.position.z);
-      const pivotAlpha = 1 - Math.exp(-PIVOT_SMOOTH * delta);
+      const pivotAlpha = 1 - Math.exp(-PIVOT_SMOOTH * fixedDt);
       pivotSmoothed.x += (rawPivot.x - pivotSmoothed.x) * pivotAlpha;
       pivotSmoothed.y += (rawPivot.y - pivotSmoothed.y) * pivotAlpha;
       pivotSmoothed.z += (rawPivot.z - pivotSmoothed.z) * pivotAlpha;
@@ -1447,59 +1422,47 @@ export function HelloMarble() {
         pivotSmoothed.z - rotatedPivot.z,
       );
 
-      if (delta > 0.00001) {
-        const invDelta = 1 / delta;
-        boardBody.velocity.set(
-          (boardPosition.x - boardPrevPos.x) * invDelta,
-          (boardPosition.y - boardPrevPos.y) * invDelta,
-          (boardPosition.z - boardPrevPos.z) * invDelta,
-        );
+      const invDelta = 1 / fixedDt;
+      boardBody.velocity.set(
+        (boardPosition.x - boardPrevPos.x) * invDelta,
+        (boardPosition.y - boardPrevPos.y) * invDelta,
+        (boardPosition.z - boardPrevPos.z) * invDelta,
+      );
 
-        boardNextQuat.set(
-          qFinalCannon.x,
-          qFinalCannon.y,
-          qFinalCannon.z,
-          qFinalCannon.w,
+      boardNextQuat.set(
+        qFinalCannon.x,
+        qFinalCannon.y,
+        qFinalCannon.z,
+        qFinalCannon.w,
+      );
+      boardPrevQuatInv.copy(boardPrevQuat).invert();
+      boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
+      const w = clamp(boardDeltaQuat.w, -1, 1);
+      let angle = 2 * Math.acos(w);
+      if (angle > Math.PI) {
+        angle -= 2 * Math.PI;
+      }
+      const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
+      if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
+        boardAngularAxis.set(
+          boardDeltaQuat.x / sinHalf,
+          boardDeltaQuat.y / sinHalf,
+          boardDeltaQuat.z / sinHalf,
         );
-        boardPrevQuatInv.copy(boardPrevQuat).invert();
-        boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
-        const w = clamp(boardDeltaQuat.w, -1, 1);
-        let angle = 2 * Math.acos(w);
-        if (angle > Math.PI) {
-          angle -= 2 * Math.PI;
-        }
-        const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
-        if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
-          boardAngularAxis.set(
-            boardDeltaQuat.x / sinHalf,
-            boardDeltaQuat.y / sinHalf,
-            boardDeltaQuat.z / sinHalf,
-          );
-          const angularSpeed = angle * invDelta;
-          boardBody.angularVelocity.set(
-            boardAngularAxis.x * angularSpeed,
-            boardAngularAxis.y * angularSpeed,
-            boardAngularAxis.z * angularSpeed,
-          );
-        } else {
-          boardBody.angularVelocity.set(0, 0, 0);
-        }
+        const angularSpeed = angle * invDelta;
+        boardBody.angularVelocity.set(
+          boardAngularAxis.x * angularSpeed,
+          boardAngularAxis.y * angularSpeed,
+          boardAngularAxis.z * angularSpeed,
+        );
       } else {
-        boardBody.velocity.set(0, 0, 0);
         boardBody.angularVelocity.set(0, 0, 0);
-        boardNextQuat.set(
-          qFinalCannon.x,
-          qFinalCannon.y,
-          qFinalCannon.z,
-          qFinalCannon.w,
-        );
       }
 
       boardBody.quaternion.copy(qFinalCannon);
       boardBody.position.copy(boardPosition);
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
-      track.group.position.set(boardPosition.x, boardPosition.y, boardPosition.z);
       boardPrevPos.copy(boardPosition);
       boardPrevQuat.copy(boardNextQuat);
 
@@ -1509,7 +1472,7 @@ export function HelloMarble() {
       }
 
       const physicsStartMs = performance.now();
-      world.step(TIMESTEP, delta, Math.round(currentTuning.physicsMaxSubSteps));
+      world.step(fixedDt, fixedDt, 1);
       suppressVerticalPopOnSideImpact();
       const physicsMs = performance.now() - physicsStartMs;
 
@@ -1565,8 +1528,9 @@ export function HelloMarble() {
         marbleBody.updateAABB();
         penetrationDepth = computePenetrationDepth();
       }
-      const angularSpeed = marbleBody.angularVelocity.length();
-      const verticalSpeed = marbleBody.velocity.y;
+      latestPenetrationDepth = penetrationDepth;
+      latestAngularSpeed = marbleBody.angularVelocity.length();
+      latestVerticalSpeed = marbleBody.velocity.y;
 
       if (
         nowMs - lastRaceSendAt >= SOURCE_RATE_MS &&
@@ -1575,13 +1539,6 @@ export function HelloMarble() {
         trialStateRef.current !== "finished" &&
         !isRaceFinishedLocal
       ) {
-        boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
-        boardQuatThree.set(
-          boardBody.quaternion.x,
-          boardBody.quaternion.y,
-          boardBody.quaternion.z,
-          boardBody.quaternion.w,
-        );
         const candidateT = raceClient.getServerNowMs();
         const monotonicT = Math.max(candidateT, lastSentRaceStateT + 1);
         lastSentRaceStateT = monotonicT;
@@ -1646,25 +1603,147 @@ export function HelloMarble() {
       }
       prevMarbleZ = marbleZ;
 
-      marbleMesh.position.set(
+      localRenderCurrBoardPos.set(
+        boardBody.position.x,
+        boardBody.position.y,
+        boardBody.position.z,
+      );
+      localRenderCurrBoardQuat.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
+      localRenderCurrMarblePos.set(
         marbleBody.position.x,
         marbleBody.position.y,
         marbleBody.position.z,
       );
-      marbleMesh.quaternion.set(
+      localRenderCurrMarbleQuat.set(
         marbleBody.quaternion.x,
         marbleBody.quaternion.y,
         marbleBody.quaternion.z,
         marbleBody.quaternion.w,
       );
 
-      boardPosThree.set(boardBody.position.x, boardBody.position.y, boardBody.position.z);
-      boardQuatThree.set(
-        boardBody.quaternion.x,
-        boardBody.quaternion.y,
-        boardBody.quaternion.z,
-        boardBody.quaternion.w,
-      );
+      return physicsMs;
+    };
+
+    const tick = (nowMs: number) => {
+      const frameStartMs = performance.now();
+      if (lastCadenceTimestampMs != null) {
+        const rafDeltaMs = clamp(nowMs - lastCadenceTimestampMs, 1, 250);
+        cadenceMsEma += (rafDeltaMs - cadenceMsEma) * 0.12;
+      }
+      lastCadenceTimestampMs = nowMs;
+      const now = nowMs / 1000;
+      let delta = Math.min(now - lastTime, MAX_FRAME_DELTA);
+      lastTime = now;
+      // T1-3: After un-backgrounding, clamp delta to a single frame to avoid physics jump.
+      if (wasBackgrounded) {
+        delta = TIMESTEP;
+        accumulator = 0;
+        wasBackgrounded = false;
+      }
+      debugTimer += delta;
+
+      const currentTuning = tuningRef.current;
+      if (mobileMode && mobilePerfGovernor) {
+        mobilePerfGovernor.setUserScaleCap(
+          clamp(
+            currentTuning.renderScaleMobile,
+            MOBILE_SAFE_RENDER_SCALE_MIN,
+            MOBILE_SAFE_RENDER_SCALE_MAX,
+          ),
+        );
+      } else if (mobileMode) {
+        const nextRenderScale = clamp(
+          currentTuning.renderScaleMobile,
+          MOBILE_RENDER_SCALE_MIN,
+          MOBILE_RENDER_SCALE_MAX,
+        );
+        if (Math.abs(nextRenderScale - lastRenderScale) > 0.001) {
+          lastRenderScale = nextRenderScale;
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio, lastRenderScale));
+        }
+      }
+
+      if (Math.abs(currentTuning.tiltFilterTau - lastFilterTau) > 0.0001) {
+        lastFilterTau = currentTuning.tiltFilterTau;
+        filter = makeTiltFilter({ tau: lastFilterTau });
+        filter.reset(lastFilteredIntent);
+      }
+
+      const countdownStart = countdownStartAtRef.current;
+      if (countdownStart != null) {
+        const stepMs = countdownStepMsRef.current;
+        const elapsedMs = raceClient.getServerNowMs() - countdownStart;
+        if (elapsedMs >= 0 && elapsedMs < stepMs * COUNTDOWN_LABELS.length) {
+          const nextIndex = clamp(
+            Math.floor(elapsedMs / stepMs),
+            0,
+            COUNTDOWN_LABELS.length - 1,
+          );
+          if (nextIndex !== countdownIndexRef.current) {
+            countdownIndexRef.current = nextIndex;
+            setCountdownToken(COUNTDOWN_LABELS[nextIndex] ?? null);
+          }
+          if (!countdownGoHandledRef.current && nextIndex >= COUNTDOWN_LABELS.length - 1) {
+            countdownGoHandledRef.current = true;
+            if (gameModeRef.current === "solo") {
+              unfreezeMarbleRef.current();
+            }
+            setControlsLocked(false);
+            setRacePhase("racing");
+            calibrateTiltRef.current();
+          }
+        } else if (elapsedMs >= stepMs * COUNTDOWN_LABELS.length) {
+          if (!countdownGoHandledRef.current) {
+            countdownGoHandledRef.current = true;
+            if (gameModeRef.current === "solo") {
+              unfreezeMarbleRef.current();
+            }
+            setControlsLocked(false);
+            setRacePhase("racing");
+            calibrateTiltRef.current();
+          }
+          setCountdownStartAtMs(null);
+          setCountdownToken(null);
+          countdownIndexRef.current = -1;
+        }
+      }
+
+      accumulator += delta;
+      const maxCatchupSteps = Math.max(1, Math.round(currentTuning.physicsMaxSubSteps));
+      let physicsMs = 0;
+      let simulatedSteps = 0;
+      while (accumulator >= TIMESTEP && simulatedSteps < maxCatchupSteps) {
+        localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
+        localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
+        localRenderPrevMarblePos.copy(localRenderCurrMarblePos);
+        localRenderPrevMarbleQuat.copy(localRenderCurrMarbleQuat);
+        physicsMs += simulateFixedStep(nowMs, TIMESTEP);
+        accumulator -= TIMESTEP;
+        simulatedSteps += 1;
+      }
+      if (simulatedSteps >= maxCatchupSteps && accumulator >= TIMESTEP) {
+        accumulator = 0;
+      }
+
+      const renderAlpha = currentTuning.localRenderInterpolation
+        ? clamp(accumulator / TIMESTEP, 0, 1)
+        : 1;
+      tempVecA.copy(localRenderPrevBoardPos).lerp(localRenderCurrBoardPos, renderAlpha);
+      tempQuatA.copy(localRenderPrevBoardQuat).slerp(localRenderCurrBoardQuat, renderAlpha);
+      track.group.position.copy(tempVecA);
+      track.group.quaternion.copy(tempQuatA);
+      tempVecB.copy(localRenderPrevMarblePos).lerp(localRenderCurrMarblePos, renderAlpha);
+      tempQuatB.copy(localRenderPrevMarbleQuat).slerp(localRenderCurrMarbleQuat, renderAlpha);
+      marbleMesh.position.copy(tempVecB);
+      marbleMesh.quaternion.copy(tempQuatB);
+
+      boardPosThree.copy(track.group.position);
+      boardQuatThree.copy(track.group.quaternion);
 
       let extrapolatingPlayers = 0;
       const interpNowMs = raceClient.getServerNowMs();
@@ -1789,89 +1868,89 @@ export function HelloMarble() {
       const sideSign = currentTuning.invertCameraSide ? -1 : 1;
       switch (currentTuning.cameraPreset) {
         case "chaseCentered": {
-          cameraTarget.set(0, 7.5, marbleBody.position.z - 10);
+          cameraTarget.set(0, 7.5, marbleMesh.position.z - 10);
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.x = 0;
           camera.position.y = 7.5;
-          lookTarget.set(0, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(0, LOOK_HEIGHT, marbleMesh.position.z + LOOK_AHEAD);
           break;
         }
         case "chaseRight": {
           const side = 4 * sideSign;
-          cameraTarget.set(side, 7.5, marbleBody.position.z - 10);
+          cameraTarget.set(side, 7.5, marbleMesh.position.z - 10);
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 7.5;
-          lookTarget.set(side, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(side, LOOK_HEIGHT, marbleMesh.position.z + LOOK_AHEAD);
           break;
         }
         case "chaseLeft": {
           const side = -4 * sideSign;
-          cameraTarget.set(side, 7.5, marbleBody.position.z - 10);
+          cameraTarget.set(side, 7.5, marbleMesh.position.z - 10);
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 7.5;
-          lookTarget.set(side, LOOK_HEIGHT, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(side, LOOK_HEIGHT, marbleMesh.position.z + LOOK_AHEAD);
           break;
         }
         case "isoStandard": {
           cameraTarget.set(
-            marbleBody.position.x + 4 * sideSign,
+            marbleMesh.position.x + 4 * sideSign,
             14,
-            marbleBody.position.z - 8,
+            marbleMesh.position.z - 8,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 14;
-          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + LOOK_AHEAD);
+          lookTarget.set(marbleMesh.position.x, 0, marbleMesh.position.z + LOOK_AHEAD);
           break;
         }
         case "isoFlatter": {
           cameraTarget.set(
-            marbleBody.position.x + 4 * sideSign,
+            marbleMesh.position.x + 4 * sideSign,
             11,
-            marbleBody.position.z - 10,
+            marbleMesh.position.z - 10,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 11;
           lookTarget.set(
-            marbleBody.position.x,
+            marbleMesh.position.x,
             0,
-            marbleBody.position.z + LOOK_AHEAD + 4,
+            marbleMesh.position.z + LOOK_AHEAD + 4,
           );
           break;
         }
         case "topdownPure": {
           cameraTarget.set(
-            marbleBody.position.x,
+            marbleMesh.position.x,
             TOPDOWN_HEIGHT,
-            marbleBody.position.z - TOPDOWN_Z_OFFSET,
+            marbleMesh.position.z - TOPDOWN_Z_OFFSET,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = TOPDOWN_HEIGHT;
-          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z);
+          lookTarget.set(marbleMesh.position.x, 0, marbleMesh.position.z);
           break;
         }
         case "topdownForward": {
           cameraTarget.set(
-            marbleBody.position.x,
+            marbleMesh.position.x,
             TOPDOWN_HEIGHT,
-            marbleBody.position.z - TOPDOWN_Z_OFFSET,
+            marbleMesh.position.z - TOPDOWN_Z_OFFSET,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = TOPDOWN_HEIGHT;
-          lookTarget.set(marbleBody.position.x, 0, marbleBody.position.z + 6);
+          lookTarget.set(marbleMesh.position.x, 0, marbleMesh.position.z + 6);
           break;
         }
         case "broadcast": {
           cameraTarget.set(
-            marbleBody.position.x + 6 * sideSign,
+            marbleMesh.position.x + 6 * sideSign,
             18,
-            marbleBody.position.z - 12,
+            marbleMesh.position.z - 12,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
           camera.position.y = 18;
           lookTarget.set(
-            marbleBody.position.x + sideSign,
+            marbleMesh.position.x + sideSign,
             0,
-            marbleBody.position.z + LOOK_AHEAD,
+            marbleMesh.position.z + LOOK_AHEAD,
           );
           break;
         }
@@ -1953,13 +2032,13 @@ export function HelloMarble() {
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
           speed: marbleBody.velocity.length(),
-          angularSpeed,
-          verticalSpeed,
-          penetrationDepth,
+          angularSpeed: latestAngularSpeed,
+          verticalSpeed: latestVerticalSpeed,
+          penetrationDepth: latestPenetrationDepth,
           rawTiltX: inputRawIntentX,
           rawTiltZ: inputRawIntentZ,
-          tiltX: filteredIntent.x,
-          tiltZ: filteredIntent.z,
+          tiltX: lastFilteredIntent.x,
+          tiltZ: lastFilteredIntent.z,
           gravX: world.gravity.x,
           gravY: world.gravity.y,
           gravZ: world.gravity.z,
@@ -2781,6 +2860,16 @@ export function HelloMarble() {
                 }
               />
               Mobile Safe Fallback (dynamic governor)
+            </label>
+            <label className="controlLabel controlLabelCheckbox">
+              <input
+                type="checkbox"
+                checked={tuning.localRenderInterpolation}
+                onChange={(event) =>
+                  updateTuning("localRenderInterpolation", event.target.checked)
+                }
+              />
+              Local Render Interpolation
             </label>
             <label className="controlLabel">
               Mobile Debug Hz

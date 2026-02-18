@@ -1,7 +1,7 @@
 import type { DebugTabId } from "../ui/DebugDrawer";
 import type { CameraPresetId, TuningState } from "./gameTypes";
 
-export const TIMESTEP = 1 / 60;
+export const TIMESTEP = 1 / 120;
 export const MAX_FRAME_DELTA = 0.1;
 export const LOOK_HEIGHT = 1.2;
 export const LOOK_AHEAD = 16;
@@ -66,8 +66,9 @@ export const DEFAULT_TUNING: TuningState = {
   extraDownForce: 0.7,
   renderScaleMobile: 1,
   mobileSafeFallback: false,
+  localRenderInterpolation: true,
   debugUpdateHzMobile: 5,
-  physicsMaxSubSteps: 7,
+  physicsMaxSubSteps: 12,
   physicsSolverIterations: 24,
   ccdSpeedThreshold: 0.75,
   ccdIterations: 20,

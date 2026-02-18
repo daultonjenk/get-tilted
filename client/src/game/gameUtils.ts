@@ -123,6 +123,9 @@ export function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.mobileSafeFallback === "boolean") {
     base.mobileSafeFallback = value.mobileSafeFallback;
   }
+  if (typeof value.localRenderInterpolation === "boolean") {
+    base.localRenderInterpolation = value.localRenderInterpolation;
+  }
   if (typeof value.debugUpdateHzMobile === "number") {
     base.debugUpdateHzMobile = clamp(value.debugUpdateHzMobile, 2, 15);
   }
