@@ -105,9 +105,8 @@ const MOVING_OBSTACLE_MEDIUM_L = 1.1 * MOVING_OBSTACLE_LENGTH_SCALE;
 const FINAL_WALL_W = 11.2;
 const FINAL_WALL_H = 3.6;
 const FINAL_WALL_DEPTH = 0.13;
-const FINAL_WALL_HOLE_DIAMETER = MARBLE_RADIUS * 2 * 1.15;
-const FINAL_WALL_HOLE_R = FINAL_WALL_HOLE_DIAMETER / 2;
-const FINAL_WALL_HOLE_Y = -FINAL_WALL_H / 2 + FINAL_WALL_HOLE_R;
+const FINAL_WALL_HOLE_WIDTH = MARBLE_RADIUS * 2 * 1.28;
+const FINAL_WALL_HOLE_HEIGHT = MARBLE_RADIUS * 2 * 1.15;
 const FINAL_WALL_HOLE_X = [-2.55, 0, 2.55];
 const FINAL_WALL_CURVE_SEGMENTS = 40;
 const DEFAULT_OBSTACLE_SEED = "track-v0.7.17.0";
@@ -507,6 +506,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     trackWidth: number;
     circleHoles?: Array<{ x: number; y: number; r: number }>;
     bottomOpenCircleHoles?: Array<{ x: number; y: number; r: number }>;
+    bottomRoundedTopHoles?: Array<{ x: number; width: number; height: number }>;
     bottomSlots?: Array<{ x: number; width: number; height: number }>;
   }): void => {
     const y = FLOOR_THICK / 2 + params.height / 2;
@@ -531,6 +531,19 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       holePath.lineTo(hole.x + hole.r, -halfH);
       holePath.lineTo(hole.x + hole.r, hole.y);
       holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI, true);
+      holePath.closePath();
+      wallShape.holes.push(holePath);
+    }
+
+    for (const hole of params.bottomRoundedTopHoles ?? []) {
+      const halfHoleW = hole.width / 2;
+      const holeTop = -halfH + hole.height;
+      const capCenterY = holeTop - halfHoleW;
+      const holePath = new THREE.Path();
+      holePath.moveTo(hole.x - halfHoleW, -halfH);
+      holePath.lineTo(hole.x + halfHoleW, -halfH);
+      holePath.lineTo(hole.x + halfHoleW, capCenterY);
+      holePath.absarc(hole.x, capCenterY, halfHoleW, 0, Math.PI, true);
       holePath.closePath();
       wallShape.holes.push(holePath);
     }
@@ -588,10 +601,10 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       height: FINAL_WALL_H,
       depth: FINAL_WALL_DEPTH,
       trackWidth: FINISH_WIDTH,
-      bottomOpenCircleHoles: FINAL_WALL_HOLE_X.map((x) => ({
+      bottomRoundedTopHoles: FINAL_WALL_HOLE_X.map((x) => ({
         x,
-        y: FINAL_WALL_HOLE_Y,
-        r: FINAL_WALL_HOLE_R,
+        width: FINAL_WALL_HOLE_WIDTH,
+        height: FINAL_WALL_HOLE_HEIGHT,
       })),
     });
   };
