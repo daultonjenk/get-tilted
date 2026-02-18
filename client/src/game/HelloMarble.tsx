@@ -123,6 +123,7 @@ const WALL_SQUEEZE_CONTACT_PADDING_Z = 0.02;
 const WALL_SQUEEZE_POP_CLEARANCE_Z = 0.16;
 const WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED = 2.6;
 const WALL_SQUEEZE_CONFIRM_FRAMES = 2;
+const MOVING_OBSTACLE_CONTACT_FRICTION = 0.02;
 type MenuScreen = "main" | "options";
 
 function readStoredToggle(key: string, defaultValue: boolean): boolean {
@@ -512,11 +513,12 @@ export function HelloMarble() {
     world.addBody(boardBody);
 
     const boardMat = new CANNON.Material("board");
+    const movingObstacleMat = new CANNON.Material("moving-obstacle");
     const marbleMat = new CANNON.Material("marble");
     boardBody.material = boardMat;
-    track.setMovingObstacleMaterial(boardMat);
+    track.setMovingObstacleMaterial(movingObstacleMat);
 
-    const contactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
+    const boardContactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
       friction: tuningRef.current.contactFriction,
       restitution: tuningRef.current.contactRestitution,
       contactEquationStiffness: 5e7,
@@ -524,7 +526,16 @@ export function HelloMarble() {
       frictionEquationStiffness: 5e7,
       frictionEquationRelaxation: 5,
     });
-    world.addContactMaterial(contactMat);
+    world.addContactMaterial(boardContactMat);
+    const movingObstacleContactMat = new CANNON.ContactMaterial(marbleMat, movingObstacleMat, {
+      friction: MOVING_OBSTACLE_CONTACT_FRICTION,
+      restitution: tuningRef.current.contactRestitution,
+      contactEquationStiffness: 5e7,
+      contactEquationRelaxation: 6,
+      frictionEquationStiffness: 5e7,
+      frictionEquationRelaxation: 5,
+    });
+    world.addContactMaterial(movingObstacleContactMat);
     for (const body of track.bodies.slice(1)) {
       world.addBody(body);
     }
@@ -1979,8 +1990,10 @@ export function HelloMarble() {
       marbleBody.angularDamping = currentTuning.angularDamping;
       marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
       marbleBodyWithCcd.ccdIterations = Math.round(currentTuning.ccdIterations);
-      contactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
-      contactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
+      boardContactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
+      boardContactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
+      movingObstacleContactMat.friction = MOVING_OBSTACLE_CONTACT_FRICTION;
+      movingObstacleContactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
       if (!currentTuning.legacyTrackController) {
         updateTrackControllerFixed(fixedDt, currentTuning);
       }
