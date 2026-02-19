@@ -997,11 +997,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     height: STATIC_GAP_WALL_H,
     depth: STATIC_GAP_WALL_DEPTH,
     trackWidth: TRACK_W,
-    bottomSlots: [
+    topOpenRoundedHoles: [
       {
-        x: 1.45,
-        width: MARBLE_RADIUS * 2 * 1.22,
-        height: MARBLE_RADIUS * 2 * 1.4,
+        x: -1.45,
+        width: STANDARD_MARBLE_HOLE_WIDTH,
+        baseHeight: STANDARD_MARBLE_HOLE_BASE_HEIGHT,
       },
     ],
   });
