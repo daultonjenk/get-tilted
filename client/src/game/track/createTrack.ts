@@ -596,17 +596,70 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   };
 
   const addFinalThreeHoleWall = (z: number): void => {
-    addGapWall({
-      z,
-      width: FINAL_WALL_W,
-      height: FINAL_WALL_H,
+    const y = FLOOR_THICK / 2 + FINAL_WALL_H / 2;
+    const halfW = FINAL_WALL_W / 2;
+    const halfH = FINAL_WALL_H / 2;
+    const slotHalfW = STANDARD_MARBLE_HOLE_WIDTH / 2;
+    const sortedCenters = [...FINAL_WALL_HOLE_X].sort((a, b) => a - b);
+    const shapes: THREE.Shape[] = [];
+
+    let segmentStart = -halfW;
+    for (const centerX of sortedCenters) {
+      const slotStart = centerX - slotHalfW;
+      const slotEnd = centerX + slotHalfW;
+      if (slotStart > segmentStart) {
+        const shape = new THREE.Shape();
+        shape.moveTo(segmentStart, -halfH);
+        shape.lineTo(slotStart, -halfH);
+        shape.lineTo(slotStart, halfH);
+        shape.lineTo(segmentStart, halfH);
+        shape.closePath();
+        shapes.push(shape);
+      }
+      segmentStart = Math.max(segmentStart, slotEnd);
+    }
+
+    if (segmentStart < halfW) {
+      const shape = new THREE.Shape();
+      shape.moveTo(segmentStart, -halfH);
+      shape.lineTo(halfW, -halfH);
+      shape.lineTo(halfW, halfH);
+      shape.lineTo(segmentStart, halfH);
+      shape.closePath();
+      shapes.push(shape);
+    }
+
+    const wallGeometry = new THREE.ExtrudeGeometry(shapes, {
       depth: FINAL_WALL_DEPTH,
+      bevelEnabled: false,
+      curveSegments: FINAL_WALL_CURVE_SEGMENTS,
+      steps: 1,
+    });
+    wallGeometry.translate(0, 0, -FINAL_WALL_DEPTH / 2);
+
+    const wallMesh = new THREE.Mesh(wallGeometry, obstacleMaterial);
+    wallMesh.position.set(0, y, z);
+    wallMesh.castShadow = false;
+    wallMesh.receiveShadow = true;
+    const edgeLines = new THREE.LineSegments(
+      new THREE.EdgesGeometry(wallGeometry),
+      new THREE.LineBasicMaterial({ color: 0x330000 }),
+    );
+    edgeLines.scale.set(1.002, 1.002, 1.002);
+    wallMesh.add(edgeLines);
+    group.add(wallMesh);
+
+    const wallBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+    wallBody.addShape(geometryToTrimesh(wallGeometry));
+
+    registerObstacleActor({
+      visual: wallMesh,
+      body: wallBody,
+      localPos: new THREE.Vector3(0, y, z),
       trackWidth: FINISH_WIDTH,
-      bottomRoundedTopHoles: FINAL_WALL_HOLE_X.map((x) => ({
-        x,
-        width: STANDARD_MARBLE_HOLE_WIDTH,
-        baseHeight: STANDARD_MARBLE_HOLE_BASE_HEIGHT,
-      })),
+      obstacleWidth: FINAL_WALL_W,
+      phase: 0,
+      speedHz: 0,
     });
   };
 
