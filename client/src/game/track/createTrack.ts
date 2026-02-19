@@ -508,65 +508,225 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     circleHoles?: Array<{ x: number; y: number; r: number }>;
     bottomOpenCircleHoles?: Array<{ x: number; y: number; r: number }>;
     bottomRoundedTopHoles?: Array<{ x: number; width: number; baseHeight: number }>;
+    topOpenRoundedHoles?: Array<{ x: number; width: number; baseHeight: number }>;
     bottomSlots?: Array<{ x: number; width: number; height: number }>;
   }): void => {
     const y = FLOOR_THICK / 2 + params.height / 2;
-    const wallShape = new THREE.Shape();
     const halfW = params.width / 2;
     const halfH = params.height / 2;
-    wallShape.moveTo(-halfW, -halfH);
-    wallShape.lineTo(halfW, -halfH);
-    wallShape.lineTo(halfW, halfH);
-    wallShape.lineTo(-halfW, halfH);
-    wallShape.closePath();
+    let wallGeometry: THREE.ExtrudeGeometry;
+    if ((params.topOpenRoundedHoles?.length ?? 0) > 0) {
+      type ResolvedTopOpenRoundedHole = {
+        x: number;
+        radius: number;
+        baseY: number;
+        topY: number;
+        leftBottomX: number;
+        rightBottomX: number;
+        leftTopX: number;
+        rightTopX: number;
+        leftTopAngle: number;
+        rightTopAngle: number;
+      };
 
-    for (const hole of params.circleHoles ?? []) {
-      const holePath = new THREE.Path();
-      holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI * 2, false);
-      wallShape.holes.push(holePath);
+      type Boundary =
+        | { kind: "wall"; x: number }
+        | { kind: "holeLeft"; hole: ResolvedTopOpenRoundedHole }
+        | { kind: "holeRight"; hole: ResolvedTopOpenRoundedHole };
+
+      const resolveTopOpenRoundedHole = (hole: {
+        x: number;
+        width: number;
+        baseHeight: number;
+      }): ResolvedTopOpenRoundedHole => {
+        const radius = hole.width / 2;
+        const baseY = -halfH + hole.baseHeight;
+        const dyToTop = THREE.MathUtils.clamp(halfH - baseY, -radius, radius);
+        const topY = baseY + dyToTop;
+        const halfTopChord = Math.sqrt(Math.max(0, radius * radius - dyToTop * dyToTop));
+        return {
+          x: hole.x,
+          radius,
+          baseY,
+          topY,
+          leftBottomX: hole.x - radius,
+          rightBottomX: hole.x + radius,
+          leftTopX: hole.x - halfTopChord,
+          rightTopX: hole.x + halfTopChord,
+          leftTopAngle: Math.atan2(dyToTop, -halfTopChord),
+          rightTopAngle: Math.atan2(dyToTop, halfTopChord),
+        };
+      };
+
+      const boundaryBottomX = (boundary: Boundary): number => {
+        if (boundary.kind === "wall") {
+          return boundary.x;
+        }
+        if (boundary.kind === "holeLeft") {
+          return boundary.hole.leftBottomX;
+        }
+        return boundary.hole.rightBottomX;
+      };
+
+      const boundaryTopX = (boundary: Boundary): number => {
+        if (boundary.kind === "wall") {
+          return boundary.x;
+        }
+        if (boundary.kind === "holeLeft") {
+          return boundary.hole.leftTopX;
+        }
+        return boundary.hole.rightTopX;
+      };
+
+      const appendBoundaryUp = (shape: THREE.Shape, boundary: Boundary): void => {
+        if (boundary.kind === "wall") {
+          shape.lineTo(boundary.x, halfH);
+          return;
+        }
+
+        const hole = boundary.hole;
+        if (boundary.kind === "holeLeft") {
+          shape.lineTo(hole.leftBottomX, hole.baseY);
+          shape.absarc(hole.x, hole.baseY, hole.radius, Math.PI, hole.leftTopAngle, true);
+          if (hole.topY < halfH) {
+            shape.lineTo(hole.leftTopX, halfH);
+          }
+          return;
+        }
+
+        shape.lineTo(hole.rightBottomX, hole.baseY);
+        shape.absarc(hole.x, hole.baseY, hole.radius, 0, hole.rightTopAngle, false);
+        if (hole.topY < halfH) {
+          shape.lineTo(hole.rightTopX, halfH);
+        }
+      };
+
+      const appendBoundaryDown = (shape: THREE.Shape, boundary: Boundary): void => {
+        if (boundary.kind === "wall") {
+          shape.lineTo(boundary.x, -halfH);
+          return;
+        }
+
+        const hole = boundary.hole;
+        if (boundary.kind === "holeLeft") {
+          if (hole.topY < halfH) {
+            shape.lineTo(hole.leftTopX, hole.topY);
+          }
+          shape.absarc(hole.x, hole.baseY, hole.radius, hole.leftTopAngle, Math.PI, false);
+          shape.lineTo(hole.leftBottomX, -halfH);
+          return;
+        }
+
+        if (hole.topY < halfH) {
+          shape.lineTo(hole.rightTopX, hole.topY);
+        }
+        shape.absarc(hole.x, hole.baseY, hole.radius, hole.rightTopAngle, 0, true);
+        shape.lineTo(hole.rightBottomX, -halfH);
+      };
+
+      const resolvedHoles = [...params.topOpenRoundedHoles!]
+        .sort((a, b) => a.x - b.x)
+        .map(resolveTopOpenRoundedHole);
+
+      const shapes: THREE.Shape[] = [];
+      for (let i = 0; i <= resolvedHoles.length; i += 1) {
+        const leftBoundary: Boundary =
+          i === 0 ? { kind: "wall", x: -halfW } : { kind: "holeRight", hole: resolvedHoles[i - 1]! };
+        const rightBoundary: Boundary =
+          i === resolvedHoles.length
+            ? { kind: "wall", x: halfW }
+            : { kind: "holeLeft", hole: resolvedHoles[i]! };
+
+        const leftBottomX = boundaryBottomX(leftBoundary);
+        const rightBottomX = boundaryBottomX(rightBoundary);
+        const leftTopX = boundaryTopX(leftBoundary);
+        const rightTopX = boundaryTopX(rightBoundary);
+        if (rightBottomX <= leftBottomX || rightTopX <= leftTopX) {
+          continue;
+        }
+
+        const shape = new THREE.Shape();
+        shape.moveTo(leftBottomX, -halfH);
+        shape.lineTo(rightBottomX, -halfH);
+        appendBoundaryUp(shape, rightBoundary);
+        shape.lineTo(leftTopX, halfH);
+        appendBoundaryDown(shape, leftBoundary);
+        shape.closePath();
+        shapes.push(shape);
+      }
+
+      if (shapes.length === 0) {
+        const shape = new THREE.Shape();
+        shape.moveTo(-halfW, -halfH);
+        shape.lineTo(halfW, -halfH);
+        shape.lineTo(halfW, halfH);
+        shape.lineTo(-halfW, halfH);
+        shape.closePath();
+        shapes.push(shape);
+      }
+
+      wallGeometry = new THREE.ExtrudeGeometry(shapes, {
+        depth: params.depth,
+        bevelEnabled: false,
+        curveSegments: FINAL_WALL_CURVE_SEGMENTS,
+        steps: 1,
+      });
+    } else {
+      const wallShape = new THREE.Shape();
+      wallShape.moveTo(-halfW, -halfH);
+      wallShape.lineTo(halfW, -halfH);
+      wallShape.lineTo(halfW, halfH);
+      wallShape.lineTo(-halfW, halfH);
+      wallShape.closePath();
+
+      for (const hole of params.circleHoles ?? []) {
+        const holePath = new THREE.Path();
+        holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI * 2, false);
+        wallShape.holes.push(holePath);
+      }
+
+      for (const hole of params.bottomOpenCircleHoles ?? []) {
+        const holePath = new THREE.Path();
+        holePath.moveTo(hole.x - hole.r, -halfH);
+        holePath.lineTo(hole.x + hole.r, -halfH);
+        holePath.lineTo(hole.x + hole.r, hole.y);
+        holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI, true);
+        holePath.closePath();
+        wallShape.holes.push(holePath);
+      }
+
+      for (const hole of params.bottomRoundedTopHoles ?? []) {
+        const halfHoleW = hole.width / 2;
+        const baseTop = -halfH + hole.baseHeight;
+        const capCenterY = baseTop;
+        const holePath = new THREE.Path();
+        holePath.moveTo(hole.x - halfHoleW, -halfH);
+        holePath.lineTo(hole.x + halfHoleW, -halfH);
+        holePath.lineTo(hole.x + halfHoleW, capCenterY);
+        holePath.absarc(hole.x, capCenterY, halfHoleW, 0, Math.PI, false);
+        holePath.closePath();
+        wallShape.holes.push(holePath);
+      }
+
+      for (const slot of params.bottomSlots ?? []) {
+        const slotHalfW = slot.width / 2;
+        const slotTop = -halfH + slot.height;
+        const holePath = new THREE.Path();
+        holePath.moveTo(slot.x - slotHalfW, -halfH);
+        holePath.lineTo(slot.x + slotHalfW, -halfH);
+        holePath.lineTo(slot.x + slotHalfW, slotTop);
+        holePath.lineTo(slot.x - slotHalfW, slotTop);
+        holePath.closePath();
+        wallShape.holes.push(holePath);
+      }
+
+      wallGeometry = new THREE.ExtrudeGeometry(wallShape, {
+        depth: params.depth,
+        bevelEnabled: false,
+        curveSegments: FINAL_WALL_CURVE_SEGMENTS,
+        steps: 1,
+      });
     }
-
-    for (const hole of params.bottomOpenCircleHoles ?? []) {
-      const holePath = new THREE.Path();
-      holePath.moveTo(hole.x - hole.r, -halfH);
-      holePath.lineTo(hole.x + hole.r, -halfH);
-      holePath.lineTo(hole.x + hole.r, hole.y);
-      holePath.absarc(hole.x, hole.y, hole.r, 0, Math.PI, true);
-      holePath.closePath();
-      wallShape.holes.push(holePath);
-    }
-
-    for (const hole of params.bottomRoundedTopHoles ?? []) {
-      const halfHoleW = hole.width / 2;
-      const baseTop = -halfH + hole.baseHeight;
-      const capCenterY = baseTop;
-      const holePath = new THREE.Path();
-      holePath.moveTo(hole.x - halfHoleW, -halfH);
-      holePath.lineTo(hole.x + halfHoleW, -halfH);
-      holePath.lineTo(hole.x + halfHoleW, capCenterY);
-      holePath.absarc(hole.x, capCenterY, halfHoleW, 0, Math.PI, false);
-      holePath.closePath();
-      wallShape.holes.push(holePath);
-    }
-
-    for (const slot of params.bottomSlots ?? []) {
-      const slotHalfW = slot.width / 2;
-      const slotTop = -halfH + slot.height;
-      const holePath = new THREE.Path();
-      holePath.moveTo(slot.x - slotHalfW, -halfH);
-      holePath.lineTo(slot.x + slotHalfW, -halfH);
-      holePath.lineTo(slot.x + slotHalfW, slotTop);
-      holePath.lineTo(slot.x - slotHalfW, slotTop);
-      holePath.closePath();
-      wallShape.holes.push(holePath);
-    }
-
-    const wallGeometry = new THREE.ExtrudeGeometry(wallShape, {
-      depth: params.depth,
-      bevelEnabled: false,
-      curveSegments: FINAL_WALL_CURVE_SEGMENTS,
-      steps: 1,
-    });
     wallGeometry.translate(0, 0, -params.depth / 2);
 
     const wallMesh = new THREE.Mesh(wallGeometry, obstacleMaterial);
@@ -596,70 +756,17 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   };
 
   const addFinalThreeHoleWall = (z: number): void => {
-    const y = FLOOR_THICK / 2 + FINAL_WALL_H / 2;
-    const halfW = FINAL_WALL_W / 2;
-    const halfH = FINAL_WALL_H / 2;
-    const slotHalfW = STANDARD_MARBLE_HOLE_WIDTH / 2;
-    const sortedCenters = [...FINAL_WALL_HOLE_X].sort((a, b) => a - b);
-    const shapes: THREE.Shape[] = [];
-
-    let segmentStart = -halfW;
-    for (const centerX of sortedCenters) {
-      const slotStart = centerX - slotHalfW;
-      const slotEnd = centerX + slotHalfW;
-      if (slotStart > segmentStart) {
-        const shape = new THREE.Shape();
-        shape.moveTo(segmentStart, -halfH);
-        shape.lineTo(slotStart, -halfH);
-        shape.lineTo(slotStart, halfH);
-        shape.lineTo(segmentStart, halfH);
-        shape.closePath();
-        shapes.push(shape);
-      }
-      segmentStart = Math.max(segmentStart, slotEnd);
-    }
-
-    if (segmentStart < halfW) {
-      const shape = new THREE.Shape();
-      shape.moveTo(segmentStart, -halfH);
-      shape.lineTo(halfW, -halfH);
-      shape.lineTo(halfW, halfH);
-      shape.lineTo(segmentStart, halfH);
-      shape.closePath();
-      shapes.push(shape);
-    }
-
-    const wallGeometry = new THREE.ExtrudeGeometry(shapes, {
+    addGapWall({
+      z,
+      width: FINAL_WALL_W,
+      height: FINAL_WALL_H,
       depth: FINAL_WALL_DEPTH,
-      bevelEnabled: false,
-      curveSegments: FINAL_WALL_CURVE_SEGMENTS,
-      steps: 1,
-    });
-    wallGeometry.translate(0, 0, -FINAL_WALL_DEPTH / 2);
-
-    const wallMesh = new THREE.Mesh(wallGeometry, obstacleMaterial);
-    wallMesh.position.set(0, y, z);
-    wallMesh.castShadow = false;
-    wallMesh.receiveShadow = true;
-    const edgeLines = new THREE.LineSegments(
-      new THREE.EdgesGeometry(wallGeometry),
-      new THREE.LineBasicMaterial({ color: 0x330000 }),
-    );
-    edgeLines.scale.set(1.002, 1.002, 1.002);
-    wallMesh.add(edgeLines);
-    group.add(wallMesh);
-
-    const wallBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-    wallBody.addShape(geometryToTrimesh(wallGeometry));
-
-    registerObstacleActor({
-      visual: wallMesh,
-      body: wallBody,
-      localPos: new THREE.Vector3(0, y, z),
       trackWidth: FINISH_WIDTH,
-      obstacleWidth: FINAL_WALL_W,
-      phase: 0,
-      speedHz: 0,
+      topOpenRoundedHoles: FINAL_WALL_HOLE_X.map((x) => ({
+        x,
+        width: STANDARD_MARBLE_HOLE_WIDTH,
+        baseHeight: STANDARD_MARBLE_HOLE_BASE_HEIGHT,
+      })),
     });
   };
 
@@ -876,7 +983,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     height: STATIC_GAP_WALL_H,
     depth: STATIC_GAP_WALL_DEPTH,
     trackWidth: TRACK_W,
-    bottomRoundedTopHoles: [
+    topOpenRoundedHoles: [
       {
         x: -1.45,
         width: STANDARD_MARBLE_HOLE_WIDTH,
