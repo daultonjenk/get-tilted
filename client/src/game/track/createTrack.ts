@@ -9,6 +9,16 @@ export type CreateTrackOptions = {
   blueprint?: TrackBlueprint;
 };
 
+export type TrackContainmentSample = {
+  center: [number, number, number];
+  right: [number, number, number];
+  up: [number, number, number];
+  tangent: [number, number, number];
+  halfWidth: number;
+  railLeft: boolean;
+  railRight: boolean;
+};
+
 export type TrackBuildResult = {
   group: THREE.Group;
   bodies: CANNON.Body[];
@@ -18,7 +28,8 @@ export type TrackBuildResult = {
     finishHalfX: number;
     finishStartZ: number;
   };
-  wallContainmentMode: "legacyLinear" | "disabled";
+  wallContainmentMode: "legacyLinear" | "curvedPathClamp";
+  containmentPathLocal: TrackContainmentSample[];
   spawn: CANNON.Vec3;
   respawnY: number;
   offCourseBoundsLocal: {
@@ -125,6 +136,9 @@ const STATIC_INTERSTITIAL_CENTER_W = TRACK_W / 5;
 const STATIC_INTERSTITIAL_OFFCENTER_W = TRACK_W * 0.19;
 const STATIC_INTERSTITIAL_WALL_JUT_W = TRACK_W / 6;
 const STATIC_INTERSTITIAL_L = 0.62;
+const BLUEPRINT_RENDER_SAMPLE_STEP = 0.25;
+const BLUEPRINT_COLLIDER_SAMPLE_STEP = 0.55;
+const CENTER_GUIDE_HALF_WIDTH = 0.16;
 
 // Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
@@ -371,6 +385,16 @@ type SweepRect = {
   maxY: number;
 };
 
+type BlueprintSweepPath = {
+  samples: BlueprintSweepSample[];
+  finishStart: THREE.Vector3;
+  finishDirection: THREE.Vector3;
+};
+
+function toTuple(point: THREE.Vector3): [number, number, number] {
+  return [point.x, point.y, point.z];
+}
+
 function getPlacementVectors(points: Array<[number, number, number]>): THREE.Vector3[] {
   return points.map((point) => new THREE.Vector3(point[0], point[1], point[2]));
 }
@@ -613,45 +637,15 @@ function buildSweptRectGeometry(
   return geometry;
 }
 
-function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
-  const group = new THREE.Group();
-  group.name = "track";
-
-  const boardBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-  boardBody.position.set(0, 0, 0);
-  boardBody.quaternion.set(0, 0, 0, 1);
-
-  const trackSurfaceTexture = createTrackSurfaceTexture();
-  const floorMaterial = new THREE.MeshStandardMaterial({
-    map: trackSurfaceTexture,
-    side: THREE.DoubleSide,
-  });
-  const railMaterial = new THREE.MeshStandardMaterial({
-    map: trackSurfaceTexture,
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.35,
-    side: THREE.DoubleSide,
-  });
-  const roofMaterial = new THREE.MeshStandardMaterial({
-    map: trackSurfaceTexture,
-    color: 0xf4f0de,
-    side: THREE.DoubleSide,
-  });
-  const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
-  const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
-
-  const startTopBackPoint = new THREE.Vector3(0, FLOOR_THICK / 2, -START_LENGTH / 2);
-  const sourcePlacements = (() => {
-    const mainLane = blueprint.placements.filter((placement) => placement.lane === "main");
-    return mainLane.length > 0 ? mainLane : blueprint.placements;
-  })();
-  const sampleStep = 0.25;
-  const samples = buildBlueprintSweepSamples(sourcePlacements, sampleStep);
-
+function buildBlueprintSweepPath(
+  placements: TrackBlueprint["placements"],
+  sampleStep: number,
+  startPoint: THREE.Vector3,
+): BlueprintSweepPath {
+  const samples = buildBlueprintSweepSamples(placements, sampleStep);
   if (samples.length === 0) {
-    const fallbackEnd = startTopBackPoint.clone().add(new THREE.Vector3(0, 0, 28));
-    for (const point of resamplePolyline([startTopBackPoint, fallbackEnd], sampleStep)) {
+    const fallbackEnd = startPoint.clone().add(new THREE.Vector3(0, 0, 28));
+    for (const point of resamplePolyline([startPoint, fallbackEnd], sampleStep)) {
       samples.push({
         center: point,
         width: TRACK_W,
@@ -686,13 +680,115 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     });
   }
 
+  return {
+    samples,
+    finishStart,
+    finishDirection,
+  };
+}
+
+function applyHeightVertexColors(
+  geometry: THREE.BufferGeometry,
+  lowColorHex: number,
+  highColorHex: number,
+): void {
+  const position = geometry.getAttribute("position");
+  const colorArray = new Float32Array(position.count * 3);
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < position.count; i += 1) {
+    const y = position.getY(i);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    return;
+  }
+  const range = Math.max(maxY - minY, 1e-5);
+  const lowColor = new THREE.Color(lowColorHex);
+  const highColor = new THREE.Color(highColorHex);
+  const mixed = new THREE.Color();
+  for (let i = 0; i < position.count; i += 1) {
+    const y = position.getY(i);
+    const alpha = clamp((y - minY) / range, 0, 1);
+    mixed.copy(lowColor).lerp(highColor, alpha);
+    const base = i * 3;
+    colorArray[base] = mixed.r;
+    colorArray[base + 1] = mixed.g;
+    colorArray[base + 2] = mixed.b;
+  }
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colorArray, 3));
+}
+
+function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
+  const group = new THREE.Group();
+  group.name = "track";
+
+  const boardBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+  boardBody.position.set(0, 0, 0);
+  boardBody.quaternion.set(0, 0, 0, 1);
+
+  const trackSurfaceTexture = createTrackSurfaceTexture();
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    map: trackSurfaceTexture,
+    color: 0xffffff,
+    vertexColors: true,
+    side: THREE.DoubleSide,
+  });
+  const railMaterial = new THREE.MeshStandardMaterial({
+    map: trackSurfaceTexture,
+    color: 0xe7f0f5,
+    transparent: true,
+    opacity: 0.56,
+    side: THREE.DoubleSide,
+  });
+  const roofMaterial = new THREE.MeshStandardMaterial({
+    map: trackSurfaceTexture,
+    color: 0xf2e7cd,
+    side: THREE.DoubleSide,
+  });
+  const guideMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffe08a,
+    emissive: 0x39290b,
+    emissiveIntensity: 0.45,
+    roughness: 0.42,
+    metalness: 0.04,
+    side: THREE.DoubleSide,
+  });
+  const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
+  const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
+
+  const startTopBackPoint = new THREE.Vector3(0, FLOOR_THICK / 2, -START_LENGTH / 2);
+  const sourcePlacements = (() => {
+    const mainLane = blueprint.placements.filter((placement) => placement.lane === "main");
+    return mainLane.length > 0 ? mainLane : blueprint.placements;
+  })();
+  const renderPath = buildBlueprintSweepPath(
+    sourcePlacements,
+    BLUEPRINT_RENDER_SAMPLE_STEP,
+    startTopBackPoint,
+  );
+  const colliderPath = buildBlueprintSweepPath(
+    sourcePlacements,
+    BLUEPRINT_COLLIDER_SAMPLE_STEP,
+    startTopBackPoint,
+  );
+  const samples = renderPath.samples;
+  const finishDirection = renderPath.finishDirection;
+  const finishStart = renderPath.finishStart;
   const frames = buildBlueprintSweepFrames(samples);
+  const colliderSamples = colliderPath.samples;
+  const colliderFrames = buildBlueprintSweepFrames(colliderSamples);
+
   const floorGeometry = buildSweptRectGeometry(samples, frames, (sample) => ({
     minX: -sample.width / 2,
     maxX: sample.width / 2,
     minY: -FLOOR_THICK,
     maxY: 0,
   }));
+  if (floorGeometry) {
+    applyHeightVertexColors(floorGeometry, 0x7a8ea0, 0xe9f3f7);
+  }
   const leftRailGeometry = buildSweptRectGeometry(samples, frames, (sample) => {
     if (!sample.railLeft) {
       return null;
@@ -740,15 +836,21 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     };
   });
 
+  const centerGuideGeometry = buildSweptRectGeometry(samples, frames, () => ({
+    minX: -CENTER_GUIDE_HALF_WIDTH,
+    maxX: CENTER_GUIDE_HALF_WIDTH,
+    minY: 0.01,
+    maxY: 0.04,
+  }));
+
   const renderGeometries: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }> = [];
   if (floorGeometry) renderGeometries.push({ geometry: floorGeometry, material: floorMaterial });
-  if (leftRailGeometry) {
-    renderGeometries.push({ geometry: leftRailGeometry, material: railMaterial });
-  }
-  if (rightRailGeometry) {
-    renderGeometries.push({ geometry: rightRailGeometry, material: railMaterial });
-  }
+  if (leftRailGeometry) renderGeometries.push({ geometry: leftRailGeometry, material: railMaterial });
+  if (rightRailGeometry) renderGeometries.push({ geometry: rightRailGeometry, material: railMaterial });
   if (roofGeometry) renderGeometries.push({ geometry: roofGeometry, material: roofMaterial });
+  if (centerGuideGeometry) {
+    renderGeometries.push({ geometry: centerGuideGeometry, material: guideMaterial });
+  }
 
   for (const entry of renderGeometries) {
     const mesh = new THREE.Mesh(entry.geometry, entry.material);
@@ -757,11 +859,85 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     group.add(mesh);
   }
 
-  const colliderGeometries = renderGeometries.map((entry) => entry.geometry.clone());
-  const mergedGeometry = mergeGeometries(colliderGeometries, false);
+  const colliderFloorGeometry = buildSweptRectGeometry(
+    colliderSamples,
+    colliderFrames,
+    (sample) => ({
+      minX: -sample.width / 2,
+      maxX: sample.width / 2,
+      minY: -FLOOR_THICK,
+      maxY: 0,
+    }),
+  );
+  const colliderLeftRailGeometry = buildSweptRectGeometry(
+    colliderSamples,
+    colliderFrames,
+    (sample) => {
+      if (!sample.railLeft) {
+        return null;
+      }
+      const sideOffset = sample.width / 2 - RAIL_INSET;
+      const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+      return {
+        minX: -sideOffset - RAIL_THICK / 2,
+        maxX: -sideOffset + RAIL_THICK / 2,
+        minY: railBottom,
+        maxY: railBottom + RAIL_H,
+      };
+    },
+  );
+  const colliderRightRailGeometry = buildSweptRectGeometry(
+    colliderSamples,
+    colliderFrames,
+    (sample) => {
+      if (!sample.railRight) {
+        return null;
+      }
+      const sideOffset = sample.width / 2 - RAIL_INSET;
+      const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+      return {
+        minX: sideOffset - RAIL_THICK / 2,
+        maxX: sideOffset + RAIL_THICK / 2,
+        minY: railBottom,
+        maxY: railBottom + RAIL_H,
+      };
+    },
+  );
+  const colliderRoofGeometry = buildSweptRectGeometry(colliderSamples, colliderFrames, (sample) => {
+    if (!sample.tunnelRoof) {
+      return null;
+    }
+    const roofInset = Math.max(RAIL_THICK * 0.75, 0.25);
+    const minX = -sample.width / 2 + roofInset;
+    const maxX = sample.width / 2 - roofInset;
+    if (maxX - minX < 0.15) {
+      return null;
+    }
+    const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+    const railTop = railBottom + RAIL_H;
+    const roofBottom = railTop - 0.2;
+    return {
+      minX,
+      maxX,
+      minY: roofBottom,
+      maxY: roofBottom + 0.45,
+    };
+  });
+  const colliderGeometries = [
+    colliderFloorGeometry,
+    colliderLeftRailGeometry,
+    colliderRightRailGeometry,
+    colliderRoofGeometry,
+  ].filter((geometry): geometry is THREE.BufferGeometry => geometry != null);
+  const mergedGeometry =
+    colliderGeometries.length > 0 ? mergeGeometries(colliderGeometries, false) : null;
   if (mergedGeometry) {
     mergedGeometry.computeVertexNormals();
-    boardBody.addShape(geometryToTrimesh(mergedGeometry, { doubleSided: true }));
+    boardBody.addShape(geometryToTrimesh(mergedGeometry));
+    mergedGeometry.dispose();
+  }
+  for (const geometry of colliderGeometries) {
+    geometry.dispose();
   }
 
   const startBackWallWidth = TRACK_W - (RAIL_INSET * 2 + RAIL_THICK);
@@ -839,6 +1015,18 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     minZ: minTrackZ - OFF_COURSE_Z_MARGIN,
     maxZ: maxTrackZ + OFF_COURSE_Z_MARGIN,
   };
+  const containmentPathLocal = samples.map((sample, index) => {
+    const frame = frames[index]!;
+    return {
+      center: toTuple(sample.center),
+      right: toTuple(frame.right),
+      up: toTuple(frame.up),
+      tangent: toTuple(frame.tangent),
+      halfWidth: computeContainmentHalfX(sample.width),
+      railLeft: sample.railLeft,
+      railRight: sample.railRight,
+    };
+  });
 
   return {
     group,
@@ -849,7 +1037,8 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
       finishHalfX: computeContainmentHalfX(Math.max(FINISH_WIDTH, maxSegmentWidth)),
       finishStartZ,
     },
-    wallContainmentMode: "disabled",
+    wallContainmentMode: "curvedPathClamp",
+    containmentPathLocal,
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
     offCourseBoundsLocal,
@@ -1628,6 +1817,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       finishStartZ,
     },
     wallContainmentMode: "legacyLinear",
+    containmentPathLocal: [],
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
     offCourseBoundsLocal,

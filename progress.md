@@ -232,3 +232,30 @@ Verification:
 - `npm run test` passes.
 - `npm run build` passes.
 - Playwright skill smoke remains blocked in this environment (`ERR_MODULE_NOT_FOUND: playwright` in the skill runner path).
+
+v0.8.2.0 update:
+- Reworked modular track containment and collision behavior to prevent wall escapes:
+  - Added curved-path containment metadata (`containmentPathLocal`) to `TrackBuildResult` and introduced `wallContainmentMode: "curvedPathClamp"` for blueprint tracks.
+  - Implemented curved-path side-wall clamping in `HelloMarble` using nearest sweep sample frames (`center/right/up/tangent`) with rail-aware per-side enforcement.
+  - Preserved legacy wall-squeeze logic for authored legacy tracks (`legacyLinear`) only.
+- Replaced fixed floor-height penetration correction with contact-driven correction:
+  - Removed constant `TRACK_FLOOR_TOP_Y` penetration nudging path.
+  - Added marble-vs-board contact penetration measurement from live contact equations and apply correction along deepest board-to-marble contact normal only.
+- Reduced modular physics collider cost:
+  - Added separate modular collider sweep sampling step (`0.55`) while retaining render sweep detail (`0.25`).
+  - Removed double-sided Trimesh duplication on modular colliders and now build from dedicated lower-density collider geometries.
+- Improved modular track readability:
+  - Added floor height-based vertex color gradient to improve elevation readability.
+  - Added a high-contrast center guide strip along the sweep path to improve turn/path legibility.
+  - Increased rail visual contrast/opacity for clearer boundaries.
+- Performance baseline tuning changes:
+  - Updated default `physicsMaxSubSteps` from `12` to `6`.
+  - Updated default `physicsSolverIterations` from `24` to `16`.
+- Bumped app version to `0.8.2.0` in `client/src/buildInfo.ts`.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run test` passes.
+- `npm run build` passes.
+- Manual desktop/mobile interactive smoke is still pending in this non-interactive environment.
