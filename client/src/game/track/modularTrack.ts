@@ -33,6 +33,8 @@ export type TrackPiecePlacement = {
   kind: TrackPieceKind;
   lane: TrackLaneId;
   branchNodeId?: string;
+  groupId?: string;
+  isCompensatingTurn?: boolean;
   length: number;
   width: number;
   gradeDeg: number;
@@ -71,6 +73,8 @@ export type BuildTrackBlueprintOptions = {
   includeCustomPieces: boolean;
   trackWidth: number;
   enableBranchPieces?: boolean;
+  maxHeadingDriftDeg?: number;
+  enforceBendPairs?: boolean;
 };
 
 type LaneCursor = {
@@ -83,7 +87,7 @@ type LaneCursor = {
 
 const START_TOP_Y = 0.3;
 const START_TOP_Z = -4;
-const MAX_YAW_DEG = 70;
+const MAX_YAW_DEG = 92;
 const MAX_BANK_DEG = 35;
 
 export const DEFAULT_TRACK_SEED = "v0_8_default_seed";
@@ -470,13 +474,13 @@ function toTuple(position: LaneCursor): [number, number, number] {
   return [position.x, position.y, position.z];
 }
 
-function clampTurnForYaw(currentYawDeg: number, desiredTurnDeg: number): number {
+function clampTurnForYaw(currentYawDeg: number, desiredTurnDeg: number, yawLimitDeg: number): number {
   const nextYaw = currentYawDeg + desiredTurnDeg;
-  if (nextYaw > MAX_YAW_DEG) {
-    return MAX_YAW_DEG - currentYawDeg;
+  if (nextYaw > yawLimitDeg) {
+    return yawLimitDeg - currentYawDeg;
   }
-  if (nextYaw < -MAX_YAW_DEG) {
-    return -MAX_YAW_DEG - currentYawDeg;
+  if (nextYaw < -yawLimitDeg) {
+    return -yawLimitDeg - currentYawDeg;
   }
   return desiredTurnDeg;
 }
@@ -544,10 +548,13 @@ function buildPlacement(
   placementId: string,
   forcedTurnDeg?: number,
   branchNodeId?: string,
+  yawLimitDeg = MAX_YAW_DEG,
+  groupId?: string,
+  isCompensatingTurn?: boolean,
 ): { placement: TrackPiecePlacement; end: LaneCursor } {
   const directionSign = piece.turnDirection === "right" ? -1 : 1;
   const rawTurn = forcedTurnDeg ?? piece.turnDeg * directionSign;
-  const totalTurnDeg = clampTurnForYaw(laneCursor.yawDeg, rawTurn);
+  const totalTurnDeg = clampTurnForYaw(laneCursor.yawDeg, rawTurn, yawLimitDeg);
 
   const trace = tracePiecePoints(
     laneCursor,
@@ -567,6 +574,8 @@ function buildPlacement(
       kind: piece.kind,
       lane,
       branchNodeId,
+      groupId,
+      isCompensatingTurn,
       length: piece.length,
       width,
       gradeDeg: piece.gradeDeg,
@@ -645,6 +654,12 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
   const pieceCount = sanitizeTrackPieceCount(options.config.pieceCount);
   const trackWidth = Number.isFinite(options.trackWidth) ? options.trackWidth : FALLBACK_TRACK_WIDTH;
   const enableBranchPieces = options.enableBranchPieces ?? false;
+  const maxHeadingDriftDeg = clamp(
+    asFiniteNumber(options.maxHeadingDriftDeg) ?? 18,
+    8,
+    45,
+  );
+  const enforceBendPairs = options.enforceBendPairs ?? true;
 
   const catalog = options.includeCustomPieces
     ? [...BUILTIN_TRACK_PIECES, ...options.customPieces]
@@ -673,6 +688,7 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
   let splitActive = false;
   let placementSeq = 1;
   let branchSeq = 1;
+  let bendPairSeq = 1;
 
   for (let i = 0; i < pieceCount; i += 1) {
     const picked = resolvePieceForStep(
@@ -793,12 +809,71 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
       if (!cursor) {
         continue;
       }
+
+      const isMainLane = lane === "main";
+      const shouldPairHardArc =
+        enforceBendPairs &&
+        isMainLane &&
+        picked.kind === "arc90" &&
+        picked.turnDeg >= 80 &&
+        !enableBranchPieces;
+
+      if (shouldPairHardArc) {
+        const pairId = `pair-${bendPairSeq.toString().padStart(3, "0")}`;
+        bendPairSeq += 1;
+        const firstTurnSign = picked.turnDirection === "right" ? -1 : 1;
+        const firstBuild = buildPlacement(
+          picked,
+          lane,
+          cursor,
+          trackWidth,
+          `placement-${placementSeq.toString().padStart(4, "0")}`,
+          picked.turnDeg * firstTurnSign,
+          undefined,
+          MAX_YAW_DEG,
+          pairId,
+          false,
+        );
+        placementSeq += 1;
+        placements.push(firstBuild.placement);
+
+        const compensatingDirection: "left" | "right" =
+          firstBuild.placement.turnDeg >= 0 ? "right" : "left";
+        const compensatingPiece: TrackPieceTemplate = {
+          ...picked,
+          id: `${picked.id}-pair`,
+          label: `${picked.label} Return`,
+          turnDirection: compensatingDirection,
+          bankDeg: -picked.bankDeg,
+        };
+        const compensatingBuild = buildPlacement(
+          compensatingPiece,
+          lane,
+          firstBuild.end,
+          trackWidth,
+          `placement-${placementSeq.toString().padStart(4, "0")}`,
+          -firstBuild.placement.turnDeg,
+          undefined,
+          MAX_YAW_DEG,
+          pairId,
+          true,
+        );
+        placementSeq += 1;
+        placements.push(compensatingBuild.placement);
+        lanes.set(lane, compensatingBuild.end);
+        continue;
+      }
+
+      const yawLimitDeg = isMainLane ? maxHeadingDriftDeg : MAX_YAW_DEG;
       const built = buildPlacement(
         picked,
         lane,
         cursor,
         trackWidth,
         `placement-${placementSeq.toString().padStart(4, "0")}`,
+        undefined,
+        undefined,
+        yawLimitDeg,
       );
       placementSeq += 1;
       placements.push(built.placement);

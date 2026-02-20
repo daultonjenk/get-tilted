@@ -220,6 +220,8 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
     includeCustomPieces: config.catalogMode === "builtin_plus_custom",
     trackWidth: 9,
     enableBranchPieces: false,
+    maxHeadingDriftDeg: 18,
+    enforceBendPairs: true,
   });
   return {
     seed,
@@ -3968,6 +3970,9 @@ export function HelloMarble() {
               <p className="raceHint">
                 Split/Merge generation is temporarily disabled while path stabilization is in
                 progress.
+              </p>
+              <p className="raceHint">
+                90° bends are automatically paired so direction returns down-track quickly.
               </p>
               <div className="trackLabEditorGrid">
                 <label className="optionsField" htmlFor="trackPieceLabel">

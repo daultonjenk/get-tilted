@@ -208,3 +208,27 @@ Verification:
 - `npm run test` passes.
 - `npm run build` passes.
 - Playwright skill smoke remains blocked in this environment (`ERR_MODULE_NOT_FOUND: playwright` in the skill runner path).
+
+v0.8.1.2 update:
+- Addressed modular-track post-curve wall collision instability and camera-flow discomfort.
+- Blueprint generation updates (`client/src/game/track/modularTrack.ts`):
+  - added generation options `maxHeadingDriftDeg` and `enforceBendPairs`.
+  - added placement metadata `groupId` and `isCompensatingTurn`.
+  - enabled hard-arc pairing logic: each 90-degree arc on main lane now emits an immediate compensating arc in the opposite direction.
+  - normal main-lane turns are now constrained by heading drift (`maxHeadingDriftDeg`, default 18°) to preserve primarily down-track travel.
+- Track Lab runtime config now explicitly requests:
+  - `enableBranchPieces: false`
+  - `maxHeadingDriftDeg: 18`
+  - `enforceBendPairs: true`
+- Track Lab messaging updated to explain automatic 90° bend pairing.
+- Swept modular collider robustness updates (`client/src/game/track/createTrack.ts`):
+  - `geometryToTrimesh(...)` now filters non-finite/degenerate triangles.
+  - blueprint mesh collider is now built as double-sided Trimesh indices to preserve wall collision even if winding varies across tight curvature.
+- Bumped app version to `0.8.1.2` and advanced Track Lab storage keys to `v0.8.1.2` namespace.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run test` passes.
+- `npm run build` passes.
+- Playwright skill smoke remains blocked in this environment (`ERR_MODULE_NOT_FOUND: playwright` in the skill runner path).

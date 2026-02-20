@@ -266,21 +266,77 @@ function addPart(group: THREE.Group, boardBody: CANNON.Body, spec: PartSpec): vo
   addCompoundPart(boardBody, spec);
 }
 
-function geometryToTrimesh(geometry: THREE.BufferGeometry): CANNON.Trimesh {
+function geometryToTrimesh(
+  geometry: THREE.BufferGeometry,
+  options?: { doubleSided?: boolean; minAreaSq?: number },
+): CANNON.Trimesh {
+  const doubleSided = options?.doubleSided ?? false;
+  const minAreaSq = options?.minAreaSq ?? 1e-12;
   const position = geometry.getAttribute("position");
   const vertices: number[] = [];
   for (let i = 0; i < position.count; i += 1) {
     vertices.push(position.getX(i), position.getY(i), position.getZ(i));
   }
-  const indices: number[] = [];
+  const sourceIndices: number[] = [];
   const indexAttr = geometry.getIndex();
   if (indexAttr) {
     for (let i = 0; i < indexAttr.count; i += 1) {
-      indices.push(indexAttr.getX(i));
+      sourceIndices.push(indexAttr.getX(i));
     }
   } else {
     for (let i = 0; i < position.count; i += 1) {
-      indices.push(i);
+      sourceIndices.push(i);
+    }
+  }
+  const indices: number[] = [];
+  for (let i = 0; i + 2 < sourceIndices.length; i += 3) {
+    const ia = sourceIndices[i]!;
+    const ib = sourceIndices[i + 1]!;
+    const ic = sourceIndices[i + 2]!;
+    if (ia < 0 || ib < 0 || ic < 0) {
+      continue;
+    }
+    const aBase = ia * 3;
+    const bBase = ib * 3;
+    const cBase = ic * 3;
+    const ax = vertices[aBase];
+    const ay = vertices[aBase + 1];
+    const az = vertices[aBase + 2];
+    const bx = vertices[bBase];
+    const by = vertices[bBase + 1];
+    const bz = vertices[bBase + 2];
+    const cx = vertices[cBase];
+    const cy = vertices[cBase + 1];
+    const cz = vertices[cBase + 2];
+    if (
+      !Number.isFinite(ax) ||
+      !Number.isFinite(ay) ||
+      !Number.isFinite(az) ||
+      !Number.isFinite(bx) ||
+      !Number.isFinite(by) ||
+      !Number.isFinite(bz) ||
+      !Number.isFinite(cx) ||
+      !Number.isFinite(cy) ||
+      !Number.isFinite(cz)
+    ) {
+      continue;
+    }
+    const abx = bx - ax;
+    const aby = by - ay;
+    const abz = bz - az;
+    const acx = cx - ax;
+    const acy = cy - ay;
+    const acz = cz - az;
+    const crossX = aby * acz - abz * acy;
+    const crossY = abz * acx - abx * acz;
+    const crossZ = abx * acy - aby * acx;
+    const areaSq = crossX * crossX + crossY * crossY + crossZ * crossZ;
+    if (areaSq <= minAreaSq) {
+      continue;
+    }
+    indices.push(ia, ib, ic);
+    if (doubleSided) {
+      indices.push(ia, ic, ib);
     }
   }
   return new CANNON.Trimesh(vertices, indices);
@@ -705,7 +761,7 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
   const mergedGeometry = mergeGeometries(colliderGeometries, false);
   if (mergedGeometry) {
     mergedGeometry.computeVertexNormals();
-    boardBody.addShape(geometryToTrimesh(mergedGeometry));
+    boardBody.addShape(geometryToTrimesh(mergedGeometry, { doubleSided: true }));
   }
 
   const startBackWallWidth = TRACK_W - (RAIL_INSET * 2 + RAIL_THICK);
