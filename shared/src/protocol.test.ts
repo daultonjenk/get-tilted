@@ -225,6 +225,7 @@ describe("encodeMessage / safeParseMessage", () => {
     const payload = {
       roomCode: "ABC123",
       playerId: "P0001",
+      trackSeed: "seed_123",
     };
     const encoded = encodeMessage("race:start", payload);
     const parsed = safeParseMessage(encoded);
@@ -233,6 +234,32 @@ describe("encodeMessage / safeParseMessage", () => {
       expect(parsed.msg.type).toBe("race:start");
       expect(parsed.msg.payload).toEqual(payload);
     }
+  });
+
+  it("round-trips a race:countdown:start message with seed", () => {
+    const payload = {
+      roomCode: "ABC123",
+      startAtMs: 1700000,
+      stepMs: 1000,
+      trackSeed: "seed_123",
+    };
+    const encoded = encodeMessage("race:countdown:start", payload);
+    const parsed = safeParseMessage(encoded);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.msg.type).toBe("race:countdown:start");
+      expect(parsed.msg.payload).toEqual(payload);
+    }
+  });
+
+  it("rejects race:start with invalid trackSeed", () => {
+    const parsed = safeParseMessage(
+      JSON.stringify({
+        type: "race:start",
+        payload: { roomCode: "ABC123", playerId: "P0001", trackSeed: "bad seed!" },
+      }),
+    );
+    expect(parsed.ok).toBe(false);
   });
 
   it("rejects invalid JSON", () => {

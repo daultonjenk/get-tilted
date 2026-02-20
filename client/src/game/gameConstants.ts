@@ -46,6 +46,9 @@ export const GYRO_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:gyro-enabled";
 export const MUSIC_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:music-enabled";
 export const SOUND_ENABLED_STORAGE_KEY = "get-tilted:v0.7.10.0:sound-enabled";
 export const DEBUG_MENU_ENABLED_STORAGE_KEY = "get-tilted:v0.7.12.0:debug-menu-enabled";
+export const TRACK_LAB_LIBRARY_STORAGE_KEY = "get-tilted:v0.8.0.0:track-lab-library";
+export const TRACK_LAB_SEED_STORAGE_KEY = "get-tilted:v0.8.0.0:track-lab-seed";
+export const TRACK_LAB_PIECE_COUNT_STORAGE_KEY = "get-tilted:v0.8.0.0:track-lab-piece-count";
 
 export const COUNTDOWN_LABELS = ["3", "2", "1", "GO!"] as const;
 export const RESULT_SPARKLES = Array.from({ length: 12 }, (_, index) => index);

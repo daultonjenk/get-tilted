@@ -3,6 +3,7 @@ import {
   encodeMessage,
   generateRoomCode,
   safeParseMessage,
+  sanitizeTrackSeed,
   COUNTDOWN_STEP_MS,
   COUNTDOWN_PREROLL_MS,
   type MessagePayloadMap,
@@ -254,8 +255,9 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
           broadcastReadyState(roomCode);
           return;
         }
+        const trackSeed = sanitizeTrackSeed(parsed.msg.payload.trackSeed);
         const startAtMs = Date.now() + COUNTDOWN_PREROLL_MS;
-        roomStore.beginRace(roomCode);
+        roomStore.beginRace(roomCode, trackSeed);
         roomStore.setCountdownStart(roomCode, startAtMs);
         const clients = roomStore.getClients(roomCode);
         for (const client of clients) {
@@ -263,6 +265,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
             roomCode,
             startAtMs,
             stepMs: COUNTDOWN_STEP_MS,
+            trackSeed,
           });
         }
         broadcastReadyState(roomCode);

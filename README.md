@@ -62,6 +62,28 @@ v0.1 does not use tilt yet. For mobile smoke testing:
 
 Tilt permissions are introduced in v0.3. iOS Safari requires a user gesture before calling motion permission APIs.
 
+## Track Lab (v0.8 seeded modular tracks)
+
+The main menu now includes **Track Lab** for in-game modular piece authoring.
+
+Track Lab features:
+
+- Seed input + randomize button.
+- Piece count control for generated courses.
+- Custom piece editor with bounded controls:
+  - piece type (`Straight`, `90 Bend`, `S-Curve`, `Narrow Bridge`)
+  - length, width scale, slope, turn direction/strength, spawn weight, and rails.
+- Save/update/delete custom pieces in a local custom library.
+- Apply preview track immediately without leaving the menu.
+
+Determinism + multiplayer behavior:
+
+- Track generation is deterministic (`same seed + same catalog => same layout`).
+- Host sends a `trackSeed` with `race:start`.
+- Backend broadcasts the authoritative seed in `race:countdown:start`.
+- Multiplayer generation uses built-in catalog only for parity across clients.
+- Custom piece libraries are local-only in v0.8.
+
 ## Custom marble skins
 
 Final placement (required):

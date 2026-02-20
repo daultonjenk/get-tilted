@@ -559,6 +559,45 @@ textarea {
   border-radius: 0.9rem;
 }
 
+.trackLabCard {
+  width: min(760px, 95vw);
+}
+
+.trackLabPanel {
+  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.58rem;
+}
+
+.trackLabEditorGrid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.56rem;
+}
+
+.trackLabPieceList {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.trackLabPieceButton {
+  border: 1px solid rgb(167 217 255 / 55%);
+  background: rgb(8 50 83 / 75%);
+  color: #e8f5ff;
+  border-radius: 0.5rem;
+  padding: 0.28rem 0.5rem;
+  font-weight: 700;
+}
+
+.trackLabPieceButton.selected {
+  border-color: rgb(151 255 127 / 70%);
+  background: rgb(20 68 47 / 75%);
+}
+
 .optionsSliderField {
   width: 100%;
   display: flex;
@@ -1290,6 +1329,10 @@ textarea {
 
   .optionsPanel {
     width: 100%;
+  }
+
+  .trackLabEditorGrid {
+    grid-template-columns: 1fr;
   }
 
   .debugDrawer {

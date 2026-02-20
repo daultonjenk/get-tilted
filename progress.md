@@ -126,3 +126,42 @@ v0.7.15.0 update:
 Open items / next checks:
 - Manual desktop and mobile feel-pass for squeeze escapes (watch for over-aggressive pop when grazing walls).
 - Optional tuning pass on `WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED` and obstacle speed spread after hands-on playtest.
+
+v0.8.0.0 update:
+- Added seeded modular track domain model in `client/src/game/track/modularTrack.ts`:
+  - built-in piece catalog (`straight`, `bend90`, `sCurve`, `narrowBridge`)
+  - bounded template sanitizers for custom piece libraries
+  - deterministic seeded blueprint generation (`buildTrackBlueprint`)
+  - seed/piece-count sanitization and random seed helper.
+- Extended `createTrack` with blueprint support and added a modular builder path:
+  - builds floor + rail colliders per generated segment
+  - computes dynamic off-course bounds from generated geometry extents
+  - preserves existing fixed authored track path when no blueprint is provided.
+- Implemented Track Lab menu flow in `HelloMarble`:
+  - new main-menu `Track Lab` entry
+  - seed + piece count controls
+  - piece editor with type/dimensions/turn/rails/weight controls
+  - save/select/update/delete custom pieces
+  - local persistence for seed, piece count, and custom piece library.
+- Added runtime track rebuild plumbing in `HelloMarble` so Track Lab preview and mode switches can rebuild track geometry in-place without recreating the entire app shell.
+- Added host-authoritative multiplayer seed flow:
+  - protocol: `race:start` includes optional `trackSeed`
+  - protocol: `race:countdown:start` now includes required `trackSeed`
+  - race host sends selected seed when starting match
+  - clients rebuild multiplayer track from built-in catalog on countdown start.
+- Updated both backend implementations to carry `trackSeed` on countdown start:
+  - Node WS server path (`server/src/ws/wsRouter.ts`, `server/src/ws/roomStore.ts`)
+  - Durable Object path (`worker/src/roomDO.ts`).
+- Added shared protocol tests for seeded race start/countdown payloads and invalid seed rejection.
+- Added new v0.8 Track Lab docs in `README.md`.
+- Bumped app version to `0.8.0.0` in `client/src/buildInfo.ts`.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run test` passes (shared protocol tests).
+- `npm run build` passes.
+- Attempted Playwright skill smoke via:
+  - `node ~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js ...`
+  - blocked in this environment with `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright' imported from ~/.codex/skills/...`
+  - root project checks still pass; browser automation remains pending until Playwright is available to the skill runner path.

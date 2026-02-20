@@ -307,13 +307,14 @@ export class RaceClient {
     });
   }
 
-  sendRaceStart(): void {
+  sendRaceStart(trackSeed?: string): void {
     if (!this.roomCode || !this.playerId) {
       return;
     }
     this.ws.send("race:start", {
       roomCode: this.roomCode,
       playerId: this.playerId,
+      trackSeed,
     });
   }
 

@@ -51,6 +51,8 @@ export class RoomStore {
 
   private readonly lastRaceStateByRoom = new Map<RoomCode, Map<PlayerId, RaceStatePayload>>();
 
+  private readonly trackSeedByRoom = new Map<RoomCode, string>();
+
   private nextPlayerSeq = 1;
 
   join(
@@ -277,10 +279,11 @@ export class RoomStore {
     this.readyByRoom.set(roomCode, new Set<PlayerId>());
   }
 
-  beginRace(roomCode: string): void {
+  beginRace(roomCode: string, trackSeed: string): void {
     this.raceActiveByRoom.set(roomCode, true);
     this.finishesByRoom.set(roomCode, new Map<PlayerId, RaceFinishRecord>());
     this.raceResultByRoom.delete(roomCode);
+    this.trackSeedByRoom.set(roomCode, trackSeed);
   }
 
   isRaceActive(roomCode: string): boolean {
@@ -348,5 +351,6 @@ export class RoomStore {
     this.raceActiveByRoom.delete(roomCode);
     this.finishesByRoom.delete(roomCode);
     this.raceResultByRoom.delete(roomCode);
+    this.trackSeedByRoom.delete(roomCode);
   }
 }

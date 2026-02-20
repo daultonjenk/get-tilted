@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import trackSurfaceUrl from "../../assets/textures/track/track-surface.png";
+import type { TrackBlueprint } from "./modularTrack";
 
 export type CreateTrackOptions = {
   seed?: string;
+  blueprint?: TrackBlueprint;
 };
 
 export type TrackBuildResult = {
@@ -290,7 +292,229 @@ function computeContainmentHalfX(trackWidth: number): number {
   return Math.max(0, trackWidth / 2 - RAIL_INSET - RAIL_THICK / 2 - MARBLE_RADIUS - 0.02);
 }
 
+function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
+  const group = new THREE.Group();
+  group.name = "track";
+
+  const boardBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+  boardBody.position.set(0, 0, 0);
+  boardBody.quaternion.set(0, 0, 0, 1);
+
+  const trackSurfaceTexture = createTrackSurfaceTexture();
+  const floorMaterial = new THREE.MeshStandardMaterial({ map: trackSurfaceTexture });
+  const railMaterial = new THREE.MeshStandardMaterial({
+    map: trackSurfaceTexture,
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.35,
+  });
+  const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
+  const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
+
+  const startTopBackPoint = new THREE.Vector3(0, FLOOR_THICK / 2, -START_LENGTH / 2);
+  const startForward = new THREE.Vector3(0, 0, 1);
+  const pathStartTopPoint = startTopBackPoint.clone();
+
+  let currentYawDeg = 0;
+  let lowestFloorY = 0;
+  let maxSegmentWidth = TRACK_W;
+  let minTrackX = Number.POSITIVE_INFINITY;
+  let maxTrackX = Number.NEGATIVE_INFINITY;
+  let minTrackZ = Number.POSITIVE_INFINITY;
+  let maxTrackZ = Number.NEGATIVE_INFINITY;
+
+  const includePointInBounds = (point: THREE.Vector3): void => {
+    minTrackX = Math.min(minTrackX, point.x);
+    maxTrackX = Math.max(maxTrackX, point.x);
+    minTrackZ = Math.min(minTrackZ, point.z);
+    maxTrackZ = Math.max(maxTrackZ, point.z);
+  };
+
+  const addSegment = ({
+    length,
+    slopeDeg,
+    width = TRACK_W,
+    railLeft = true,
+    railRight = true,
+  }: {
+    length: number;
+    slopeDeg: number;
+    width?: number;
+    railLeft?: boolean;
+    railRight?: boolean;
+  }) => {
+    const rotation = new THREE.Euler(degToRad(slopeDeg), degToRad(currentYawDeg), 0, "XYZ");
+
+    const forward = new THREE.Vector3(0, 0, 1).applyEuler(rotation).normalize();
+    const right = new THREE.Vector3(1, 0, 0).applyEuler(rotation).normalize();
+    const up = new THREE.Vector3(0, 1, 0).applyEuler(rotation).normalize();
+
+    const segmentEndTopPoint = pathStartTopPoint.clone().addScaledVector(forward, length);
+    const topCenter = pathStartTopPoint.clone().add(segmentEndTopPoint).multiplyScalar(0.5);
+    const floorCenter = topCenter.clone().addScaledVector(up, -FLOOR_THICK / 2);
+
+    addPart(group, boardBody, {
+      size: new THREE.Vector3(width, FLOOR_THICK, length),
+      position: floorCenter,
+      rotation,
+      material: floorMaterial,
+      uvProjection: "floorSegment",
+    });
+
+    maxSegmentWidth = Math.max(maxSegmentWidth, width);
+    lowestFloorY = Math.min(lowestFloorY, floorCenter.y);
+
+    const halfWidth = width / 2;
+    const halfLength = length / 2;
+    includePointInBounds(
+      floorCenter
+        .clone()
+        .addScaledVector(right, halfWidth)
+        .addScaledVector(forward, halfLength),
+    );
+    includePointInBounds(
+      floorCenter
+        .clone()
+        .addScaledVector(right, -halfWidth)
+        .addScaledVector(forward, halfLength),
+    );
+    includePointInBounds(
+      floorCenter
+        .clone()
+        .addScaledVector(right, halfWidth)
+        .addScaledVector(forward, -halfLength),
+    );
+    includePointInBounds(
+      floorCenter
+        .clone()
+        .addScaledVector(right, -halfWidth)
+        .addScaledVector(forward, -halfLength),
+    );
+
+    const sideOffset = width / 2 - RAIL_INSET;
+    const verticalOffset = RAIL_H / 2 - FLOOR_THICK / 2 + RAIL_FLOOR_OVERLAP;
+    const addRail = (direction: -1 | 1) => {
+      const railCenter = floorCenter
+        .clone()
+        .addScaledVector(right, sideOffset * direction)
+        .addScaledVector(up, verticalOffset);
+      addPart(group, boardBody, {
+        size: new THREE.Vector3(RAIL_THICK, RAIL_H, length),
+        position: railCenter,
+        rotation,
+        material: railMaterial,
+        uvScale: [Math.max(length * 0.3, 1), Math.max(RAIL_H, 1)],
+      });
+    };
+    if (railLeft) addRail(-1);
+    if (railRight) addRail(1);
+
+    pathStartTopPoint.copy(segmentEndTopPoint);
+  };
+
+  addSegment({ length: START_LENGTH, slopeDeg: 0, width: TRACK_W });
+  const startBackWallWidth = TRACK_W - (RAIL_INSET * 2 + RAIL_THICK);
+  const startBackWallY = RAIL_H / 2 - FLOOR_THICK / 2 + RAIL_FLOOR_OVERLAP;
+  const startBackWallZ = startTopBackPoint.z + RAIL_THICK / 2 + START_BACK_WALL_PADDING;
+  addPart(group, boardBody, {
+    size: new THREE.Vector3(startBackWallWidth, RAIL_H, RAIL_THICK),
+    position: new THREE.Vector3(0, startBackWallY, startBackWallZ),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: railMaterial,
+    uvScale: [Math.max(startBackWallWidth * 0.3, 1), Math.max(RAIL_H, 1)],
+  });
+
+  for (const segment of blueprint.segments) {
+    currentYawDeg += segment.yawDeg;
+    addSegment({
+      length: segment.length,
+      slopeDeg: segment.slopeDeg,
+      width: segment.width ?? TRACK_W,
+      railLeft: segment.railLeft ?? true,
+      railRight: segment.railRight ?? true,
+    });
+    if (segment.landingLength && segment.landingLength > 0) {
+      addSegment({
+        length: segment.landingLength,
+        slopeDeg: 0,
+        width: segment.width ?? TRACK_W,
+        railLeft: segment.railLeft ?? true,
+        railRight: segment.railRight ?? true,
+      });
+    }
+  }
+
+  const finishStartZ = pathStartTopPoint.z;
+  addSegment({
+    length: FINISH_LENGTH,
+    slopeDeg: 0,
+    width: FINISH_WIDTH,
+    railLeft: true,
+    railRight: true,
+  });
+
+  boardBody.aabbNeedsUpdate = true;
+  boardBody.updateAABB();
+
+  const spawn = startTopBackPoint
+    .clone()
+    .addScaledVector(startForward, 1.8)
+    .add(new THREE.Vector3(0, MARBLE_RADIUS + 0.6, 0));
+  const trialStartZ = spawn.z + 2;
+  const trialFinishZ = pathStartTopPoint.z - 1;
+
+  addVisualPart(group, {
+    size: new THREE.Vector3(TRACK_W + 0.8, MARKER_THICK, 0.45),
+    position: new THREE.Vector3(0, FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01, trialStartZ),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: startMarkerMaterial,
+  });
+
+  addVisualPart(group, {
+    size: new THREE.Vector3(FINISH_WIDTH + 1.2, MARKER_THICK, 0.55),
+    position: new THREE.Vector3(0, FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01, trialFinishZ),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: finishMarkerMaterial,
+  });
+
+  if (!Number.isFinite(minTrackX)) {
+    minTrackX = -FINISH_WIDTH / 2;
+    maxTrackX = FINISH_WIDTH / 2;
+    minTrackZ = startTopBackPoint.z;
+    maxTrackZ = pathStartTopPoint.z;
+  }
+
+  const offCourseBoundsLocal = {
+    minX: minTrackX - OFF_COURSE_MARGIN,
+    maxX: maxTrackX + OFF_COURSE_MARGIN,
+    minZ: minTrackZ - OFF_COURSE_Z_MARGIN,
+    maxZ: maxTrackZ + OFF_COURSE_Z_MARGIN,
+  };
+
+  return {
+    group,
+    bodies: [boardBody],
+    movingObstacleBodies: [],
+    containmentLocal: {
+      mainHalfX: computeContainmentHalfX(maxSegmentWidth),
+      finishHalfX: computeContainmentHalfX(Math.max(FINISH_WIDTH, maxSegmentWidth)),
+      finishStartZ,
+    },
+    spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
+    respawnY: lowestFloorY - 6,
+    offCourseBoundsLocal,
+    trialStartZ,
+    trialFinishZ,
+    updateMovingObstacles: () => {},
+    setMovingObstacleMaterial: () => {},
+  };
+}
+
 export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
+  if (opts?.blueprint) {
+    return createTrackFromBlueprint(opts.blueprint);
+  }
+
   const obstacleSeed = opts?.seed ?? DEFAULT_OBSTACLE_SEED;
   const obstacleRandom = makeSeededRandom(obstacleSeed);
 

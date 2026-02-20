@@ -6,9 +6,12 @@ export const ROOM_MAX_CLIENTS = 4;
 export const COUNTDOWN_STEP_MS = 1000;
 export const COUNTDOWN_PREROLL_MS = 600;
 export const COUNTDOWN_TOTAL_STEPS = 4;
+export const DEFAULT_TRACK_SEED = "v0_8_default_seed";
+export const TRACK_SEED_MAX_LENGTH = 64;
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_LENGTH = 6;
+const TRACK_SEED_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Generate a random room code.  Uses `crypto.getRandomValues` when available
@@ -29,6 +32,24 @@ export function generateRoomCode(): string {
     code += ROOM_CODE_CHARS[Math.floor(Math.random() * ROOM_CODE_CHARS.length)];
   }
   return code;
+}
+
+export function isTrackSeed(value: unknown): value is string {
+  return typeof value === "string" && TRACK_SEED_PATTERN.test(value);
+}
+
+export function sanitizeTrackSeed(
+  value: unknown,
+  fallback = DEFAULT_TRACK_SEED,
+): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > TRACK_SEED_MAX_LENGTH) {
+    return fallback;
+  }
+  return TRACK_SEED_PATTERN.test(trimmed) ? trimmed : fallback;
 }
 
 export type RaceFinishRecord = {
@@ -128,13 +149,18 @@ export type MessagePayloadMap = {
     }>;
   };
   "race:ready": { roomCode: string; playerId: string; ready: boolean };
-  "race:start": { roomCode: string; playerId: string };
+  "race:start": { roomCode: string; playerId: string; trackSeed?: string };
   "race:ready:state": {
     roomCode: string;
     readyPlayerIds: string[];
     countdownStartAtMs?: number;
   };
-  "race:countdown:start": { roomCode: string; startAtMs: number; stepMs: number };
+  "race:countdown:start": {
+    roomCode: string;
+    startAtMs: number;
+    stepMs: number;
+    trackSeed: string;
+  };
   "race:finish": {
     roomCode: string;
     playerId: string;
@@ -406,9 +432,15 @@ export function validatePayload<TType extends MessageType>(
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };
       }
-      return isString(payload.playerId)
+      if (!isString(payload.playerId)) {
+        return { ok: false, error: "Expected playerId string" };
+      }
+      if (typeof payload.trackSeed === "undefined") {
+        return { ok: true };
+      }
+      return isTrackSeed(payload.trackSeed)
         ? { ok: true }
-        : { ok: false, error: "Expected playerId string" };
+        : { ok: false, error: "Expected optional trackSeed string" };
     case "race:ready:state":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };
@@ -430,9 +462,12 @@ export function validatePayload<TType extends MessageType>(
       if (!isNumber(payload.startAtMs)) {
         return { ok: false, error: "Expected startAtMs number" };
       }
-      return isNumber(payload.stepMs)
+      if (!isNumber(payload.stepMs)) {
+        return { ok: false, error: "Expected stepMs number" };
+      }
+      return isTrackSeed(payload.trackSeed)
         ? { ok: true }
-        : { ok: false, error: "Expected stepMs number" };
+        : { ok: false, error: "Expected trackSeed string" };
     case "race:finish":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };

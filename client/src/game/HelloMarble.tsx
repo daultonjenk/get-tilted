@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { createTrack } from "./track/createTrack";
+import {
+  createTrack,
+  type CreateTrackOptions,
+  type TrackBuildResult,
+} from "./track/createTrack";
 import { RingBuffer } from "./RingBuffer";
 import {
   debugStore,
@@ -84,6 +88,9 @@ import {
   MUSIC_ENABLED_STORAGE_KEY,
   SOUND_ENABLED_STORAGE_KEY,
   DEBUG_MENU_ENABLED_STORAGE_KEY,
+  TRACK_LAB_LIBRARY_STORAGE_KEY,
+  TRACK_LAB_SEED_STORAGE_KEY,
+  TRACK_LAB_PIECE_COUNT_STORAGE_KEY,
   COUNTDOWN_LABELS,
   RESULT_SPARKLES,
   CAMERA_PRESETS,
@@ -112,6 +119,19 @@ import {
   getSkinCatalog,
   resolveSkinById,
 } from "./skins";
+import {
+  DEFAULT_TRACK_SEED,
+  TRACK_PIECE_COUNT_DEFAULT,
+  buildTrackBlueprint,
+  createDefaultCustomPiece,
+  randomTrackSeed,
+  sanitizeTrackPieceCount,
+  sanitizeTrackPieceLibrary,
+  sanitizeTrackPieceTemplate,
+  sanitizeTrackSeed,
+  type TrackPieceKind,
+  type TrackPieceTemplate,
+} from "./track/modularTrack";
 
 const skinCatalog = getSkinCatalog();
 const defaultSkinId = getDefaultSkinId();
@@ -126,8 +146,18 @@ const WALL_SQUEEZE_POP_CLEARANCE_Z = 0.16;
 const WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED = 2.6;
 const WALL_SQUEEZE_CONFIRM_FRAMES = 2;
 const MOVING_OBSTACLE_CONTACT_FRICTION = 0.02;
-type MenuScreen = "main" | "options";
+type MenuScreen = "main" | "options" | "trackLab";
 type OptionsSubmenu = "root" | "controls" | "camera";
+type TrackCatalogMode = "builtin" | "builtin_plus_custom";
+
+type RuntimeTrackConfig = {
+  seed: string;
+  pieceCount: number;
+  catalogMode: TrackCatalogMode;
+  customPieces: TrackPieceTemplate[];
+};
+
+type TrackPieceDraft = Omit<TrackPieceTemplate, "id">;
 
 function readStoredToggle(key: string, defaultValue: boolean): boolean {
   if (typeof window === "undefined") {
@@ -138,6 +168,76 @@ function readStoredToggle(key: string, defaultValue: boolean): boolean {
     return defaultValue;
   }
   return stored === "1";
+}
+
+function readStoredTrackSeed(): string {
+  if (typeof window === "undefined") {
+    return DEFAULT_TRACK_SEED;
+  }
+  return sanitizeTrackSeed(window.localStorage.getItem(TRACK_LAB_SEED_STORAGE_KEY));
+}
+
+function readStoredTrackPieceCount(): number {
+  if (typeof window === "undefined") {
+    return TRACK_PIECE_COUNT_DEFAULT;
+  }
+  const raw = window.localStorage.getItem(TRACK_LAB_PIECE_COUNT_STORAGE_KEY);
+  return sanitizeTrackPieceCount(raw ? Number(raw) : TRACK_PIECE_COUNT_DEFAULT);
+}
+
+function readStoredTrackLibrary(): TrackPieceTemplate[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  const raw = window.localStorage.getItem(TRACK_LAB_LIBRARY_STORAGE_KEY);
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return sanitizeTrackPieceLibrary(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function sanitizeTrackSeedInput(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+}
+
+function toTrackDraft(piece: TrackPieceTemplate): TrackPieceDraft {
+  const { id, ...draft } = piece;
+  void id;
+  return draft;
+}
+
+function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOptions {
+  const seed = sanitizeTrackSeed(config.seed);
+  const pieceCount = sanitizeTrackPieceCount(config.pieceCount);
+  const blueprint = buildTrackBlueprint({
+    config: { seed, pieceCount },
+    customPieces: sanitizeTrackPieceLibrary(config.customPieces),
+    includeCustomPieces: config.catalogMode === "builtin_plus_custom",
+    trackWidth: 9,
+  });
+  return {
+    seed,
+    blueprint,
+  };
+}
+
+function buildTrackConfig(
+  seed: string,
+  pieceCount: number,
+  catalogMode: TrackCatalogMode,
+  customPieces: TrackPieceTemplate[],
+): RuntimeTrackConfig {
+  return {
+    seed: sanitizeTrackSeed(seed),
+    pieceCount: sanitizeTrackPieceCount(pieceCount),
+    catalogMode,
+    customPieces: sanitizeTrackPieceLibrary(customPieces),
+  };
 }
 
 export function HelloMarble() {
@@ -241,6 +341,17 @@ export function HelloMarble() {
   const [debugMenuEnabled, setDebugMenuEnabled] = useState(() =>
     readStoredToggle(DEBUG_MENU_ENABLED_STORAGE_KEY, false),
   );
+  const [trackLabSeed, setTrackLabSeed] = useState(() => readStoredTrackSeed());
+  const [trackLabPieceCount, setTrackLabPieceCount] = useState(() => readStoredTrackPieceCount());
+  const [trackLabCustomPieces, setTrackLabCustomPieces] = useState<TrackPieceTemplate[]>(() =>
+    readStoredTrackLibrary(),
+  );
+  const [trackLabSelectedPieceId, setTrackLabSelectedPieceId] = useState<string | null>(null);
+  const [trackLabDraft, setTrackLabDraft] = useState<TrackPieceDraft>(() =>
+    toTrackDraft(createDefaultCustomPiece("straight")),
+  );
+  const [trackLabStatus, setTrackLabStatus] = useState("");
+  const [multiplayerTrackSeed, setMultiplayerTrackSeed] = useState(DEFAULT_TRACK_SEED);
 
   const tiltStatusRef = useRef(tiltStatus);
   const touchTiltRef = useRef(touchTilt);
@@ -265,6 +376,11 @@ export function HelloMarble() {
   const freezeMarbleRef = useRef<() => void>(() => {});
   const unfreezeMarbleRef = useRef<() => void>(() => {});
   const applyLocalSkinRef = useRef<(skinId: string) => void>(() => {});
+  const applyTrackConfigRef = useRef<(config: RuntimeTrackConfig) => void>(() => {});
+  const trackLabSeedRef = useRef(trackLabSeed);
+  const trackLabPieceCountRef = useRef(trackLabPieceCount);
+  const trackLabCustomPiecesRef = useRef(trackLabCustomPieces);
+  const multiplayerTrackSeedRef = useRef(multiplayerTrackSeed);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -446,6 +562,34 @@ export function HelloMarble() {
   }, [debugMenuEnabled]);
 
   useEffect(() => {
+    trackLabSeedRef.current = trackLabSeed;
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(TRACK_LAB_SEED_STORAGE_KEY, sanitizeTrackSeed(trackLabSeed));
+  }, [trackLabSeed]);
+
+  useEffect(() => {
+    trackLabPieceCountRef.current = trackLabPieceCount;
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      TRACK_LAB_PIECE_COUNT_STORAGE_KEY,
+      String(sanitizeTrackPieceCount(trackLabPieceCount)),
+    );
+  }, [trackLabPieceCount]);
+
+  useEffect(() => {
+    trackLabCustomPiecesRef.current = trackLabCustomPieces;
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      TRACK_LAB_LIBRARY_STORAGE_KEY,
+      JSON.stringify(sanitizeTrackPieceLibrary(trackLabCustomPieces)),
+    );
+  }, [trackLabCustomPieces]);
+
+  useEffect(() => {
+    multiplayerTrackSeedRef.current = sanitizeTrackSeed(multiplayerTrackSeed);
+  }, [multiplayerTrackSeed]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -513,10 +657,16 @@ export function HelloMarble() {
     directionalLight.position.set(6, 8, 5);
     scene.add(directionalLight);
 
-    const track = createTrack();
+    const initialTrackConfig = buildTrackConfig(
+      trackLabSeedRef.current,
+      trackLabPieceCountRef.current,
+      "builtin_plus_custom",
+      trackLabCustomPiecesRef.current,
+    );
+    let track = createTrack(createTrackOptionsFromConfig(initialTrackConfig));
     scene.add(track.group);
 
-    const boardBody = track.bodies[0];
+    let boardBody = track.bodies[0];
     if (!boardBody) {
       throw new Error("Track did not provide board physics body");
     }
@@ -677,7 +827,7 @@ export function HelloMarble() {
     const ghostTravelDelta = new THREE.Vector3();
     const ghostSpinAxis = new THREE.Vector3();
     const ghostSpinStepQuat = new THREE.Quaternion();
-    const movingObstacleBodySet = new Set(track.movingObstacleBodies);
+    let movingObstacleBodySet = new Set(track.movingObstacleBodies);
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -745,6 +895,50 @@ export function HelloMarble() {
       marbleMesh.quaternion.copy(localRenderCurrMarbleQuat);
       boardPosThree.copy(localRenderCurrBoardPos);
       boardQuatThree.copy(localRenderCurrBoardQuat);
+    };
+
+    const disposeTrack = (trackToDispose: TrackBuildResult): void => {
+      const disposedTrackTextures = new Set<THREE.Texture>();
+      for (const child of trackToDispose.group.children) {
+        if (child instanceof THREE.Mesh) {
+          for (const nested of child.children) {
+            if (nested instanceof THREE.LineSegments) {
+              nested.geometry.dispose();
+              if (Array.isArray(nested.material)) {
+                for (const material of nested.material) {
+                  material.dispose();
+                }
+              } else {
+                nested.material.dispose();
+              }
+            }
+          }
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            for (const material of child.material) {
+              if (
+                material instanceof THREE.MeshStandardMaterial &&
+                material.map &&
+                !disposedTrackTextures.has(material.map)
+              ) {
+                disposedTrackTextures.add(material.map);
+                material.map.dispose();
+              }
+              material.dispose();
+            }
+          } else {
+            if (
+              child.material instanceof THREE.MeshStandardMaterial &&
+              child.material.map &&
+              !disposedTrackTextures.has(child.material.map)
+            ) {
+              disposedTrackTextures.add(child.material.map);
+              child.material.map.dispose();
+            }
+            child.material.dispose();
+          }
+        }
+      }
     };
 
     const suppressVerticalPopOnSideImpact = () => {
@@ -1237,6 +1431,14 @@ export function HelloMarble() {
               : false,
           );
           if (typeof message.payload.countdownStartAtMs === "number") {
+            applyTrackConfigRef.current(
+              buildTrackConfig(
+                multiplayerTrackSeedRef.current,
+                trackLabPieceCountRef.current,
+                "builtin",
+                [],
+              ),
+            );
             resetGhostSnapshots();
             setRaceResult(null);
             hasSentFinishRef.current = false;
@@ -1263,6 +1465,16 @@ export function HelloMarble() {
           }
           if (message.payload.roomCode !== raceClient.getRoomCode()) {
             return;
+          }
+          {
+            const seededConfig = buildTrackConfig(
+              message.payload.trackSeed,
+              trackLabPieceCountRef.current,
+              "builtin",
+              [],
+            );
+            setMultiplayerTrackSeed(seededConfig.seed);
+            applyTrackConfigRef.current(seededConfig);
           }
           resetGhostSnapshots();
           setRaceResult(null);
@@ -1565,6 +1777,46 @@ export function HelloMarble() {
     if (gameModeRef.current !== "solo") {
       freezeMarble();
     }
+
+    const rebuildTrack = (nextConfig: RuntimeTrackConfig): void => {
+      const nextTrack = createTrack(createTrackOptionsFromConfig(nextConfig));
+      const nextBoardBody = nextTrack.bodies[0];
+      if (!nextBoardBody) {
+        return;
+      }
+
+      for (const body of track.bodies) {
+        world.removeBody(body);
+      }
+      scene.remove(track.group);
+      disposeTrack(track);
+
+      track = nextTrack;
+      boardBody = nextBoardBody;
+      boardBody.material = boardMat;
+      track.setMovingObstacleMaterial(movingObstacleMat);
+      for (const body of track.bodies) {
+        world.addBody(body);
+      }
+      movingObstacleBodySet = new Set(track.movingObstacleBodies);
+      scene.add(track.group);
+
+      boardPrevPos.copy(boardBody.position);
+      boardPrevQuat.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
+      currentPitch = 0;
+      currentRoll = 0;
+      respawnMarble(false);
+      if (gameModeRef.current !== "solo") {
+        freezeMarble();
+      }
+    };
+
+    applyTrackConfigRef.current = rebuildTrack;
 
     const getKeyboardIntent = (): TiltSample => {
       let x = 0;
@@ -2823,50 +3075,11 @@ export function HelloMarble() {
       stopTiltListener?.();
       raceClient.disconnect();
       raceClientRef.current = null;
+      applyTrackConfigRef.current = () => {};
       mount.removeChild(renderer.domElement);
       renderer.dispose();
       scene.remove(track.group);
-      const disposedTrackTextures = new Set<THREE.Texture>();
-      for (const child of track.group.children) {
-        if (child instanceof THREE.Mesh) {
-          for (const nested of child.children) {
-            if (nested instanceof THREE.LineSegments) {
-              nested.geometry.dispose();
-              if (Array.isArray(nested.material)) {
-                for (const material of nested.material) {
-                  material.dispose();
-                }
-              } else {
-                nested.material.dispose();
-              }
-            }
-          }
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) {
-            for (const material of child.material) {
-              if (
-                material instanceof THREE.MeshStandardMaterial &&
-                material.map &&
-                !disposedTrackTextures.has(material.map)
-              ) {
-                disposedTrackTextures.add(material.map);
-                material.map.dispose();
-              }
-              material.dispose();
-            }
-          } else {
-            if (
-              child.material instanceof THREE.MeshStandardMaterial &&
-              child.material.map &&
-              !disposedTrackTextures.has(child.material.map)
-            ) {
-              disposedTrackTextures.add(child.material.map);
-              child.material.map.dispose();
-            }
-            child.material.dispose();
-          }
-        }
-      }
+      disposeTrack(track);
       for (const [, playerState] of ghostPlayers) {
         scene.remove(playerState.mesh);
         playerState.mesh.geometry.dispose();
@@ -2888,6 +3101,7 @@ export function HelloMarble() {
     !gyroEnabled || !tiltStatus.supported || tiltStatus.permission === "denied";
   const showModePicker = gameMode === "unselected" && menuScreen === "main";
   const showOptionsMenu = gameMode === "unselected" && menuScreen === "options";
+  const showTrackLabMenu = gameMode === "unselected" && menuScreen === "trackLab";
   const showingOptionsRoot = showOptionsMenu && optionsSubmenu === "root";
   const showingOptionsControls = showOptionsMenu && optionsSubmenu === "controls";
   const showingOptionsCamera = showOptionsMenu && optionsSubmenu === "camera";
@@ -2905,6 +3119,7 @@ export function HelloMarble() {
   const gameplayUiVisible =
     !showModePicker &&
     !showOptionsMenu &&
+    !showTrackLabMenu &&
     !showRaceLobby &&
     !showMultiplayerResult &&
     !showSoloResult;
@@ -3090,6 +3305,115 @@ export function HelloMarble() {
     setOptionsSubmenu("root");
   };
 
+  const handleTrackLabBack = () => {
+    setMenuScreen("main");
+  };
+
+  const setTrackDraftKind = (kind: TrackPieceKind) => {
+    setTrackLabDraft((prev) => {
+      const seeded = toTrackDraft(createDefaultCustomPiece(kind));
+      return {
+        ...seeded,
+        label: prev.label,
+        weight: prev.weight,
+      };
+    });
+  };
+
+  const updateTrackLabDraft = <K extends keyof TrackPieceDraft>(
+    key: K,
+    value: TrackPieceDraft[K],
+  ) => {
+    setTrackLabDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const beginNewTrackPiece = (kind: TrackPieceKind = trackLabDraft.kind) => {
+    setTrackLabSelectedPieceId(null);
+    setTrackLabDraft(toTrackDraft(createDefaultCustomPiece(kind)));
+  };
+
+  const indexedTrackPieceLabel = (piece: TrackPieceTemplate, suffix: string): string =>
+    `${piece.label} ${suffix}.`;
+
+  const saveTrackPieceDraft = () => {
+    const nextId = trackLabSelectedPieceId ?? `custom-${Date.now().toString(36)}`;
+    const candidate = sanitizeTrackPieceTemplate(
+      {
+        ...trackLabDraft,
+        id: nextId,
+      },
+      nextId,
+    );
+    if (!candidate) {
+      setTrackLabStatus("Invalid piece settings.");
+      return;
+    }
+    setTrackLabCustomPieces((prev) => {
+      const next = [...prev];
+      const index = next.findIndex((entry) => entry.id === nextId);
+      if (index >= 0) {
+        next[index] = candidate;
+      } else {
+        next.push(candidate);
+      }
+      return sanitizeTrackPieceLibrary(next);
+    });
+    setTrackLabSelectedPieceId(nextId);
+    setTrackLabStatus(indexedTrackPieceLabel(candidate, "saved"));
+  };
+
+  const selectTrackPiece = (pieceId: string) => {
+    const selected = trackLabCustomPieces.find((piece) => piece.id === pieceId);
+    if (!selected) {
+      return;
+    }
+    setTrackLabSelectedPieceId(pieceId);
+    setTrackLabDraft(toTrackDraft(selected));
+    setTrackLabStatus(`${selected.label} loaded into editor.`);
+  };
+
+  const deleteSelectedTrackPiece = () => {
+    if (!trackLabSelectedPieceId) {
+      setTrackLabStatus("Select a piece to delete.");
+      return;
+    }
+    const selected = trackLabCustomPieces.find((piece) => piece.id === trackLabSelectedPieceId);
+    setTrackLabCustomPieces((prev) =>
+      prev.filter((piece) => piece.id !== trackLabSelectedPieceId),
+    );
+    setTrackLabSelectedPieceId(null);
+    beginNewTrackPiece();
+    setTrackLabStatus(selected ? `${selected.label} deleted.` : "Piece deleted.");
+  };
+
+  const applyTrackLabPreview = () => {
+    const nextConfig = buildTrackConfig(
+      trackLabSeed,
+      trackLabPieceCount,
+      "builtin_plus_custom",
+      trackLabCustomPieces,
+    );
+    setTrackLabSeed(nextConfig.seed);
+    setTrackLabPieceCount(nextConfig.pieceCount);
+    applyTrackConfigRef.current(nextConfig);
+    setTrackLabStatus(
+      `Preview applied using seed "${nextConfig.seed}" with ${nextConfig.pieceCount} pieces.`,
+    );
+  };
+
+  const resetTrackLabLibrary = () => {
+    setTrackLabCustomPieces([]);
+    setTrackLabSelectedPieceId(null);
+    beginNewTrackPiece();
+    setTrackLabStatus("Custom piece library cleared.");
+  };
+
+  const randomizeSeedForTrackLab = () => {
+    const next = randomTrackSeed("track");
+    setTrackLabSeed(next);
+    setTrackLabStatus(`Seed randomized: ${next}`);
+  };
+
   const gyroPermissionWorking =
     tiltStatus.supported &&
     tiltStatus.permission === "granted" &&
@@ -3173,8 +3497,10 @@ export function HelloMarble() {
       setNetError("All joined players must be READY.");
       return;
     }
+    const seed = sanitizeTrackSeed(trackLabSeedRef.current);
+    setMultiplayerTrackSeed(seed);
     setNetError(null);
-    raceClientRef.current?.sendRaceStart();
+    raceClientRef.current?.sendRaceStart(seed);
   };
 
   const startSoloRaceSequence = async () => {
@@ -3239,11 +3565,27 @@ export function HelloMarble() {
     countdownIndexRef.current = -1;
     countdownGoHandledRef.current = false;
     if (nextMode === "solo") {
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          trackLabSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin_plus_custom",
+          trackLabCustomPiecesRef.current,
+        ),
+      );
       void startSoloRaceSequence();
       return;
     }
     if (nextMode === "multiplayer") {
       setDrawerOpen(false);
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          multiplayerTrackSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin",
+          [],
+        ),
+      );
       raceClientRef.current?.setPreferredName(playerNameRef.current || undefined);
       raceClientRef.current?.setPreferredSkinId(
         selectedMarbleSkinIdRef.current === defaultSkinId
@@ -3253,6 +3595,14 @@ export function HelloMarble() {
       raceClientRef.current?.createRoom();
     }
     if (nextMode === "unselected") {
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          trackLabSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin_plus_custom",
+          trackLabCustomPiecesRef.current,
+        ),
+      );
       setOptionsSubmenu("root");
       setMenuScreen("main");
     }
@@ -3327,12 +3677,16 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
+                onClick={() => setMenuScreen("trackLab")}
+              >
+                Track Lab
+              </button>
+              <button
+                type="button"
+                className="menuActionButton"
                 onClick={() => switchGameMode("multiplayer")}
               >
                 Multiplayer
-              </button>
-              <button type="button" className="menuActionButton menuActionButtonDisabled" disabled>
-                WIP
               </button>
               <button
                 type="button"
@@ -3549,6 +3903,258 @@ export function HelloMarble() {
                   onChange={(event) => setDebugMenuEnabled(event.target.checked)}
                 />
               </label>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showTrackLabMenu ? (
+        <div className="raceOverlay menuOverlay">
+          <div className="raceOverlayCard menuCard trackLabCard">
+            <div className="menuHeaderRow">
+              <button
+                type="button"
+                className="lobbyBackButton optionsBackButton"
+                onClick={handleTrackLabBack}
+              >
+                {"< Back"}
+              </button>
+              <p className="raceOverlayTitle optionsTitle">Track Lab</p>
+            </div>
+            <div className="trackLabPanel">
+              <label className="optionsField" htmlFor="trackLabSeedInput">
+                <span className="optionsFieldLabel">Seed</span>
+                <input
+                  id="trackLabSeedInput"
+                  className="optionsTextInput"
+                  value={trackLabSeed}
+                  onChange={(event) => setTrackLabSeed(sanitizeTrackSeedInput(event.target.value))}
+                  placeholder="seed_123"
+                  maxLength={64}
+                  autoComplete="off"
+                />
+              </label>
+              <div className="optionsInlineButtons">
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={randomizeSeedForTrackLab}
+                >
+                  Randomize Seed
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={() => setTrackLabSeed(DEFAULT_TRACK_SEED)}
+                >
+                  Reset Seed
+                </button>
+              </div>
+              <label className="optionsSliderField" htmlFor="trackLabPieceCount">
+                <span className="optionsFieldLabel">Piece Count ({trackLabPieceCount})</span>
+                <input
+                  id="trackLabPieceCount"
+                  type="range"
+                  min={6}
+                  max={48}
+                  step={1}
+                  value={trackLabPieceCount}
+                  onChange={(event) => setTrackLabPieceCount(Number(event.target.value))}
+                />
+              </label>
+              <p className="raceHint">Multiplayer race seed: {multiplayerTrackSeed}</p>
+              <div className="trackLabEditorGrid">
+                <label className="optionsField" htmlFor="trackPieceLabel">
+                  <span className="optionsFieldLabel">Piece Name</span>
+                  <input
+                    id="trackPieceLabel"
+                    className="optionsTextInput"
+                    value={trackLabDraft.label}
+                    maxLength={28}
+                    onChange={(event) => updateTrackLabDraft("label", event.target.value)}
+                  />
+                </label>
+                <label className="optionsField" htmlFor="trackPieceKind">
+                  <span className="optionsFieldLabel">Piece Type</span>
+                  <select
+                    id="trackPieceKind"
+                    className="menuSelect"
+                    value={trackLabDraft.kind}
+                    onChange={(event) => setTrackDraftKind(event.target.value as TrackPieceKind)}
+                  >
+                    <option value="straight">Straight</option>
+                    <option value="bend90">90 Bend</option>
+                    <option value="sCurve">S-Curve</option>
+                    <option value="narrowBridge">Narrow Bridge</option>
+                  </select>
+                </label>
+                <label className="optionsSliderField" htmlFor="trackPieceLength">
+                  <span className="optionsFieldLabel">
+                    Length ({trackLabDraft.length.toFixed(1)})
+                  </span>
+                  <input
+                    id="trackPieceLength"
+                    type="range"
+                    min={4}
+                    max={24}
+                    step={0.5}
+                    value={trackLabDraft.length}
+                    onChange={(event) => updateTrackLabDraft("length", Number(event.target.value))}
+                  />
+                </label>
+                <label className="optionsSliderField" htmlFor="trackPieceWidthScale">
+                  <span className="optionsFieldLabel">
+                    Width Scale ({trackLabDraft.widthScale.toFixed(2)})
+                  </span>
+                  <input
+                    id="trackPieceWidthScale"
+                    type="range"
+                    min={0.35}
+                    max={1.35}
+                    step={0.01}
+                    value={trackLabDraft.widthScale}
+                    onChange={(event) =>
+                      updateTrackLabDraft("widthScale", Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="optionsSliderField" htmlFor="trackPieceSlope">
+                  <span className="optionsFieldLabel">
+                    Slope ({trackLabDraft.slopeDeg.toFixed(1)}°)
+                  </span>
+                  <input
+                    id="trackPieceSlope"
+                    type="range"
+                    min={-8}
+                    max={8}
+                    step={0.5}
+                    value={trackLabDraft.slopeDeg}
+                    onChange={(event) => updateTrackLabDraft("slopeDeg", Number(event.target.value))}
+                  />
+                </label>
+                <label className="optionsSliderField" htmlFor="trackPieceTurnStrength">
+                  <span className="optionsFieldLabel">
+                    Turn Strength ({Math.round(trackLabDraft.turnStrengthDeg)}°)
+                  </span>
+                  <input
+                    id="trackPieceTurnStrength"
+                    type="range"
+                    min={10}
+                    max={90}
+                    step={1}
+                    value={trackLabDraft.turnStrengthDeg}
+                    onChange={(event) =>
+                      updateTrackLabDraft("turnStrengthDeg", Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="optionsField" htmlFor="trackPieceDirection">
+                  <span className="optionsFieldLabel">Turn Direction</span>
+                  <select
+                    id="trackPieceDirection"
+                    className="menuSelect"
+                    value={trackLabDraft.turnDirection}
+                    onChange={(event) =>
+                      updateTrackLabDraft(
+                        "turnDirection",
+                        event.target.value === "right" ? "right" : "left",
+                      )
+                    }
+                  >
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                  </select>
+                </label>
+                <label className="optionsSliderField" htmlFor="trackPieceWeight">
+                  <span className="optionsFieldLabel">
+                    Spawn Weight ({trackLabDraft.weight.toFixed(2)})
+                  </span>
+                  <input
+                    id="trackPieceWeight"
+                    type="range"
+                    min={0.1}
+                    max={5}
+                    step={0.1}
+                    value={trackLabDraft.weight}
+                    onChange={(event) => updateTrackLabDraft("weight", Number(event.target.value))}
+                  />
+                </label>
+                <label className="optionsToggleRow" htmlFor="trackPieceRailLeft">
+                  <span>Rail Left</span>
+                  <input
+                    id="trackPieceRailLeft"
+                    type="checkbox"
+                    checked={trackLabDraft.railLeft}
+                    onChange={(event) => updateTrackLabDraft("railLeft", event.target.checked)}
+                  />
+                </label>
+                <label className="optionsToggleRow" htmlFor="trackPieceRailRight">
+                  <span>Rail Right</span>
+                  <input
+                    id="trackPieceRailRight"
+                    type="checkbox"
+                    checked={trackLabDraft.railRight}
+                    onChange={(event) => updateTrackLabDraft("railRight", event.target.checked)}
+                  />
+                </label>
+              </div>
+              <div className="optionsInlineButtons">
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={saveTrackPieceDraft}
+                >
+                  {trackLabSelectedPieceId ? "Update Piece" : "Save Piece"}
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={() => beginNewTrackPiece(trackLabDraft.kind)}
+                >
+                  New Piece
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={deleteSelectedTrackPiece}
+                >
+                  Delete Piece
+                </button>
+              </div>
+              <div className="trackLabPieceList">
+                {trackLabCustomPieces.length === 0 ? (
+                  <p className="raceHint">No custom pieces yet. Save your first piece above.</p>
+                ) : (
+                  trackLabCustomPieces.map((piece) => (
+                    <button
+                      key={piece.id}
+                      type="button"
+                      className={`trackLabPieceButton ${
+                        piece.id === trackLabSelectedPieceId ? "selected" : ""
+                      }`}
+                      onClick={() => selectTrackPiece(piece.id)}
+                    >
+                      {piece.label} · {piece.kind}
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="optionsInlineButtons">
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={applyTrackLabPreview}
+                >
+                  Apply Preview Track
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={resetTrackLabLibrary}
+                >
+                  Clear Custom Pieces
+                </button>
+              </div>
+              {trackLabStatus ? <p className="raceHint">{trackLabStatus}</p> : null}
             </div>
           </div>
         </div>

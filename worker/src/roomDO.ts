@@ -3,6 +3,7 @@ import {
   encodeMessage,
   generateRoomCode,
   safeParseMessage,
+  sanitizeTrackSeed,
   COUNTDOWN_STEP_MS,
   COUNTDOWN_PREROLL_MS,
   ROOM_MAX_CLIENTS,
@@ -255,12 +256,14 @@ export class RoomDO {
             this.broadcastReadyState();
             return;
           }
+          const trackSeed = sanitizeTrackSeed(parsed.msg.payload.trackSeed);
           const startAtMs = Date.now() + COUNTDOWN_PREROLL_MS;
           this.beginRace(startAtMs);
           this.broadcast("race:countdown:start", {
             roomCode: this.roomCode,
             startAtMs,
             stepMs: COUNTDOWN_STEP_MS,
+            trackSeed,
           });
           this.broadcastReadyState();
           return;
