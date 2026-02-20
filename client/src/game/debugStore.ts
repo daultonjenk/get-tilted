@@ -30,6 +30,11 @@ export type MarbleDebug = {
   physicsMsEma: number;
   renderMsEma: number;
   miscMsEma: number;
+  marbleBoardContactCount: number;
+  colliderPieceCount: number;
+  primitiveShapeCount: number;
+  exoticTrimeshPieceCount: number;
+  railClampCorrectionsPerSec: number;
 };
 
 export type NetSmoothingDebug = {
@@ -89,6 +94,11 @@ const DEFAULT_DEBUG: MarbleDebug = {
   physicsMsEma: 0,
   renderMsEma: 0,
   miscMsEma: 0,
+  marbleBoardContactCount: 0,
+  colliderPieceCount: 0,
+  primitiveShapeCount: 0,
+  exoticTrimeshPieceCount: 0,
+  railClampCorrectionsPerSec: 0,
 };
 
 const DEFAULT_NET: NetSmoothingDebug = {

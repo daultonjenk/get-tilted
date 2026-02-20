@@ -19,6 +19,12 @@ export type TrackContainmentSample = {
   railRight: boolean;
 };
 
+export type TrackPhysicsDebug = {
+  colliderPieceCount: number;
+  primitiveShapeCount: number;
+  exoticTrimeshPieceCount: number;
+};
+
 export type TrackBuildResult = {
   group: THREE.Group;
   bodies: CANNON.Body[];
@@ -40,6 +46,7 @@ export type TrackBuildResult = {
   };
   trialStartZ: number;
   trialFinishZ: number;
+  physicsDebug: TrackPhysicsDebug;
   updateMovingObstacles: (
     fixedDt: number,
     boardPos: CANNON.Vec3,
@@ -137,8 +144,11 @@ const STATIC_INTERSTITIAL_OFFCENTER_W = TRACK_W * 0.19;
 const STATIC_INTERSTITIAL_WALL_JUT_W = TRACK_W / 6;
 const STATIC_INTERSTITIAL_L = 0.62;
 const BLUEPRINT_RENDER_SAMPLE_STEP = 0.25;
-const BLUEPRINT_COLLIDER_SAMPLE_STEP = 0.55;
+const BLUEPRINT_COLLIDER_SAMPLE_STEP = 1.2;
 const CENTER_GUIDE_HALF_WIDTH = 0.16;
+const BLUEPRINT_COLLIDER_MODE: BlueprintColliderMode = "primitive";
+const COLLIDER_SPAN_OVERLAP_Z = 0.22;
+const COLLIDER_LATERAL_PADDING_X = 0.04;
 
 // Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
@@ -384,6 +394,8 @@ type SweepRect = {
   minY: number;
   maxY: number;
 };
+
+type BlueprintColliderMode = "primitive" | "trimesh";
 
 type BlueprintSweepPath = {
   samples: BlueprintSweepSample[];
@@ -720,6 +732,161 @@ function applyHeightVertexColors(
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colorArray, 3));
 }
 
+function countBodyShapes(bodies: CANNON.Body[]): number {
+  let total = 0;
+  for (const body of bodies) {
+    total += body.shapes.length;
+  }
+  return total;
+}
+
+function addBlueprintPrimitiveColliders(
+  boardBody: CANNON.Body,
+  samples: BlueprintSweepSample[],
+  frames: BlueprintSweepFrame[],
+): { colliderPieceCount: number; primitiveShapeCount: number } {
+  if (samples.length < 2 || frames.length !== samples.length) {
+    return { colliderPieceCount: 0, primitiveShapeCount: 0 };
+  }
+
+  let colliderPieceCount = 0;
+  let primitiveShapeCount = 0;
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const spanDelta = new THREE.Vector3();
+  const spanCenter = new THREE.Vector3();
+  const spanTangent = new THREE.Vector3();
+  const spanRight = new THREE.Vector3();
+  const spanUp = new THREE.Vector3();
+  const orientedQuat = new THREE.Quaternion();
+  const orientedBasis = new THREE.Matrix4();
+  const floorCenter = new THREE.Vector3();
+  const railCenter = new THREE.Vector3();
+  const roofCenter = new THREE.Vector3();
+
+  const addSpanBox = (center: THREE.Vector3, halfExtents: THREE.Vector3): void => {
+    primitiveShapeCount += 1;
+    boardBody.addShape(
+      new CANNON.Box(new CANNON.Vec3(halfExtents.x, halfExtents.y, halfExtents.z)),
+      new CANNON.Vec3(center.x, center.y, center.z),
+      new CANNON.Quaternion(
+        orientedQuat.x,
+        orientedQuat.y,
+        orientedQuat.z,
+        orientedQuat.w,
+      ),
+    );
+  };
+
+  const floorHalfExtents = new THREE.Vector3();
+  const leftRailHalfExtents = new THREE.Vector3();
+  const rightRailHalfExtents = new THREE.Vector3();
+  const roofHalfExtents = new THREE.Vector3();
+
+  for (let i = 0; i < samples.length - 1; i += 1) {
+    const sampleA = samples[i]!;
+    const sampleB = samples[i + 1]!;
+    const frameA = frames[i]!;
+    const frameB = frames[i + 1]!;
+
+    spanDelta.copy(sampleB.center).sub(sampleA.center);
+    const spanLength = spanDelta.length();
+    if (spanLength <= 0.08) {
+      continue;
+    }
+    colliderPieceCount += 1;
+    spanTangent.copy(spanDelta).multiplyScalar(1 / spanLength);
+
+    spanRight.copy(frameA.right).add(frameB.right);
+    if (spanRight.lengthSq() <= 1e-8) {
+      spanRight.copy(frameA.right);
+    }
+    spanRight.addScaledVector(spanTangent, -spanRight.dot(spanTangent));
+    if (spanRight.lengthSq() <= 1e-8) {
+      spanRight.copy(worldUp).cross(spanTangent);
+    }
+    if (spanRight.lengthSq() <= 1e-8) {
+      spanRight.set(1, 0, 0);
+    }
+    spanRight.normalize();
+
+    spanUp.copy(spanTangent).cross(spanRight);
+    if (spanUp.lengthSq() <= 1e-8) {
+      spanUp.copy(frameA.up);
+    } else {
+      spanUp.normalize();
+    }
+    if (spanUp.dot(frameA.up) < 0) {
+      spanUp.negate();
+      spanRight.negate();
+    }
+
+    orientedBasis.makeBasis(spanRight, spanUp, spanTangent);
+    orientedQuat.setFromRotationMatrix(orientedBasis);
+    spanCenter.copy(sampleA.center).add(sampleB.center).multiplyScalar(0.5);
+
+    const spanWidth = Math.max(2.8, (sampleA.width + sampleB.width) * 0.5);
+    const spanHalfLength = spanLength * 0.5 + COLLIDER_SPAN_OVERLAP_Z;
+
+    floorHalfExtents.set(
+      spanWidth * 0.5 + COLLIDER_LATERAL_PADDING_X,
+      FLOOR_THICK * 0.5,
+      spanHalfLength,
+    );
+    floorCenter
+      .copy(spanCenter)
+      .addScaledVector(spanUp, -FLOOR_THICK * 0.5);
+    addSpanBox(floorCenter, floorHalfExtents);
+
+    const sideOffset = spanWidth / 2 - RAIL_INSET;
+    const railCenterYOffset = -FLOOR_THICK + RAIL_FLOOR_OVERLAP + RAIL_H * 0.5;
+    if (sampleA.railLeft || sampleB.railLeft) {
+      leftRailHalfExtents.set(
+        RAIL_THICK * 0.5 + COLLIDER_LATERAL_PADDING_X,
+        RAIL_H * 0.5,
+        spanHalfLength,
+      );
+      railCenter
+        .copy(spanCenter)
+        .addScaledVector(spanRight, -sideOffset)
+        .addScaledVector(spanUp, railCenterYOffset);
+      addSpanBox(railCenter, leftRailHalfExtents);
+    }
+    if (sampleA.railRight || sampleB.railRight) {
+      rightRailHalfExtents.set(
+        RAIL_THICK * 0.5 + COLLIDER_LATERAL_PADDING_X,
+        RAIL_H * 0.5,
+        spanHalfLength,
+      );
+      railCenter
+        .copy(spanCenter)
+        .addScaledVector(spanRight, sideOffset)
+        .addScaledVector(spanUp, railCenterYOffset);
+      addSpanBox(railCenter, rightRailHalfExtents);
+    }
+
+    if (sampleA.tunnelRoof || sampleB.tunnelRoof) {
+      const roofInset = Math.max(RAIL_THICK * 0.75, 0.25);
+      const roofWidth = spanWidth - roofInset * 2;
+      if (roofWidth > 0.15) {
+        const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+        const railTop = railBottom + RAIL_H;
+        const roofBottom = railTop - 0.2;
+        const roofHeight = 0.45;
+        roofHalfExtents.set(roofWidth * 0.5, roofHeight * 0.5, spanHalfLength);
+        roofCenter
+          .copy(spanCenter)
+          .addScaledVector(spanUp, roofBottom + roofHeight * 0.5);
+        addSpanBox(roofCenter, roofHalfExtents);
+      }
+    }
+  }
+
+  return {
+    colliderPieceCount,
+    primitiveShapeCount,
+  };
+}
+
 function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
   const group = new THREE.Group();
   group.name = "track";
@@ -859,85 +1026,102 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     group.add(mesh);
   }
 
-  const colliderFloorGeometry = buildSweptRectGeometry(
-    colliderSamples,
-    colliderFrames,
-    (sample) => ({
-      minX: -sample.width / 2,
-      maxX: sample.width / 2,
-      minY: -FLOOR_THICK,
-      maxY: 0,
-    }),
-  );
-  const colliderLeftRailGeometry = buildSweptRectGeometry(
-    colliderSamples,
-    colliderFrames,
-    (sample) => {
-      if (!sample.railLeft) {
-        return null;
-      }
-      const sideOffset = sample.width / 2 - RAIL_INSET;
-      const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
-      return {
-        minX: -sideOffset - RAIL_THICK / 2,
-        maxX: -sideOffset + RAIL_THICK / 2,
-        minY: railBottom,
-        maxY: railBottom + RAIL_H,
-      };
-    },
-  );
-  const colliderRightRailGeometry = buildSweptRectGeometry(
-    colliderSamples,
-    colliderFrames,
-    (sample) => {
-      if (!sample.railRight) {
-        return null;
-      }
-      const sideOffset = sample.width / 2 - RAIL_INSET;
-      const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
-      return {
-        minX: sideOffset - RAIL_THICK / 2,
-        maxX: sideOffset + RAIL_THICK / 2,
-        minY: railBottom,
-        maxY: railBottom + RAIL_H,
-      };
-    },
-  );
-  const colliderRoofGeometry = buildSweptRectGeometry(colliderSamples, colliderFrames, (sample) => {
-    if (!sample.tunnelRoof) {
-      return null;
+  let colliderPieceCount = 0;
+  let exoticTrimeshPieceCount = 0;
+  if (BLUEPRINT_COLLIDER_MODE === "primitive") {
+    const primitiveStats = addBlueprintPrimitiveColliders(
+      boardBody,
+      colliderSamples,
+      colliderFrames,
+    );
+    colliderPieceCount = primitiveStats.colliderPieceCount;
+  } else {
+    const colliderFloorGeometry = buildSweptRectGeometry(
+      colliderSamples,
+      colliderFrames,
+      (sample) => ({
+        minX: -sample.width / 2,
+        maxX: sample.width / 2,
+        minY: -FLOOR_THICK,
+        maxY: 0,
+      }),
+    );
+    const colliderLeftRailGeometry = buildSweptRectGeometry(
+      colliderSamples,
+      colliderFrames,
+      (sample) => {
+        if (!sample.railLeft) {
+          return null;
+        }
+        const sideOffset = sample.width / 2 - RAIL_INSET;
+        const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+        return {
+          minX: -sideOffset - RAIL_THICK / 2,
+          maxX: -sideOffset + RAIL_THICK / 2,
+          minY: railBottom,
+          maxY: railBottom + RAIL_H,
+        };
+      },
+    );
+    const colliderRightRailGeometry = buildSweptRectGeometry(
+      colliderSamples,
+      colliderFrames,
+      (sample) => {
+        if (!sample.railRight) {
+          return null;
+        }
+        const sideOffset = sample.width / 2 - RAIL_INSET;
+        const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+        return {
+          minX: sideOffset - RAIL_THICK / 2,
+          maxX: sideOffset + RAIL_THICK / 2,
+          minY: railBottom,
+          maxY: railBottom + RAIL_H,
+        };
+      },
+    );
+    const colliderRoofGeometry = buildSweptRectGeometry(
+      colliderSamples,
+      colliderFrames,
+      (sample) => {
+        if (!sample.tunnelRoof) {
+          return null;
+        }
+        const roofInset = Math.max(RAIL_THICK * 0.75, 0.25);
+        const minX = -sample.width / 2 + roofInset;
+        const maxX = sample.width / 2 - roofInset;
+        if (maxX - minX < 0.15) {
+          return null;
+        }
+        const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+        const railTop = railBottom + RAIL_H;
+        const roofBottom = railTop - 0.2;
+        return {
+          minX,
+          maxX,
+          minY: roofBottom,
+          maxY: roofBottom + 0.45,
+        };
+      },
+    );
+    const colliderGeometries = [
+      colliderFloorGeometry,
+      colliderLeftRailGeometry,
+      colliderRightRailGeometry,
+      colliderRoofGeometry,
+    ].filter((geometry): geometry is THREE.BufferGeometry => geometry != null);
+    const mergedGeometry =
+      colliderGeometries.length > 0 ? mergeGeometries(colliderGeometries, false) : null;
+    if (mergedGeometry) {
+      mergedGeometry.computeVertexNormals();
+      boardBody.addShape(geometryToTrimesh(mergedGeometry));
+      mergedGeometry.dispose();
+      exoticTrimeshPieceCount = 1;
+      colliderPieceCount = Math.max(colliderSamples.length - 1, 1);
     }
-    const roofInset = Math.max(RAIL_THICK * 0.75, 0.25);
-    const minX = -sample.width / 2 + roofInset;
-    const maxX = sample.width / 2 - roofInset;
-    if (maxX - minX < 0.15) {
-      return null;
+    for (const geometry of colliderGeometries) {
+      geometry.dispose();
     }
-    const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
-    const railTop = railBottom + RAIL_H;
-    const roofBottom = railTop - 0.2;
-    return {
-      minX,
-      maxX,
-      minY: roofBottom,
-      maxY: roofBottom + 0.45,
-    };
-  });
-  const colliderGeometries = [
-    colliderFloorGeometry,
-    colliderLeftRailGeometry,
-    colliderRightRailGeometry,
-    colliderRoofGeometry,
-  ].filter((geometry): geometry is THREE.BufferGeometry => geometry != null);
-  const mergedGeometry =
-    colliderGeometries.length > 0 ? mergeGeometries(colliderGeometries, false) : null;
-  if (mergedGeometry) {
-    mergedGeometry.computeVertexNormals();
-    boardBody.addShape(geometryToTrimesh(mergedGeometry));
-    mergedGeometry.dispose();
-  }
-  for (const geometry of colliderGeometries) {
-    geometry.dispose();
   }
 
   const startBackWallWidth = TRACK_W - (RAIL_INSET * 2 + RAIL_THICK);
@@ -1015,8 +1199,8 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     minZ: minTrackZ - OFF_COURSE_Z_MARGIN,
     maxZ: maxTrackZ + OFF_COURSE_Z_MARGIN,
   };
-  const containmentPathLocal = samples.map((sample, index) => {
-    const frame = frames[index]!;
+  const containmentPathLocal = colliderSamples.map((sample, index) => {
+    const frame = colliderFrames[index]!;
     return {
       center: toTuple(sample.center),
       right: toTuple(frame.right),
@@ -1044,6 +1228,11 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     offCourseBoundsLocal,
     trialStartZ,
     trialFinishZ,
+    physicsDebug: {
+      colliderPieceCount,
+      primitiveShapeCount: countBodyShapes([boardBody]),
+      exoticTrimeshPieceCount,
+    },
     updateMovingObstacles: () => {},
     setMovingObstacleMaterial: () => {},
   };
@@ -1823,6 +2012,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     offCourseBoundsLocal,
     trialStartZ,
     trialFinishZ,
+    physicsDebug: {
+      colliderPieceCount: 0,
+      primitiveShapeCount: countBodyShapes([boardBody, ...obstacleBodies]),
+      exoticTrimeshPieceCount: 0,
+    },
     updateMovingObstacles,
     setMovingObstacleMaterial,
   };

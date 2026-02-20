@@ -58,9 +58,6 @@ import {
   TOPDOWN_Z_OFFSET,
   BOARD_TILT_SMOOTH,
   PIVOT_SMOOTH,
-  PENETRATION_EPSILON,
-  PENETRATION_CORRECTION_BIAS,
-  PENETRATION_CORRECTION_MAX,
   SIDE_IMPACT_NORMAL_UP_DOT_MAX,
   SIDE_IMPACT_UPWARD_SPEED_MIN,
   SIDE_IMPACT_UPWARD_DAMPING,
@@ -832,8 +829,6 @@ export function HelloMarble() {
     const boardRightWorld = new THREE.Vector3();
     const boardForwardWorld = new THREE.Vector3();
     const contactNormalWorld = new THREE.Vector3();
-    const contactPointAWorld = new THREE.Vector3();
-    const contactPointBWorld = new THREE.Vector3();
     const obstacleLocalPos = new THREE.Vector3();
     const targetLocalPos = new THREE.Vector3();
     const targetWorldPos = new THREE.Vector3();
@@ -848,6 +843,9 @@ export function HelloMarble() {
     let movingObstacleBodySet = new Set(track.movingObstacleBodies);
     let curvedContainmentSamples: RuntimeContainmentSample[] = [];
     let curvedContainmentNearestIndex = 0;
+    let colliderPieceCount = track.physicsDebug.colliderPieceCount;
+    let primitiveShapeCount = track.physicsDebug.primitiveShapeCount;
+    let exoticTrimeshPieceCount = track.physicsDebug.exoticTrimeshPieceCount;
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -877,8 +875,11 @@ export function HelloMarble() {
     let latestAngularSpeed = 0;
     let latestVerticalSpeed = 0;
     let latestPenetrationDepth = 0;
+    let latestMarbleBoardContactCount = 0;
     let offCourseSinceMs: number | null = null;
     let squeezeBlockedFrames = 0;
+    let railClampCorrectionsCounter = 0;
+    let railClampCorrectionsPerSecEma = 0;
     let accumulator = 0;
     let disposed = false;
 
@@ -1060,7 +1061,7 @@ export function HelloMarble() {
       let bestIndex = safeIndex;
       let bestDistSq = Number.POSITIVE_INFINITY;
 
-      const windowRadius = 12;
+      const windowRadius = 18;
       const minIndex = Math.max(0, safeIndex - windowRadius);
       const maxIndex = Math.min(lastIndex, safeIndex + windowRadius);
       for (let i = minIndex; i <= maxIndex; i += 1) {
@@ -1068,16 +1069,6 @@ export function HelloMarble() {
         if (distSq < bestDistSq) {
           bestDistSq = distSq;
           bestIndex = i;
-        }
-      }
-
-      if (bestDistSq > 9) {
-        for (let i = 0; i < count; i += 1) {
-          const distSq = curvedContainmentSamples[i]!.center.distanceToSquared(localPos);
-          if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestIndex = i;
-          }
         }
       }
 
@@ -1105,6 +1096,7 @@ export function HelloMarble() {
       if (Math.abs(clampedLateral - lateralOffset) <= WALL_CONTAINMENT_EPSILON) {
         return;
       }
+      railClampCorrectionsCounter += 1;
 
       const forwardOffset = containmentDelta.dot(sample.tangent);
       const verticalOffset = containmentDelta.dot(sample.up);
@@ -1144,9 +1136,8 @@ export function HelloMarble() {
       updateMarblePosLocalToBoard();
     };
 
-    const computeBoardContactPenetration = (outNormal: THREE.Vector3): number => {
-      let maxPenetration = 0;
-      let foundNormal = false;
+    const countMarbleBoardContacts = (): number => {
+      let count = 0;
       for (const contact of world.contacts) {
         const isMarbleBoardPair =
           (contact.bi === marbleBody && contact.bj === boardBody) ||
@@ -1154,37 +1145,9 @@ export function HelloMarble() {
         if (!isMarbleBoardPair) {
           continue;
         }
-        contactPointAWorld.set(
-          contact.bi.position.x + contact.ri.x,
-          contact.bi.position.y + contact.ri.y,
-          contact.bi.position.z + contact.ri.z,
-        );
-        contactPointBWorld.set(
-          contact.bj.position.x + contact.rj.x,
-          contact.bj.position.y + contact.rj.y,
-          contact.bj.position.z + contact.rj.z,
-        );
-        const separationX = contactPointBWorld.x - contactPointAWorld.x;
-        const separationY = contactPointBWorld.y - contactPointAWorld.y;
-        const separationZ = contactPointBWorld.z - contactPointAWorld.z;
-        const separationAlongNormal =
-          separationX * contact.ni.x + separationY * contact.ni.y + separationZ * contact.ni.z;
-        const penetration = Math.max(0, -separationAlongNormal);
-        if (penetration <= maxPenetration) {
-          continue;
-        }
-        maxPenetration = penetration;
-        if (contact.bi === boardBody) {
-          outNormal.set(contact.ni.x, contact.ni.y, contact.ni.z);
-        } else {
-          outNormal.set(-contact.ni.x, -contact.ni.y, -contact.ni.z);
-        }
-        foundNormal = true;
+        count += 1;
       }
-      if (!foundNormal) {
-        outNormal.set(0, 0, 0);
-      }
-      return maxPenetration;
+      return count;
     };
 
     const clampMarbleWithinSideWalls = (halfWidth: number): void => {
@@ -1947,6 +1910,7 @@ export function HelloMarble() {
       offCourseSinceMs = null;
       squeezeBlockedFrames = 0;
       curvedContainmentNearestIndex = 0;
+      railClampCorrectionsCounter = 0;
       syncLocalRenderSnapshotsFromBodies();
       setTrialState("idle");
       setTrialCurrentMs(null);
@@ -1981,6 +1945,9 @@ export function HelloMarble() {
         world.addBody(body);
       }
       movingObstacleBodySet = new Set(track.movingObstacleBodies);
+      colliderPieceCount = track.physicsDebug.colliderPieceCount;
+      primitiveShapeCount = track.physicsDebug.primitiveShapeCount;
+      exoticTrimeshPieceCount = track.physicsDebug.exoticTrimeshPieceCount;
       refreshCurvedContainment();
       scene.add(track.group);
 
@@ -2597,40 +2564,15 @@ export function HelloMarble() {
         marblePosLocalToBoard.x > outBounds.maxX ||
         marblePosLocalToBoard.z < outBounds.minZ ||
         marblePosLocalToBoard.z > outBounds.maxZ;
-      let penetrationDepth = 0;
+      const penetrationDepth = 0;
       if (!isOffCourseByBounds) {
-        penetrationDepth = computeBoardContactPenetration(contactNormalWorld);
-        if (penetrationDepth > PENETRATION_EPSILON && contactNormalWorld.lengthSq() > 1e-8) {
-          contactNormalWorld.normalize();
-          const correction = Math.min(
-            penetrationDepth + PENETRATION_CORRECTION_BIAS,
-            PENETRATION_CORRECTION_MAX,
-          );
-          marbleBody.position.x += contactNormalWorld.x * correction;
-          marbleBody.position.y += contactNormalWorld.y * correction;
-          marbleBody.position.z += contactNormalWorld.z * correction;
-
-          const inwardSpeed =
-            marbleBody.velocity.x * contactNormalWorld.x +
-            marbleBody.velocity.y * contactNormalWorld.y +
-            marbleBody.velocity.z * contactNormalWorld.z;
-          if (inwardSpeed < 0) {
-            marbleBody.velocity.x -= contactNormalWorld.x * inwardSpeed;
-            marbleBody.velocity.y -= contactNormalWorld.y * inwardSpeed;
-            marbleBody.velocity.z -= contactNormalWorld.z * inwardSpeed;
-          }
-
-          marbleBody.aabbNeedsUpdate = true;
-          marbleBody.updateAABB();
-          updateMarblePosLocalToBoard();
-          penetrationDepth = computeBoardContactPenetration(contactNormalWorld);
-        }
         isOffCourseByBounds =
           marblePosLocalToBoard.x < outBounds.minX ||
           marblePosLocalToBoard.x > outBounds.maxX ||
           marblePosLocalToBoard.z < outBounds.minZ ||
           marblePosLocalToBoard.z > outBounds.maxZ;
       }
+      latestMarbleBoardContactCount = countMarbleBoardContacts();
       latestPenetrationDepth = penetrationDepth;
       latestAngularSpeed = marbleBody.angularVelocity.length();
       latestVerticalSpeed = marbleBody.velocity.y;
@@ -2837,7 +2779,10 @@ export function HelloMarble() {
       }
 
       accumulator += delta;
-      const maxCatchupSteps = Math.max(1, Math.round(currentTuning.physicsMaxSubSteps));
+      const maxCatchupSteps = Math.max(
+        1,
+        Math.min(6, Math.round(currentTuning.physicsMaxSubSteps)),
+      );
       let physicsMs = 0;
       let simulatedSteps = 0;
       while (accumulator >= TIMESTEP && simulatedSteps < maxCatchupSteps) {
@@ -3180,6 +3125,11 @@ export function HelloMarble() {
         if (trialStartAt != null) {
           setTrialCurrentMs(nowMs - trialStartAt);
         }
+        const debugWindowSec = Math.max(debugTimer, 1e-4);
+        const railClampRateSample = railClampCorrectionsCounter / debugWindowSec;
+        railClampCorrectionsPerSecEma +=
+          (railClampRateSample - railClampCorrectionsPerSecEma) * 0.24;
+        railClampCorrectionsCounter = 0;
         debugStore.updateDebug({
           cadenceHz: Math.round(1000 / Math.max(cadenceMsEma, 0.0001)),
           rafGapP95Ms,
@@ -3209,6 +3159,11 @@ export function HelloMarble() {
           physicsMsEma,
           renderMsEma,
           miscMsEma,
+          marbleBoardContactCount: latestMarbleBoardContactCount,
+          colliderPieceCount,
+          primitiveShapeCount,
+          exoticTrimeshPieceCount,
+          railClampCorrectionsPerSec: railClampCorrectionsPerSecEma,
         });
         debugStore.updateNet({
           ghostPlayers: ghostCount,
@@ -4940,7 +4895,7 @@ export function HelloMarble() {
                 <input
                   type="range"
                   min={1}
-                  max={12}
+                  max={6}
                   step={1}
                   value={tuning.physicsMaxSubSteps}
                   onChange={(event) =>
@@ -4963,7 +4918,7 @@ export function HelloMarble() {
                 <input
                   type="range"
                   min={8}
-                  max={40}
+                  max={24}
                   step={1}
                   value={tuning.physicsSolverIterations}
                   onChange={(event) =>
@@ -5302,6 +5257,11 @@ export function HelloMarble() {
             <p>rAF gaps {'>'}25ms (window): {debug.rafGapsOver25Ms}</p>
             <p>Sim steps/frame (EMA): {debug.simStepsPerFrameEma.toFixed(2)}</p>
             <p>Sim steps/frame (max recent): {debug.simStepsMaxRecent}</p>
+            <p>Marble-board contacts: {debug.marbleBoardContactCount}</p>
+            <p>Collider pieces: {debug.colliderPieceCount}</p>
+            <p>Primitive shapes: {debug.primitiveShapeCount}</p>
+            <p>Exotic Trimesh pieces: {debug.exoticTrimeshPieceCount}</p>
+            <p>Rail clamp corrections/sec: {debug.railClampCorrectionsPerSec.toFixed(2)}</p>
             <p>
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}
             </p>

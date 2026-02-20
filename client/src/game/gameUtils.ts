@@ -151,10 +151,10 @@ export function sanitizeTuning(input: unknown): TuningState {
     base.debugUpdateHzMobile = clamp(value.debugUpdateHzMobile, 2, 15);
   }
   if (typeof value.physicsMaxSubSteps === "number") {
-    base.physicsMaxSubSteps = Math.round(clamp(value.physicsMaxSubSteps, 1, 12));
+    base.physicsMaxSubSteps = Math.round(clamp(value.physicsMaxSubSteps, 1, 6));
   }
   if (typeof value.physicsSolverIterations === "number") {
-    base.physicsSolverIterations = Math.round(clamp(value.physicsSolverIterations, 8, 40));
+    base.physicsSolverIterations = Math.round(clamp(value.physicsSolverIterations, 8, 24));
   }
   if (typeof value.ccdSpeedThreshold === "number") {
     base.ccdSpeedThreshold = clamp(value.ccdSpeedThreshold, 0.05, 4);

@@ -259,3 +259,31 @@ Verification:
 - `npm run test` passes.
 - `npm run build` passes.
 - Manual desktop/mobile interactive smoke is still pending in this non-interactive environment.
+
+v0.8.3.0 update:
+- Performed a modular track physics hotfix overhaul to recover severe frame drops and wall clipping while preserving board-tilt marble feel.
+- Replaced default modular collider strategy with primitive segment colliders:
+  - Added a primitive collider chain builder in `client/src/game/track/createTrack.ts` that emits overlapping oriented box colliders for floor, rails, and tunnel roofs along the sampled path.
+  - Increased modular collider sampling step to `1.2` (`BLUEPRINT_COLLIDER_SAMPLE_STEP`) to reduce narrowphase workload.
+  - Kept a fallback Trimesh collider branch for future exotic pieces (`BLUEPRINT_COLLIDER_MODE: "trimesh"`), but default mode is now `"primitive"`.
+- Added physics diagnostics metadata to track build output:
+  - `TrackBuildResult.physicsDebug` with `colliderPieceCount`, `primitiveShapeCount`, and `exoticTrimeshPieceCount`.
+  - Wired this data into runtime diagnostics display.
+- Optimized containment and runtime diagnostics in `HelloMarble`:
+  - Removed expensive full-scan nearest-sample fallback in curved containment lookup.
+  - Added runtime counters for marble-board contacts and rail clamp corrections/sec.
+  - Added diagnostics lines for collider/shape/contact/clamp rates.
+- Removed the contact-penetration correction pass introduced in v0.8.2.0 from the fixed-step path to avoid extra per-step contact processing overhead; diagnostics `penetrationDepth` now remains `0` unless a later correction path is reintroduced.
+- Hardened anti-death-spiral tuning constraints:
+  - Runtime max catch-up steps now hard-capped at `6`.
+  - Tuning sanitize clamp now enforces `physicsMaxSubSteps <= 6` and `physicsSolverIterations <= 24`.
+  - Debug sliders updated to match (`substeps max 6`, `solver max 24`).
+  - Bumped tuning storage namespace to `get-tilted:v0.8.3.0:tuning` to avoid stale high-cost persisted values.
+- Bumped app version to `0.8.3.0` in `client/src/buildInfo.ts`.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run test` passes.
+- `npm run build` passes.
+- Attempted `develop-web-game` Playwright workflow client invocation, but it remains blocked in this environment (`ERR_MODULE_NOT_FOUND: Cannot find package 'playwright' imported from ~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`).
