@@ -61,6 +61,8 @@ type ObstacleActor = {
   body: CANNON.Body;
   baseLocalPos: CANNON.Vec3;
   localQuat: CANNON.Quaternion;
+  hasLocalRotation: boolean;
+  isLocallyDynamic: boolean;
   minX: number;
   maxX: number;
   phase: number;
@@ -321,6 +323,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   let lowestFloorY = 0;
 
   const obstacleActors: ObstacleActor[] = [];
+  const dynamicObstacleActors: ObstacleActor[] = [];
   const obstacleBodies: CANNON.Body[] = [];
   const movingObstacleBodies: CANNON.Body[] = [];
 
@@ -411,17 +414,23 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     params.body.quaternion.set(0, 0, 0, 1);
     params.body.aabbNeedsUpdate = true;
     params.body.updateAABB();
-
-    obstacleActors.push({
+    const localQuat = new CANNON.Quaternion(0, 0, 0, 1);
+    const actor: ObstacleActor = {
       visual: params.visual,
       body: params.body,
       baseLocalPos: new CANNON.Vec3(startX, params.localPos.y, params.localPos.z),
-      localQuat: new CANNON.Quaternion(0, 0, 0, 1),
+      localQuat,
+      hasLocalRotation: false,
+      isLocallyDynamic: (params.speedHz ?? 0) !== 0 && maxX > minX,
       minX,
       maxX,
       phase: params.phase ?? 0,
       speedHz: params.speedHz ?? 0,
-    });
+    };
+    obstacleActors.push(actor);
+    if (actor.isLocallyDynamic) {
+      dynamicObstacleActors.push(actor);
+    }
     obstacleBodies.push(params.body);
   };
 
@@ -779,25 +788,28 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     boardPos: CANNON.Vec3,
     boardQuat: CANNON.Quaternion,
   ): void => {
-    for (const obstacle of obstacleActors) {
-      if (obstacle.speedHz !== 0 && obstacle.maxX > obstacle.minX) {
-        obstacle.phase += fixedDt * obstacle.speedHz * Math.PI * 2;
-      }
-
+    for (const obstacle of dynamicObstacleActors) {
+      obstacle.phase += fixedDt * obstacle.speedHz * Math.PI * 2;
       const centerX = (obstacle.minX + obstacle.maxX) / 2;
       const amplitude = (obstacle.maxX - obstacle.minX) / 2;
       const localX = centerX + Math.sin(obstacle.phase) * amplitude;
 
       obstacle.baseLocalPos.x = localX;
       obstacle.visual.position.x = localX;
+    }
 
+    for (const obstacle of obstacleActors) {
       boardQuat.vmult(obstacle.baseLocalPos, tempOffset);
       tempWorldPos.set(
         boardPos.x + tempOffset.x,
         boardPos.y + tempOffset.y,
         boardPos.z + tempOffset.z,
       );
-      boardQuat.mult(obstacle.localQuat, tempWorldQuat);
+      if (obstacle.hasLocalRotation) {
+        boardQuat.mult(obstacle.localQuat, tempWorldQuat);
+      } else {
+        tempWorldQuat.copy(boardQuat);
+      }
 
       obstacle.body.position.copy(tempWorldPos);
       obstacle.body.quaternion.copy(tempWorldQuat);

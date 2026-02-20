@@ -95,6 +95,7 @@ import {
   sanitizeJoinHost,
   sanitizePlayerName,
   isEditableEventTarget,
+  isFirefoxAndroidUserAgent,
   isLocalHost,
   extractHostname,
   buildCanonicalTuning,
@@ -466,6 +467,7 @@ export function HelloMarble() {
     camera.up.set(0, 1, 0);
 
     const mobileMode = window.matchMedia("(max-width: 700px)").matches;
+    const firefoxAndroid = isFirefoxAndroidUserAgent();
     const initialRenderScaleCap = clamp(
       tuningRef.current.renderScaleMobile,
       MOBILE_RENDER_SCALE_MIN,
@@ -486,7 +488,17 @@ export function HelloMarble() {
         )
       : null;
     const initialRenderScale = mobilePerfGovernor?.getStats().renderScale ?? initialRenderScaleCap;
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const rendererOptions: THREE.WebGLRendererParameters = { antialias: true };
+    if (firefoxAndroid) {
+      rendererOptions.powerPreference = "high-performance";
+      rendererOptions.stencil = false;
+      (
+        rendererOptions as THREE.WebGLRendererParameters & {
+          desynchronized?: boolean;
+        }
+      ).desynchronized = true;
+    }
+    const renderer = new THREE.WebGLRenderer(rendererOptions);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, initialRenderScale));
     mount.appendChild(renderer.domElement);
 
@@ -2046,18 +2058,58 @@ export function HelloMarble() {
       updateTrackController(currentTuning, fixedDt, false);
     };
 
+    let lastGravityG = Number.NaN;
+    let lastSolverIterations = -1;
+    let lastLinearDamping = Number.NaN;
+    let lastAngularDamping = Number.NaN;
+    let lastCcdSpeedThreshold = Number.NaN;
+    let lastCcdIterations = -1;
+    let lastBoardContactFriction = Number.NaN;
+    let lastBoardContactRestitution = Number.NaN;
+    let lastMovingObstacleRestitution = Number.NaN;
+
     const simulateFixedStep = (nowMs: number, fixedDt: number): number => {
       const currentTuning = tuningRef.current;
-      world.gravity.set(0, -currentTuning.gravityG, 0);
-      solver.iterations = Math.round(currentTuning.physicsSolverIterations);
-      marbleBody.linearDamping = currentTuning.linearDamping;
-      marbleBody.angularDamping = currentTuning.angularDamping;
-      marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
-      marbleBodyWithCcd.ccdIterations = Math.round(currentTuning.ccdIterations);
-      boardContactMat.friction = clamp(currentTuning.contactFriction, 0, 1.0);
-      boardContactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
-      movingObstacleContactMat.friction = MOVING_OBSTACLE_CONTACT_FRICTION;
-      movingObstacleContactMat.restitution = clamp(currentTuning.bounce, 0, 0.99);
+      if (currentTuning.gravityG !== lastGravityG) {
+        world.gravity.set(0, -currentTuning.gravityG, 0);
+        lastGravityG = currentTuning.gravityG;
+      }
+      const solverIterations = Math.round(currentTuning.physicsSolverIterations);
+      if (solverIterations !== lastSolverIterations) {
+        solver.iterations = solverIterations;
+        lastSolverIterations = solverIterations;
+      }
+      if (currentTuning.linearDamping !== lastLinearDamping) {
+        marbleBody.linearDamping = currentTuning.linearDamping;
+        lastLinearDamping = currentTuning.linearDamping;
+      }
+      if (currentTuning.angularDamping !== lastAngularDamping) {
+        marbleBody.angularDamping = currentTuning.angularDamping;
+        lastAngularDamping = currentTuning.angularDamping;
+      }
+      if (currentTuning.ccdSpeedThreshold !== lastCcdSpeedThreshold) {
+        marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
+        lastCcdSpeedThreshold = currentTuning.ccdSpeedThreshold;
+      }
+      const ccdIterations = Math.round(currentTuning.ccdIterations);
+      if (ccdIterations !== lastCcdIterations) {
+        marbleBodyWithCcd.ccdIterations = ccdIterations;
+        lastCcdIterations = ccdIterations;
+      }
+      const boardContactFriction = clamp(currentTuning.contactFriction, 0, 1.0);
+      if (boardContactFriction !== lastBoardContactFriction) {
+        boardContactMat.friction = boardContactFriction;
+        lastBoardContactFriction = boardContactFriction;
+      }
+      const contactRestitution = clamp(currentTuning.bounce, 0, 0.99);
+      if (contactRestitution !== lastBoardContactRestitution) {
+        boardContactMat.restitution = contactRestitution;
+        lastBoardContactRestitution = contactRestitution;
+      }
+      if (contactRestitution !== lastMovingObstacleRestitution) {
+        movingObstacleContactMat.restitution = contactRestitution;
+        lastMovingObstacleRestitution = contactRestitution;
+      }
       if (!currentTuning.legacyTrackController) {
         updateTrackControllerFixed(fixedDt, currentTuning);
       }
