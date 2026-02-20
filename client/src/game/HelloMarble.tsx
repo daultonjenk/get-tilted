@@ -282,16 +282,15 @@ export function HelloMarble() {
 
   useEffect(() => {
     const updateViewportOrientation = () => {
-      setIsPortraitViewport(window.innerHeight >= window.innerWidth);
+      const nextIsPortrait = window.innerHeight >= window.innerWidth;
+      setIsPortraitViewport((prev) => (prev === nextIsPortrait ? prev : nextIsPortrait));
     };
     updateViewportOrientation();
     window.addEventListener("resize", updateViewportOrientation);
     window.addEventListener("orientationchange", updateViewportOrientation);
-    window.visualViewport?.addEventListener("resize", updateViewportOrientation);
     return () => {
       window.removeEventListener("resize", updateViewportOrientation);
       window.removeEventListener("orientationchange", updateViewportOrientation);
-      window.visualViewport?.removeEventListener("resize", updateViewportOrientation);
     };
   }, []);
 
@@ -299,7 +298,12 @@ export function HelloMarble() {
     if (!isMobile || typeof window === "undefined") {
       return;
     }
+    let lockAttempted = false;
     const tryLockPortraitOrientation = async () => {
+      if (lockAttempted) {
+        return;
+      }
+      lockAttempted = true;
       const orientationApi = window.screen.orientation as
         | (ScreenOrientation & {
             lock?: (
@@ -1639,15 +1643,31 @@ export function HelloMarble() {
       setStatusMessage("Tilt calibrated.");
     };
 
+    let resizeRaf = 0;
+    let lastViewportWidth = -1;
+    let lastViewportHeight = -1;
     const resize = () => {
-      const width = mount.clientWidth;
-      const height = mount.clientHeight;
+      resizeRaf = 0;
+      const width = Math.max(1, Math.round(mount.clientWidth));
+      const height = Math.max(1, Math.round(mount.clientHeight));
+      if (width === lastViewportWidth && height === lastViewportHeight) {
+        return;
+      }
+      lastViewportWidth = width;
+      lastViewportHeight = height;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+      renderer.setSize(width, height, false);
+    };
+    const scheduleResize = () => {
+      if (resizeRaf !== 0) {
+        return;
+      }
+      resizeRaf = window.requestAnimationFrame(resize);
     };
     resize();
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", scheduleResize);
+    window.visualViewport?.addEventListener("resize", scheduleResize);
 
     const resolveSnapshotPose = (
       snapshot: GhostSnapshot,
@@ -2795,7 +2815,11 @@ export function HelloMarble() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
-      window.removeEventListener("resize", resize);
+      if (resizeRaf !== 0) {
+        window.cancelAnimationFrame(resizeRaf);
+      }
+      window.removeEventListener("resize", scheduleResize);
+      window.visualViewport?.removeEventListener("resize", scheduleResize);
       stopTiltListener?.();
       raceClient.disconnect();
       raceClientRef.current = null;
