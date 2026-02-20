@@ -242,6 +242,7 @@ describe("encodeMessage / safeParseMessage", () => {
       startAtMs: 1700000,
       stepMs: 1000,
       trackSeed: "seed_123",
+      trackBlueprintVersion: 2,
     };
     const encoded = encodeMessage("race:countdown:start", payload);
     const parsed = safeParseMessage(encoded);
@@ -250,6 +251,22 @@ describe("encodeMessage / safeParseMessage", () => {
       expect(parsed.msg.type).toBe("race:countdown:start");
       expect(parsed.msg.payload).toEqual(payload);
     }
+  });
+
+  it("rejects race:countdown:start with invalid trackBlueprintVersion", () => {
+    const parsed = safeParseMessage(
+      JSON.stringify({
+        type: "race:countdown:start",
+        payload: {
+          roomCode: "ABC123",
+          startAtMs: 1700000,
+          stepMs: 1000,
+          trackSeed: "seed_123",
+          trackBlueprintVersion: 0,
+        },
+      }),
+    );
+    expect(parsed.ok).toBe(false);
   });
 
   it("rejects race:start with invalid trackSeed", () => {

@@ -3982,9 +3982,13 @@ export function HelloMarble() {
                     onChange={(event) => setTrackDraftKind(event.target.value as TrackPieceKind)}
                   >
                     <option value="straight">Straight</option>
-                    <option value="bend90">90 Bend</option>
+                    <option value="arc90">Arc 90</option>
                     <option value="sCurve">S-Curve</option>
-                    <option value="narrowBridge">Narrow Bridge</option>
+                    <option value="ramp">Ramp</option>
+                    <option value="bridge">Bridge</option>
+                    <option value="tunnel">Tunnel</option>
+                    <option value="splitY">Split Y</option>
+                    <option value="mergeY">Merge Y</option>
                   </select>
                 </label>
                 <label className="optionsSliderField" htmlFor="trackPieceLength">
@@ -4019,32 +4023,46 @@ export function HelloMarble() {
                 </label>
                 <label className="optionsSliderField" htmlFor="trackPieceSlope">
                   <span className="optionsFieldLabel">
-                    Slope ({trackLabDraft.slopeDeg.toFixed(1)}°)
+                    Grade ({trackLabDraft.gradeDeg.toFixed(1)}°)
                   </span>
                   <input
                     id="trackPieceSlope"
                     type="range"
-                    min={-8}
-                    max={8}
+                    min={-12}
+                    max={12}
                     step={0.5}
-                    value={trackLabDraft.slopeDeg}
-                    onChange={(event) => updateTrackLabDraft("slopeDeg", Number(event.target.value))}
+                    value={trackLabDraft.gradeDeg}
+                    onChange={(event) => updateTrackLabDraft("gradeDeg", Number(event.target.value))}
                   />
                 </label>
                 <label className="optionsSliderField" htmlFor="trackPieceTurnStrength">
                   <span className="optionsFieldLabel">
-                    Turn Strength ({Math.round(trackLabDraft.turnStrengthDeg)}°)
+                    Turn ({Math.round(trackLabDraft.turnDeg)}°)
                   </span>
                   <input
                     id="trackPieceTurnStrength"
                     type="range"
-                    min={10}
-                    max={90}
+                    min={0}
+                    max={100}
                     step={1}
-                    value={trackLabDraft.turnStrengthDeg}
+                    value={trackLabDraft.turnDeg}
                     onChange={(event) =>
-                      updateTrackLabDraft("turnStrengthDeg", Number(event.target.value))
+                      updateTrackLabDraft("turnDeg", Number(event.target.value))
                     }
+                  />
+                </label>
+                <label className="optionsSliderField" htmlFor="trackPieceBank">
+                  <span className="optionsFieldLabel">
+                    Bank ({trackLabDraft.bankDeg.toFixed(1)}°)
+                  </span>
+                  <input
+                    id="trackPieceBank"
+                    type="range"
+                    min={-35}
+                    max={35}
+                    step={0.5}
+                    value={trackLabDraft.bankDeg}
+                    onChange={(event) => updateTrackLabDraft("bankDeg", Number(event.target.value))}
                   />
                 </label>
                 <label className="optionsField" htmlFor="trackPieceDirection">
@@ -4063,6 +4081,15 @@ export function HelloMarble() {
                     <option value="left">Left</option>
                     <option value="right">Right</option>
                   </select>
+                </label>
+                <label className="optionsToggleRow" htmlFor="trackPieceTunnelRoof">
+                  <span>Tunnel Roof</span>
+                  <input
+                    id="trackPieceTunnelRoof"
+                    type="checkbox"
+                    checked={trackLabDraft.tunnelRoof}
+                    onChange={(event) => updateTrackLabDraft("tunnelRoof", event.target.checked)}
+                  />
                 </label>
                 <label className="optionsSliderField" htmlFor="trackPieceWeight">
                   <span className="optionsFieldLabel">

@@ -160,6 +160,7 @@ export type MessagePayloadMap = {
     startAtMs: number;
     stepMs: number;
     trackSeed: string;
+    trackBlueprintVersion?: number;
   };
   "race:finish": {
     roomCode: string;
@@ -465,9 +466,16 @@ export function validatePayload<TType extends MessageType>(
       if (!isNumber(payload.stepMs)) {
         return { ok: false, error: "Expected stepMs number" };
       }
-      return isTrackSeed(payload.trackSeed)
-        ? { ok: true }
-        : { ok: false, error: "Expected trackSeed string" };
+      if (!isTrackSeed(payload.trackSeed)) {
+        return { ok: false, error: "Expected trackSeed string" };
+      }
+      if (
+        typeof payload.trackBlueprintVersion !== "undefined" &&
+        !isPositiveInteger(payload.trackBlueprintVersion)
+      ) {
+        return { ok: false, error: "Expected optional trackBlueprintVersion integer" };
+      }
+      return { ok: true };
     case "race:finish":
       if (!isString(payload.roomCode)) {
         return { ok: false, error: "Expected roomCode string" };

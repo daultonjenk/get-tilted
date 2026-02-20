@@ -266,6 +266,7 @@ export function handleWsConnection(ws: WebSocket, request: IncomingMessage): voi
             startAtMs,
             stepMs: COUNTDOWN_STEP_MS,
             trackSeed,
+            trackBlueprintVersion: 2,
           });
         }
         broadcastReadyState(roomCode);

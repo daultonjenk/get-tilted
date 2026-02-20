@@ -71,8 +71,8 @@ Track Lab features:
 - Seed input + randomize button.
 - Piece count control for generated courses.
 - Custom piece editor with bounded controls:
-  - piece type (`Straight`, `90 Bend`, `S-Curve`, `Narrow Bridge`)
-  - length, width scale, slope, turn direction/strength, spawn weight, and rails.
+  - piece type (`Straight`, `Arc 90`, `S-Curve`, `Ramp`, `Bridge`, `Tunnel`, `Split Y`, `Merge Y`)
+  - length, width scale, grade, bank, turn direction/strength, tunnel roof, spawn weight, and rails.
 - Save/update/delete custom pieces in a local custom library.
 - Apply preview track immediately without leaving the menu.
 
@@ -83,6 +83,7 @@ Determinism + multiplayer behavior:
 - Backend broadcasts the authoritative seed in `race:countdown:start`.
 - Multiplayer generation uses built-in catalog only for parity across clients.
 - Custom piece libraries are local-only in v0.8.
+- Generated modular tracks now use smooth swept channel meshes with matching Trimesh colliders for tighter visual/physics alignment.
 
 ## Custom marble skins
 

@@ -165,3 +165,27 @@ Verification:
   - `node ~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js ...`
   - blocked in this environment with `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright' imported from ~/.codex/skills/...`
   - root project checks still pass; browser automation remains pending until Playwright is available to the skill runner path.
+
+v0.8.1.0 update:
+- Replaced seeded modular blueprint model with branch-aware placements for a CUBORO-style core piece catalog:
+  - piece set now includes `straight`, `arc90`, `sCurve`, `ramp`, `bridge`, `tunnel`, `splitY`, and `mergeY`.
+  - added deterministic branch node metadata and exported `resolveBranchLane(marbleId, nodeId, seed)`.
+  - kept sanitizer backward-compatibility for old stored fields (`slopeDeg`, `turnStrengthDeg`, legacy kinds).
+- Rebuilt modular track rendering/physics path (`createTrackFromBlueprint`) to use smooth swept channel geometry:
+  - floor/rails/tunnel roof are extruded along sampled curves instead of stitched box segments.
+  - collider now derives from merged rendered geometry (`Trimesh`) for close visual-hitbox alignment.
+  - finish extension is generated as part of the same swept modular surface.
+- Updated Track Lab editor UI to the new schema:
+  - updated piece options to the 8-piece catalog.
+  - replaced slope/turn-strength with grade/turn and added bank + tunnel-roof controls.
+- Extended protocol countdown payload with optional `trackBlueprintVersion` and broadcast `trackBlueprintVersion: 2` from both Node WS and Durable Object backends.
+- Updated protocol tests for countdown blueprint version validation.
+- Bumped build version to `0.8.1.0` and moved Track Lab local-storage keys to `v0.8.1.0` namespace.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run test` passes.
+- `npm run build` passes.
+- `develop-web-game` Playwright smoke script is still blocked in this environment:
+  - `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright' imported from ~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`

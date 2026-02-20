@@ -264,6 +264,7 @@ export class RoomDO {
             startAtMs,
             stepMs: COUNTDOWN_STEP_MS,
             trackSeed,
+            trackBlueprintVersion: 2,
           });
           this.broadcastReadyState();
           return;
