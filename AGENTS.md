@@ -177,4 +177,5 @@ Implementation expectation:
 - This exact-match rule applies to all commits (including docs-only, tiny fixes, and minor patches) unless the exceptional-case rule below is used.
 - If a commit message introduces a new `v#.#.#.#` token, `client/src/buildInfo.ts` must be updated to that exact version in that commit.
 - Only in truly exceptional cases (for example, emergency revert/cherry-pick constraints) may a different commit message format be used.
+- Ensure to update progress.md with all changes made in this version, with the version number at the beginning of your description of changes.
 ---
