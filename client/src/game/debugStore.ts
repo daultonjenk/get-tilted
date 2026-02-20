@@ -3,6 +3,13 @@ import type { MobilePerfTier } from "./perf/mobileGovernor";
 
 export type MarbleDebug = {
   cadenceHz: number;
+  rafGapP95Ms: number;
+  rafGapP99Ms: number;
+  rafGapsOver16Ms: number;
+  rafGapsOver20Ms: number;
+  rafGapsOver25Ms: number;
+  simStepsPerFrameEma: number;
+  simStepsMaxRecent: number;
   posX: number;
   posY: number;
   posZ: number;
@@ -55,6 +62,13 @@ type Listener = () => void;
 
 const DEFAULT_DEBUG: MarbleDebug = {
   cadenceHz: 0,
+  rafGapP95Ms: 0,
+  rafGapP99Ms: 0,
+  rafGapsOver16Ms: 0,
+  rafGapsOver20Ms: 0,
+  rafGapsOver25Ms: 0,
+  simStepsPerFrameEma: 0,
+  simStepsMaxRecent: 0,
   posX: 0,
   posY: 0,
   posZ: 0,

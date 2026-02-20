@@ -1749,7 +1749,68 @@ export function HelloMarble() {
     let physicsMsEma = 0;
     let renderMsEma = 0;
     let miscMsEma = 0;
+    const rafGapSamples = new RingBuffer<number>(300);
+    const simStepsSamples = new RingBuffer<number>(180);
+    const RAF_GAP_SPIKE_16_MS = 16.7;
+    const RAF_GAP_SPIKE_20_MS = 20;
+    const RAF_GAP_SPIKE_25_MS = 25;
+    let rafGapsOver16Ms = 0;
+    let rafGapsOver20Ms = 0;
+    let rafGapsOver25Ms = 0;
+    let simStepsPerFrameEma = 0;
+    let simStepsMaxRecent = 0;
     let perfTier: MobilePerfTier | "desktop" = mobilePerfGovernor ? "high" : "desktop";
+    const updateRafSpikeCounters = (gapMs: number, direction: 1 | -1): void => {
+      if (gapMs > RAF_GAP_SPIKE_16_MS) {
+        rafGapsOver16Ms += direction;
+      }
+      if (gapMs > RAF_GAP_SPIKE_20_MS) {
+        rafGapsOver20Ms += direction;
+      }
+      if (gapMs > RAF_GAP_SPIKE_25_MS) {
+        rafGapsOver25Ms += direction;
+      }
+    };
+    const recordRafGapMs = (gapMs: number): void => {
+      const evicted = rafGapSamples.push(gapMs);
+      if (evicted != null) {
+        updateRafSpikeCounters(evicted, -1);
+      }
+      updateRafSpikeCounters(gapMs, 1);
+    };
+    const getRafGapPercentileMs = (percentile: number): number => {
+      const count = rafGapSamples.length;
+      if (count === 0) {
+        return 0;
+      }
+      const values = new Array<number>(count);
+      for (let i = 0; i < count; i += 1) {
+        values[i] = rafGapSamples.at(i) ?? 0;
+      }
+      values.sort((a, b) => a - b);
+      const idx = clamp(
+        Math.round((values.length - 1) * clamp(percentile, 0, 1)),
+        0,
+        values.length - 1,
+      );
+      return values[idx] ?? 0;
+    };
+    const recordSimSteps = (steps: number): void => {
+      simStepsPerFrameEma += (steps - simStepsPerFrameEma) * 0.12;
+      const evicted = simStepsSamples.push(steps);
+      if (steps > simStepsMaxRecent) {
+        simStepsMaxRecent = steps;
+        return;
+      }
+      if (evicted == null || evicted < simStepsMaxRecent) {
+        return;
+      }
+      let maxRecent = 0;
+      for (let i = 0; i < simStepsSamples.length; i += 1) {
+        maxRecent = Math.max(maxRecent, simStepsSamples.at(i) ?? 0);
+      }
+      simStepsMaxRecent = maxRecent;
+    };
     const resolveNormalizedIntent = (currentTuning: TuningState): TiltSample => {
       let sourceIntent: TiltSample;
       const status = tiltStatusRef.current;
@@ -2188,6 +2249,7 @@ export function HelloMarble() {
       if (lastCadenceTimestampMs != null) {
         const rafDeltaMs = clamp(nowMs - lastCadenceTimestampMs, 1, 250);
         cadenceMsEma += (rafDeltaMs - cadenceMsEma) * 0.12;
+        recordRafGapMs(rafDeltaMs);
       }
       lastCadenceTimestampMs = nowMs;
       const now = nowMs / 1000;
@@ -2290,6 +2352,7 @@ export function HelloMarble() {
       if (simulatedSteps >= maxCatchupSteps && accumulator >= TIMESTEP) {
         accumulator = 0;
       }
+      recordSimSteps(simulatedSteps);
 
       const marbleRenderAlpha = currentTuning.localMarbleRenderInterpolation
         ? clamp(accumulator / TIMESTEP, 0, 1)
@@ -2579,6 +2642,8 @@ export function HelloMarble() {
         ? 1 / Math.max(currentTuning.debugUpdateHzMobile, 1)
         : 0.1;
       if (debugTimer >= debugInterval) {
+        const rafGapP95Ms = getRafGapPercentileMs(0.95);
+        const rafGapP99Ms = getRafGapPercentileMs(0.99);
         const ghostStateList = [...ghostPlayers.values()];
         const ghostCount = ghostStateList.length;
         const avgDelayMs =
@@ -2615,6 +2680,13 @@ export function HelloMarble() {
         }
         debugStore.updateDebug({
           cadenceHz: Math.round(1000 / Math.max(cadenceMsEma, 0.0001)),
+          rafGapP95Ms,
+          rafGapP99Ms,
+          rafGapsOver16Ms,
+          rafGapsOver20Ms,
+          rafGapsOver25Ms,
+          simStepsPerFrameEma,
+          simStepsMaxRecent,
           posX: marbleBody.position.x,
           posY: marbleBody.position.y,
           posZ: marbleBody.position.z,
@@ -4329,6 +4401,13 @@ export function HelloMarble() {
             <p>Physics ms (EMA): {debug.physicsMsEma.toFixed(2)}</p>
             <p>Render ms (EMA): {debug.renderMsEma.toFixed(2)}</p>
             <p>Misc ms (EMA): {debug.miscMsEma.toFixed(2)}</p>
+            <p>rAF gap p95 ms: {debug.rafGapP95Ms.toFixed(2)}</p>
+            <p>rAF gap p99 ms: {debug.rafGapP99Ms.toFixed(2)}</p>
+            <p>rAF gaps {'>'}16.7ms (window): {debug.rafGapsOver16Ms}</p>
+            <p>rAF gaps {'>'}20ms (window): {debug.rafGapsOver20Ms}</p>
+            <p>rAF gaps {'>'}25ms (window): {debug.rafGapsOver25Ms}</p>
+            <p>Sim steps/frame (EMA): {debug.simStepsPerFrameEma.toFixed(2)}</p>
+            <p>Sim steps/frame (max recent): {debug.simStepsMaxRecent}</p>
             <p>
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}
             </p>
