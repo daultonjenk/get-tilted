@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Get Tilted icon">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0d3f8f" />
+      <stop offset="100%" stop-color="#05204f" />
+    </linearGradient>
+    <radialGradient id="marble" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#dff1ff" />
+      <stop offset="55%" stop-color="#9cc8ff" />
+      <stop offset="100%" stop-color="#4a78ba" />
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <path d="M88 332 256 114l168 218-168 66z" fill="#14376c" opacity=".85" />
+  <circle cx="260" cy="232" r="116" fill="url(#marble)" />
+  <circle cx="220" cy="196" r="40" fill="#f5fbff" opacity=".65" />
+  <path d="M142 380c46-36 83-54 118-54 34 0 73 19 116 55" fill="none" stroke="#b7d8ff" stroke-linecap="round" stroke-width="26" />
+</svg>
