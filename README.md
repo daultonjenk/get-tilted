@@ -211,3 +211,18 @@ After setting env vars, redeploy Pages.
 4. Both players press `READY`.
 5. Confirm synced countdown starts and controls unlock at `GO!`.
 6. Confirm ghost updates and race result appear for both players.
+
+## Play Store Internal Testing (TWA)
+
+Use the dedicated checklist in:
+
+- `docs/playstore-internal-testing.md`
+
+Quick starter:
+
+1. Generate `/.well-known/assetlinks.json` with your signing fingerprint:
+   - `npm run android:assetlinks`
+2. Initialize TWA wrapper:
+   - `bubblewrap init --manifest https://get-tilted.pages.dev/manifest.webmanifest`
+3. Build Android app bundle:
+   - `bubblewrap build`
