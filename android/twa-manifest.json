@@ -1,0 +1,41 @@
+{
+  "packageId": "dev.gettilted.app",
+  "host": "get-tilted.pages.dev",
+  "name": "Get Tilted",
+  "launcherName": "Get Tilted",
+  "display": "standalone",
+  "orientation": "any",
+  "themeColor": "#031129",
+  "themeColorDark": "#031129",
+  "navigationColor": "#031129",
+  "navigationColorDark": "#031129",
+  "navigationDividerColor": "#031129",
+  "navigationDividerColorDark": "#031129",
+  "backgroundColor": "#031129",
+  "enableNotifications": false,
+  "enableSiteSettingsShortcut": true,
+  "startUrl": "/",
+  "iconUrl": "https://get-tilted.pages.dev/icons/icon-512.png",
+  "maskableIconUrl": "https://get-tilted.pages.dev/icons/icon-maskable-512.png",
+  "monochromeIconUrl": "https://get-tilted.pages.dev/icons/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./keys/get-tilted-upload.jks",
+    "alias": "get-tilted-upload"
+  },
+  "appVersionCode": 72500,
+  "appVersion": "0.7.25.0",
+  "webManifestUrl": "https://get-tilted.pages.dev/manifest.webmanifest",
+  "fullScopeUrl": "https://get-tilted.pages.dev/",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "additionalTrustedOrigins": [],
+  "fingerprints": [],
+  "generatorApp": "bubblewrap-cli",
+  "minSdkVersion": 21,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false
+}

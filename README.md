@@ -222,7 +222,8 @@ Quick starter:
 
 1. Generate `/.well-known/assetlinks.json` with your signing fingerprint:
    - `npm run android:assetlinks`
-2. Initialize TWA wrapper:
-   - `bubblewrap init --manifest https://get-tilted.pages.dev/manifest.webmanifest`
+2. Sync TWA manifest and scaffold Android wrapper:
+   - `npm run android:twa:sync`
+   - `npm run android:twa:update`
 3. Build Android app bundle:
-   - `bubblewrap build`
+   - `npm run android:twa:build`

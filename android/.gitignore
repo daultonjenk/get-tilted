@@ -1,0 +1,12 @@
+# Android local/secret artifacts
+keys/*
+!keys/.gitkeep
+local.properties
+.gradle/
+
+# Bubblewrap/Gradle build outputs
+**/build/
+app-release-*.apk
+app-release-*.aab
+app-release-unsigned-aligned.apk
+manifest-checksum.txt

@@ -41,29 +41,23 @@ npm run android:assetlinks
 
 5. Deploy Pages and verify:
    - `https://get-tilted.pages.dev/.well-known/assetlinks.json`
-6. Install Bubblewrap CLI and scaffold Android wrapper:
+6. Sync + scaffold Android wrapper in repo:
 
 ```bash
-npm install -g @bubblewrap/cli
-bubblewrap init --manifest https://get-tilted.pages.dev/manifest.webmanifest
+npm run android:twa:sync
+npm run android:twa:update
 ```
-
-Use these values when prompted:
-
-- App name: `Get Tilted`
-- Package ID: `dev.gettilted.app`
-- Host: `get-tilted.pages.dev`
 
 7. Build a signed app bundle locally:
 
 ```bash
-bubblewrap build
+npm run android:twa:build
 ```
 
 ## Play day (requires Play Console account)
 
 1. Create Play app with package ID `dev.gettilted.app`.
-2. Upload the `.aab` from Bubblewrap to `Internal testing`.
+2. Upload the generated `.aab` from `android/app-release-bundle.aab` to `Internal testing`.
 3. Add tester emails and publish the internal track.
 4. Validate:
    - Install from Play internal link
