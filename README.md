@@ -84,6 +84,7 @@ Determinism + multiplayer behavior:
 - Multiplayer generation uses built-in catalog only for parity across clients.
 - Custom piece libraries are local-only in v0.8.
 - Generated modular tracks now use smooth swept channel meshes with matching Trimesh colliders for tighter visual/physics alignment.
+- v0.8.1.1 stabilization note: `Split Y` / `Merge Y` remain in the editor, but randomized generation temporarily skips branch pieces while continuous-path stabilization is in progress.
 
 ## Custom marble skins
 

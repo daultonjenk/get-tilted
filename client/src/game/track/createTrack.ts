@@ -18,6 +18,7 @@ export type TrackBuildResult = {
     finishHalfX: number;
     finishStartZ: number;
   };
+  wallContainmentMode: "legacyLinear" | "disabled";
   spawn: CANNON.Vec3;
   respawnY: number;
   offCourseBoundsLocal: {
@@ -293,53 +294,267 @@ function computeContainmentHalfX(trackWidth: number): number {
   return Math.max(0, trackWidth / 2 - RAIL_INSET - RAIL_THICK / 2 - MARBLE_RADIUS - 0.02);
 }
 
-function makeTrackCrossSectionShape(
-  minX: number,
-  maxX: number,
-  minY: number,
-  maxY: number,
-): THREE.Shape {
-  const shape = new THREE.Shape();
-  shape.moveTo(minX, minY);
-  shape.lineTo(maxX, minY);
-  shape.lineTo(maxX, maxY);
-  shape.lineTo(minX, maxY);
-  shape.closePath();
-  return shape;
-}
+type BlueprintSweepSample = {
+  center: THREE.Vector3;
+  width: number;
+  railLeft: boolean;
+  railRight: boolean;
+  tunnelRoof: boolean;
+};
 
-function createSweptTrackGeometry(
-  points: THREE.Vector3[],
-  shape: THREE.Shape,
-  targetSteps: number,
-): THREE.BufferGeometry | null {
-  if (points.length < 2) {
-    return null;
-  }
-  const uniquePoints: THREE.Vector3[] = [];
-  for (const point of points) {
-    const last = uniquePoints[uniquePoints.length - 1];
-    if (!last || last.distanceToSquared(point) > 1e-4) {
-      uniquePoints.push(point.clone());
-    }
-  }
-  if (uniquePoints.length < 2) {
-    return null;
-  }
-  const path = new THREE.CatmullRomCurve3(uniquePoints, false, "centripetal", 0.5);
-  const geometry = new THREE.ExtrudeGeometry(shape, {
-    steps: Math.max(8, targetSteps),
-    depth: 1,
-    bevelEnabled: false,
-    curveSegments: 8,
-    extrudePath: path,
-  });
-  geometry.computeVertexNormals();
-  return geometry;
-}
+type BlueprintSweepFrame = {
+  tangent: THREE.Vector3;
+  right: THREE.Vector3;
+  up: THREE.Vector3;
+};
+
+type SweepRect = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
 
 function getPlacementVectors(points: Array<[number, number, number]>): THREE.Vector3[] {
   return points.map((point) => new THREE.Vector3(point[0], point[1], point[2]));
+}
+
+function resamplePolyline(points: THREE.Vector3[], step: number): THREE.Vector3[] {
+  if (points.length <= 1) {
+    return points.map((point) => point.clone());
+  }
+  const out: THREE.Vector3[] = [points[0]!.clone()];
+  let distanceSinceLast = 0;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const start = points[i]!;
+    const end = points[i + 1]!;
+    const delta = end.clone().sub(start);
+    const segmentLength = delta.length();
+    if (segmentLength <= 1e-5) {
+      continue;
+    }
+    const direction = delta.multiplyScalar(1 / segmentLength);
+    let traveled = 0;
+    while (distanceSinceLast + (segmentLength - traveled) >= step) {
+      const needed = step - distanceSinceLast;
+      traveled += needed;
+      out.push(start.clone().addScaledVector(direction, traveled));
+      distanceSinceLast = 0;
+    }
+    distanceSinceLast += segmentLength - traveled;
+  }
+  const tail = points[points.length - 1]!;
+  const lastOut = out[out.length - 1]!;
+  if (lastOut.distanceToSquared(tail) > 1e-4) {
+    out.push(tail.clone());
+  }
+  return out;
+}
+
+function buildBlueprintSweepSamples(
+  placements: TrackBlueprint["placements"],
+  step: number,
+): BlueprintSweepSample[] {
+  const out: BlueprintSweepSample[] = [];
+  for (const placement of placements) {
+    const points = getPlacementVectors(placement.points);
+    if (points.length < 2) {
+      continue;
+    }
+    const sampled = resamplePolyline(points, step);
+    for (const point of sampled) {
+      const last = out[out.length - 1];
+      if (last && last.center.distanceToSquared(point) <= 1e-4) {
+        continue;
+      }
+      out.push({
+        center: point,
+        width: placement.width,
+        railLeft: placement.railLeft,
+        railRight: placement.railRight,
+        tunnelRoof: placement.tunnelRoof,
+      });
+    }
+  }
+  return out;
+}
+
+function buildBlueprintSweepFrames(samples: BlueprintSweepSample[]): BlueprintSweepFrame[] {
+  const frames: BlueprintSweepFrame[] = [];
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const fallbackRight = new THREE.Vector3(1, 0, 0);
+  let previousTangent = new THREE.Vector3(0, 0, 1);
+  let previousRight = fallbackRight.clone();
+
+  for (let i = 0; i < samples.length; i += 1) {
+    const prevCenter = i > 0 ? samples[i - 1]!.center : samples[i]!.center;
+    const nextCenter =
+      i < samples.length - 1 ? samples[i + 1]!.center : samples[i]!.center;
+
+    const tangent = nextCenter.clone().sub(prevCenter);
+    if (tangent.lengthSq() <= 1e-8) {
+      tangent.copy(previousTangent);
+    } else {
+      tangent.normalize();
+    }
+
+    const right = previousRight
+      .clone()
+      .sub(tangent.clone().multiplyScalar(previousRight.dot(tangent)));
+    if (right.lengthSq() <= 1e-8) {
+      right.copy(worldUp).cross(tangent);
+    }
+    if (right.lengthSq() <= 1e-8) {
+      right
+        .copy(fallbackRight)
+        .sub(tangent.clone().multiplyScalar(fallbackRight.dot(tangent)));
+    }
+    if (right.lengthSq() <= 1e-8) {
+      right.set(1, 0, 0);
+    }
+    right.normalize();
+    if (right.dot(previousRight) < 0) {
+      right.negate();
+    }
+
+    const up = tangent.clone().cross(right);
+    if (up.lengthSq() <= 1e-8) {
+      up.copy(worldUp);
+    } else {
+      up.normalize();
+    }
+
+    frames.push({ tangent, right, up });
+    previousRight = right.clone();
+    previousTangent = tangent.clone();
+  }
+
+  return frames;
+}
+
+function toSweepWorldPoint(
+  sample: BlueprintSweepSample,
+  frame: BlueprintSweepFrame,
+  localX: number,
+  localY: number,
+): THREE.Vector3 {
+  return sample.center
+    .clone()
+    .addScaledVector(frame.right, localX)
+    .addScaledVector(frame.up, localY);
+}
+
+function buildSweptRectGeometry(
+  samples: BlueprintSweepSample[],
+  frames: BlueprintSweepFrame[],
+  resolveRect: (sample: BlueprintSweepSample) => SweepRect | null,
+): THREE.BufferGeometry | null {
+  if (samples.length < 2 || frames.length !== samples.length) {
+    return null;
+  }
+
+  const rects = samples.map((sample) => resolveRect(sample));
+  const vertices: number[] = [];
+  const indices: number[] = [];
+
+  const pushVertex = (point: THREE.Vector3): number => {
+    vertices.push(point.x, point.y, point.z);
+    return vertices.length / 3 - 1;
+  };
+
+  const pushQuad = (
+    a0: THREE.Vector3,
+    a1: THREE.Vector3,
+    b1: THREE.Vector3,
+    b0: THREE.Vector3,
+  ): void => {
+    const i0 = pushVertex(a0);
+    const i1 = pushVertex(a1);
+    const i2 = pushVertex(b1);
+    const i3 = pushVertex(b0);
+    indices.push(i0, i1, i2, i0, i2, i3);
+  };
+
+  const getCorner = (
+    sample: BlueprintSweepSample,
+    frame: BlueprintSweepFrame,
+    rect: SweepRect,
+    corner: 0 | 1 | 2 | 3,
+  ): THREE.Vector3 => {
+    switch (corner) {
+      case 0:
+        return toSweepWorldPoint(sample, frame, rect.minX, rect.minY);
+      case 1:
+        return toSweepWorldPoint(sample, frame, rect.maxX, rect.minY);
+      case 2:
+        return toSweepWorldPoint(sample, frame, rect.maxX, rect.maxY);
+      default:
+        return toSweepWorldPoint(sample, frame, rect.minX, rect.maxY);
+    }
+  };
+
+  const pushCap = (
+    sample: BlueprintSweepSample,
+    frame: BlueprintSweepFrame,
+    rect: SweepRect,
+  ): void => {
+    const c0 = getCorner(sample, frame, rect, 0);
+    const c1 = getCorner(sample, frame, rect, 1);
+    const c2 = getCorner(sample, frame, rect, 2);
+    const c3 = getCorner(sample, frame, rect, 3);
+    const i0 = pushVertex(c0);
+    const i1 = pushVertex(c1);
+    const i2 = pushVertex(c2);
+    const i3 = pushVertex(c3);
+    indices.push(i0, i1, i2, i0, i2, i3);
+  };
+
+  for (let i = 0; i < samples.length - 1; i += 1) {
+    const rectA = rects[i];
+    const rectB = rects[i + 1];
+    if (!rectA || !rectB) {
+      continue;
+    }
+    const sampleA = samples[i]!;
+    const sampleB = samples[i + 1]!;
+    const frameA = frames[i]!;
+    const frameB = frames[i + 1]!;
+
+    const a0 = getCorner(sampleA, frameA, rectA, 0);
+    const a1 = getCorner(sampleA, frameA, rectA, 1);
+    const a2 = getCorner(sampleA, frameA, rectA, 2);
+    const a3 = getCorner(sampleA, frameA, rectA, 3);
+
+    const b0 = getCorner(sampleB, frameB, rectB, 0);
+    const b1 = getCorner(sampleB, frameB, rectB, 1);
+    const b2 = getCorner(sampleB, frameB, rectB, 2);
+    const b3 = getCorner(sampleB, frameB, rectB, 3);
+
+    pushQuad(a0, a1, b1, b0);
+    pushQuad(a1, a2, b2, b1);
+    pushQuad(a2, a3, b3, b2);
+    pushQuad(a3, a0, b0, b3);
+
+    const hasPrevSpan = i > 0 && rects[i - 1] != null;
+    if (!hasPrevSpan) {
+      pushCap(sampleA, frameA, rectA);
+    }
+
+    const hasNextSpan = i + 2 < samples.length && rects[i + 2] != null;
+    if (!hasNextSpan) {
+      pushCap(sampleB, frameB, rectB);
+    }
+  }
+
+  if (indices.length === 0) {
+    return null;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
@@ -351,179 +566,142 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
   boardBody.quaternion.set(0, 0, 0, 1);
 
   const trackSurfaceTexture = createTrackSurfaceTexture();
-  const floorMaterial = new THREE.MeshStandardMaterial({ map: trackSurfaceTexture });
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    map: trackSurfaceTexture,
+    side: THREE.DoubleSide,
+  });
   const railMaterial = new THREE.MeshStandardMaterial({
     map: trackSurfaceTexture,
     color: 0xffffff,
     transparent: true,
     opacity: 0.35,
+    side: THREE.DoubleSide,
   });
   const roofMaterial = new THREE.MeshStandardMaterial({
     map: trackSurfaceTexture,
     color: 0xf4f0de,
+    side: THREE.DoubleSide,
   });
   const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
   const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
 
   const startTopBackPoint = new THREE.Vector3(0, FLOOR_THICK / 2, -START_LENGTH / 2);
-  let lowestFloorY = startTopBackPoint.y - FLOOR_THICK;
-  let maxSegmentWidth = TRACK_W;
-  let minTrackX = Number.POSITIVE_INFINITY;
-  let maxTrackX = Number.NEGATIVE_INFINITY;
-  let minTrackZ = Number.POSITIVE_INFINITY;
-  let maxTrackZ = Number.NEGATIVE_INFINITY;
-  const colliderGeometries: THREE.BufferGeometry[] = [];
+  const sourcePlacements = (() => {
+    const mainLane = blueprint.placements.filter((placement) => placement.lane === "main");
+    return mainLane.length > 0 ? mainLane : blueprint.placements;
+  })();
+  const sampleStep = 0.25;
+  const samples = buildBlueprintSweepSamples(sourcePlacements, sampleStep);
 
-  const includeBoundsFromPath = (
-    pathPoints: THREE.Vector3[],
-    halfWidth: number,
-    minYOffset: number,
-  ): void => {
-    for (const point of pathPoints) {
-      minTrackX = Math.min(minTrackX, point.x - halfWidth);
-      maxTrackX = Math.max(maxTrackX, point.x + halfWidth);
-      minTrackZ = Math.min(minTrackZ, point.z - halfWidth * 0.25);
-      maxTrackZ = Math.max(maxTrackZ, point.z + halfWidth * 0.25);
-      lowestFloorY = Math.min(lowestFloorY, point.y + minYOffset);
+  if (samples.length === 0) {
+    const fallbackEnd = startTopBackPoint.clone().add(new THREE.Vector3(0, 0, 28));
+    for (const point of resamplePolyline([startTopBackPoint, fallbackEnd], sampleStep)) {
+      samples.push({
+        center: point,
+        width: TRACK_W,
+        railLeft: true,
+        railRight: true,
+        tunnelRoof: false,
+      });
     }
-  };
+  }
 
-  const addSweptMesh = (
-    points: THREE.Vector3[],
-    shape: THREE.Shape,
-    material: THREE.Material,
-    steps: number,
-  ): void => {
-    const geometry = createSweptTrackGeometry(points, shape, steps);
-    if (!geometry) {
-      return;
+  const lastPlayable = samples[samples.length - 1]!;
+  const prevPlayable = samples.length >= 2 ? samples[samples.length - 2]! : null;
+  const finishDirection = (prevPlayable
+    ? lastPlayable.center.clone().sub(prevPlayable.center)
+    : new THREE.Vector3(0, 0, 1)
+  ).normalize();
+  if (finishDirection.lengthSq() <= 1e-8) {
+    finishDirection.set(0, 0, 1);
+  }
+  const finishStart = lastPlayable.center.clone();
+  const finishPoints = resamplePolyline(
+    [finishStart, finishStart.clone().addScaledVector(finishDirection, FINISH_LENGTH)],
+    sampleStep,
+  );
+  for (let i = 1; i < finishPoints.length; i += 1) {
+    samples.push({
+      center: finishPoints[i]!,
+      width: FINISH_WIDTH,
+      railLeft: true,
+      railRight: true,
+      tunnelRoof: false,
+    });
+  }
+
+  const frames = buildBlueprintSweepFrames(samples);
+  const floorGeometry = buildSweptRectGeometry(samples, frames, (sample) => ({
+    minX: -sample.width / 2,
+    maxX: sample.width / 2,
+    minY: -FLOOR_THICK,
+    maxY: 0,
+  }));
+  const leftRailGeometry = buildSweptRectGeometry(samples, frames, (sample) => {
+    if (!sample.railLeft) {
+      return null;
     }
-    const mesh = new THREE.Mesh(geometry, material);
+    const sideOffset = sample.width / 2 - RAIL_INSET;
+    const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+    return {
+      minX: -sideOffset - RAIL_THICK / 2,
+      maxX: -sideOffset + RAIL_THICK / 2,
+      minY: railBottom,
+      maxY: railBottom + RAIL_H,
+    };
+  });
+  const rightRailGeometry = buildSweptRectGeometry(samples, frames, (sample) => {
+    if (!sample.railRight) {
+      return null;
+    }
+    const sideOffset = sample.width / 2 - RAIL_INSET;
+    const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+    return {
+      minX: sideOffset - RAIL_THICK / 2,
+      maxX: sideOffset + RAIL_THICK / 2,
+      minY: railBottom,
+      maxY: railBottom + RAIL_H,
+    };
+  });
+  const roofGeometry = buildSweptRectGeometry(samples, frames, (sample) => {
+    if (!sample.tunnelRoof) {
+      return null;
+    }
+    const roofInset = Math.max(RAIL_THICK * 0.75, 0.25);
+    const minX = -sample.width / 2 + roofInset;
+    const maxX = sample.width / 2 - roofInset;
+    if (maxX - minX < 0.15) {
+      return null;
+    }
+    const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
+    const railTop = railBottom + RAIL_H;
+    const roofBottom = railTop - 0.2;
+    return {
+      minX,
+      maxX,
+      minY: roofBottom,
+      maxY: roofBottom + 0.45,
+    };
+  });
+
+  const renderGeometries: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }> = [];
+  if (floorGeometry) renderGeometries.push({ geometry: floorGeometry, material: floorMaterial });
+  if (leftRailGeometry) {
+    renderGeometries.push({ geometry: leftRailGeometry, material: railMaterial });
+  }
+  if (rightRailGeometry) {
+    renderGeometries.push({ geometry: rightRailGeometry, material: railMaterial });
+  }
+  if (roofGeometry) renderGeometries.push({ geometry: roofGeometry, material: roofMaterial });
+
+  for (const entry of renderGeometries) {
+    const mesh = new THREE.Mesh(entry.geometry, entry.material);
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     group.add(mesh);
-    colliderGeometries.push(geometry.clone());
-  };
-
-  const addPlacement = (placement: TrackBlueprint["placements"][number]): void => {
-    const points = getPlacementVectors(placement.points);
-    if (points.length < 2) {
-      return;
-    }
-    const width = placement.width;
-    const halfW = width / 2;
-    maxSegmentWidth = Math.max(maxSegmentWidth, width);
-    includeBoundsFromPath(points, halfW, -FLOOR_THICK);
-
-    const baseSteps = Math.max(10, Math.ceil(placement.length / 0.35));
-    const floorShape = makeTrackCrossSectionShape(-halfW, halfW, -FLOOR_THICK, 0);
-    addSweptMesh(points, floorShape, floorMaterial, baseSteps);
-
-    const sideOffset = width / 2 - RAIL_INSET;
-    const railBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
-    const railTop = railBottom + RAIL_H;
-
-    if (placement.railLeft) {
-      const leftRailShape = makeTrackCrossSectionShape(
-        -sideOffset - RAIL_THICK / 2,
-        -sideOffset + RAIL_THICK / 2,
-        railBottom,
-        railTop,
-      );
-      addSweptMesh(points, leftRailShape, railMaterial, baseSteps);
-    }
-
-    if (placement.railRight) {
-      const rightRailShape = makeTrackCrossSectionShape(
-        sideOffset - RAIL_THICK / 2,
-        sideOffset + RAIL_THICK / 2,
-        railBottom,
-        railTop,
-      );
-      addSweptMesh(points, rightRailShape, railMaterial, baseSteps);
-    }
-
-    if (placement.tunnelRoof) {
-      const roofInset = Math.max(RAIL_THICK * 0.75, 0.25);
-      const roofBottom = railTop - 0.2;
-      const roofTop = roofBottom + 0.45;
-      const roofShape = makeTrackCrossSectionShape(
-        -halfW + roofInset,
-        halfW - roofInset,
-        roofBottom,
-        roofTop,
-      );
-      addSweptMesh(points, roofShape, roofMaterial, baseSteps);
-      includeBoundsFromPath(points, Math.max(halfW - roofInset, 0.8), roofBottom);
-    }
-  };
-
-  for (const placement of blueprint.placements) {
-    addPlacement(placement);
   }
 
-  const mainLanePlacements = blueprint.placements.filter((placement) => placement.lane === "main");
-  const fallbackPlacement = blueprint.placements[blueprint.placements.length - 1];
-  const finalPlacement =
-    mainLanePlacements.length > 0
-      ? mainLanePlacements[mainLanePlacements.length - 1]
-      : fallbackPlacement;
-
-  let finishAnchor = new THREE.Vector3(0, FLOOR_THICK / 2, START_LENGTH * 4);
-  let finishDirection = new THREE.Vector3(0, 0, 1);
-  if (finalPlacement) {
-    const points = getPlacementVectors(finalPlacement.points);
-    if (points.length >= 2) {
-      finishAnchor = points[points.length - 1]!;
-      finishDirection = finishAnchor
-        .clone()
-        .sub(points[points.length - 2]!)
-        .normalize();
-    }
-  }
-  if (finishDirection.lengthSq() <= 1e-5) {
-    finishDirection.set(0, 0, 1);
-  }
-
-  const finishPathPoints = [
-    finishAnchor.clone(),
-    finishAnchor.clone().addScaledVector(finishDirection, FINISH_LENGTH),
-  ];
-  const finishFloorShape = makeTrackCrossSectionShape(
-    -FINISH_WIDTH / 2,
-    FINISH_WIDTH / 2,
-    -FLOOR_THICK,
-    0,
-  );
-  addSweptMesh(finishPathPoints, finishFloorShape, floorMaterial, Math.ceil(FINISH_LENGTH / 0.3));
-  includeBoundsFromPath(finishPathPoints, FINISH_WIDTH / 2, -FLOOR_THICK);
-
-  const finishRailBottom = -FLOOR_THICK + RAIL_FLOOR_OVERLAP;
-  const finishRailTop = finishRailBottom + RAIL_H;
-  const finishRailOffset = FINISH_WIDTH / 2 - RAIL_INSET;
-  addSweptMesh(
-    finishPathPoints,
-    makeTrackCrossSectionShape(
-      -finishRailOffset - RAIL_THICK / 2,
-      -finishRailOffset + RAIL_THICK / 2,
-      finishRailBottom,
-      finishRailTop,
-    ),
-    railMaterial,
-    Math.ceil(FINISH_LENGTH / 0.3),
-  );
-  addSweptMesh(
-    finishPathPoints,
-    makeTrackCrossSectionShape(
-      finishRailOffset - RAIL_THICK / 2,
-      finishRailOffset + RAIL_THICK / 2,
-      finishRailBottom,
-      finishRailTop,
-    ),
-    railMaterial,
-    Math.ceil(FINISH_LENGTH / 0.3),
-  );
-
+  const colliderGeometries = renderGeometries.map((entry) => entry.geometry.clone());
   const mergedGeometry = mergeGeometries(colliderGeometries, false);
   if (mergedGeometry) {
     mergedGeometry.computeVertexNormals();
@@ -541,14 +719,44 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     uvScale: [Math.max(startBackWallWidth * 0.3, 1), Math.max(RAIL_H, 1)],
   });
 
-  const finishStartZ = finishAnchor.z;
+  let lowestFloorY = Number.POSITIVE_INFINITY;
+  let minTrackX = Number.POSITIVE_INFINITY;
+  let maxTrackX = Number.NEGATIVE_INFINITY;
+  let minTrackZ = Number.POSITIVE_INFINITY;
+  let maxTrackZ = Number.NEGATIVE_INFINITY;
+  let maxSegmentWidth = TRACK_W;
+  for (const sample of samples) {
+    const halfWidth = sample.width / 2;
+    maxSegmentWidth = Math.max(maxSegmentWidth, sample.width);
+    lowestFloorY = Math.min(lowestFloorY, sample.center.y - FLOOR_THICK);
+    minTrackX = Math.min(minTrackX, sample.center.x - halfWidth);
+    maxTrackX = Math.max(maxTrackX, sample.center.x + halfWidth);
+    minTrackZ = Math.min(minTrackZ, sample.center.z - halfWidth * 0.35);
+    maxTrackZ = Math.max(maxTrackZ, sample.center.z + halfWidth * 0.35);
+  }
+  if (!Number.isFinite(lowestFloorY)) {
+    lowestFloorY = startTopBackPoint.y - FLOOR_THICK;
+  }
+  if (!Number.isFinite(minTrackX)) {
+    minTrackX = -FINISH_WIDTH / 2;
+    maxTrackX = FINISH_WIDTH / 2;
+    minTrackZ = startTopBackPoint.z;
+    maxTrackZ = startTopBackPoint.z + FINISH_LENGTH + START_LENGTH;
+  }
+
+  const finishStartZ = finishStart.z;
 
   boardBody.aabbNeedsUpdate = true;
   boardBody.updateAABB();
 
-  const spawn = startTopBackPoint.clone().add(new THREE.Vector3(0, MARBLE_RADIUS + 0.6, 1.8));
+  const spawnForward = frames[0]?.tangent ?? new THREE.Vector3(0, 0, 1);
+  const spawnCenter = samples[0]?.center ?? startTopBackPoint;
+  const spawn = spawnCenter
+    .clone()
+    .addScaledVector(spawnForward, 1.8)
+    .add(new THREE.Vector3(0, MARBLE_RADIUS + 0.6, 0));
   const trialStartZ = spawn.z + 2;
-  const trialFinishZ = finishAnchor.z + Math.max(FINISH_LENGTH * 0.6, 4);
+  const trialFinishZ = finishStart.z + Math.max(FINISH_LENGTH * 0.6, 4);
 
   const finishYaw = Math.atan2(finishDirection.x, finishDirection.z);
 
@@ -561,20 +769,13 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
 
   addVisualPart(group, {
     size: new THREE.Vector3(FINISH_WIDTH + 1.2, MARKER_THICK, 0.55),
-    position: finishAnchor
+    position: finishStart
       .clone()
       .addScaledVector(finishDirection, Math.max(FINISH_LENGTH * 0.58, 3.2))
       .add(new THREE.Vector3(0, MARKER_THICK / 2 + 0.01, 0)),
     rotation: new THREE.Euler(0, finishYaw, 0, "XYZ"),
     material: finishMarkerMaterial,
   });
-
-  if (!Number.isFinite(minTrackX)) {
-    minTrackX = -FINISH_WIDTH / 2;
-    maxTrackX = FINISH_WIDTH / 2;
-    minTrackZ = startTopBackPoint.z;
-    maxTrackZ = finishAnchor.z + FINISH_LENGTH;
-  }
 
   const offCourseBoundsLocal = {
     minX: minTrackX - OFF_COURSE_MARGIN,
@@ -588,13 +789,11 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     bodies: [boardBody],
     movingObstacleBodies: [],
     containmentLocal: {
-      mainHalfX: Math.max(computeContainmentHalfX(maxSegmentWidth), Math.max(Math.abs(minTrackX), Math.abs(maxTrackX)) + 6),
-      finishHalfX: Math.max(
-        computeContainmentHalfX(Math.max(FINISH_WIDTH, maxSegmentWidth)),
-        Math.max(Math.abs(minTrackX), Math.abs(maxTrackX)) + 8,
-      ),
+      mainHalfX: computeContainmentHalfX(maxSegmentWidth),
+      finishHalfX: computeContainmentHalfX(Math.max(FINISH_WIDTH, maxSegmentWidth)),
       finishStartZ,
     },
+    wallContainmentMode: "disabled",
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
     offCourseBoundsLocal,
@@ -1372,6 +1571,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       finishHalfX: computeContainmentHalfX(FINISH_WIDTH),
       finishStartZ,
     },
+    wallContainmentMode: "legacyLinear",
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
     offCourseBoundsLocal,

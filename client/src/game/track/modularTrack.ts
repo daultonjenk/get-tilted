@@ -70,6 +70,7 @@ export type BuildTrackBlueprintOptions = {
   customPieces: TrackPieceTemplate[];
   includeCustomPieces: boolean;
   trackWidth: number;
+  enableBranchPieces?: boolean;
 };
 
 type LaneCursor = {
@@ -591,8 +592,12 @@ function resolvePieceForStep(
   splitActive: boolean,
   catalog: TrackPieceTemplate[],
   random: () => number,
+  enableBranchPieces: boolean,
 ): TrackPieceTemplate {
   const safeCatalog = catalog.filter((piece) => {
+    if (!enableBranchPieces && (piece.kind === "splitY" || piece.kind === "mergeY")) {
+      return false;
+    }
     if (piece.kind === "mergeY") {
       return splitActive;
     }
@@ -639,6 +644,7 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
   const seed = sanitizeTrackSeed(options.config.seed);
   const pieceCount = sanitizeTrackPieceCount(options.config.pieceCount);
   const trackWidth = Number.isFinite(options.trackWidth) ? options.trackWidth : FALLBACK_TRACK_WIDTH;
+  const enableBranchPieces = options.enableBranchPieces ?? false;
 
   const catalog = options.includeCustomPieces
     ? [...BUILTIN_TRACK_PIECES, ...options.customPieces]
@@ -669,9 +675,16 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
   let branchSeq = 1;
 
   for (let i = 0; i < pieceCount; i += 1) {
-    const picked = resolvePieceForStep(i, pieceCount, splitActive, sanitizedCatalog, random);
+    const picked = resolvePieceForStep(
+      i,
+      pieceCount,
+      splitActive,
+      sanitizedCatalog,
+      random,
+      enableBranchPieces,
+    );
 
-    if (!splitActive && picked.kind === "splitY") {
+    if (enableBranchPieces && !splitActive && picked.kind === "splitY") {
       const mainLane = lanes.get("main");
       if (!mainLane) {
         continue;
@@ -717,7 +730,7 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
       continue;
     }
 
-    if (splitActive && picked.kind === "mergeY") {
+    if (enableBranchPieces && splitActive && picked.kind === "mergeY") {
       const leftLane = lanes.get("left");
       const rightLane = lanes.get("right");
       if (!leftLane || !rightLane) {
@@ -793,7 +806,7 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
     }
   }
 
-  if (splitActive) {
+  if (enableBranchPieces && splitActive) {
     const leftLane = lanes.get("left");
     const rightLane = lanes.get("right");
     if (leftLane && rightLane) {

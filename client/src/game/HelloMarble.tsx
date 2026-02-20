@@ -219,6 +219,7 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
     customPieces: sanitizeTrackPieceLibrary(config.customPieces),
     includeCustomPieces: config.catalogMode === "builtin_plus_custom",
     trackWidth: 9,
+    enableBranchPieces: false,
   });
   return {
     seed,
@@ -2395,7 +2396,9 @@ export function HelloMarble() {
       const physicsStartMs = performance.now();
       world.step(fixedDt, fixedDt, 1);
       suppressVerticalPopOnSideImpact();
-      resolveWallSqueezeAgainstObstacle();
+      if (track.wallContainmentMode === "legacyLinear") {
+        resolveWallSqueezeAgainstObstacle();
+      }
       const physicsMs = performance.now() - physicsStartMs;
 
       const speed = marbleBody.velocity.length();
@@ -3962,6 +3965,10 @@ export function HelloMarble() {
                 />
               </label>
               <p className="raceHint">Multiplayer race seed: {multiplayerTrackSeed}</p>
+              <p className="raceHint">
+                Split/Merge generation is temporarily disabled while path stabilization is in
+                progress.
+              </p>
               <div className="trackLabEditorGrid">
                 <label className="optionsField" htmlFor="trackPieceLabel">
                   <span className="optionsFieldLabel">Piece Name</span>

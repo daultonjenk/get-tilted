@@ -189,3 +189,22 @@ Verification:
 - `npm run build` passes.
 - `develop-web-game` Playwright smoke script is still blocked in this environment:
   - `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright' imported from ~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`
+
+v0.8.1.1 update:
+- Stabilized modular track generation/rendering after v0.8.1.0 regression report:
+  - replaced per-piece `ExtrudeGeometry(extrudePath)` usage with a custom stable-frame sweep pipeline sampled along a continuous centerline.
+  - floor/rails/tunnel roof are now generated from deterministic transported frames (`tangent/right/up`) to avoid sideways roll artifacts.
+  - collider is rebuilt from the same generated swept geometry set and merged to a single Trimesh shape for visual/physics alignment.
+- Added `wallContainmentMode` to `TrackBuildResult` and disabled legacy linear wall-squeeze containment logic for modular tracks in `HelloMarble`.
+- Added temporary branch stabilization guard:
+  - `buildTrackBlueprint` now accepts `enableBranchPieces` (default `false`).
+  - Track Lab runtime generation passes `enableBranchPieces: false`, so `splitY`/`mergeY` pieces are currently excluded from random generation while path stability is finalized.
+  - UI now includes a non-blocking stabilization notice in Track Lab.
+- Bumped build/version to `0.8.1.1` and advanced Track Lab local storage keys to `v0.8.1.1` namespace.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run test` passes.
+- `npm run build` passes.
+- Playwright skill smoke remains blocked in this environment (`ERR_MODULE_NOT_FOUND: playwright` in the skill runner path).
