@@ -10,3 +10,4 @@ app-release-*.apk
 app-release-*.aab
 app-release-unsigned-aligned.apk
 manifest-checksum.txt
+keystore.properties

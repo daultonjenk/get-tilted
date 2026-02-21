@@ -1,13 +1,12 @@
 [
   {
-    "relation": [
-      "delegate_permission/common.handle_all_urls"
-    ],
+    "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
       "package_name": "dev.gettilted.app",
       "sha256_cert_fingerprints": [
-        "19:A2:06:CB:97:9D:73:56:58:0C:8B:27:A6:A3:61:6B:C2:CC:1D:91:EB:77:B4:3B:4B:B0:A4:F0:45:33:B1:F5"
+        "19:A2:06:CB:97:9D:73:56:58:0C:8B:27:A6:A3:61:6B:C2:CC:1D:91:EB:77:B4:3B:4B:B0:A4:F0:45:33:B1:F5",
+        "83:C4:BE:73:8F:A1:73:36:71:A9:15:EF:77:DF:D8:07:25:31:01:7C:E1:77:D5:9B:0B:4F:F1:9D:07:30:E1:64"
       ]
     }
   }
