@@ -420,15 +420,16 @@ export function HelloMarble() {
   }, []);
 
   useEffect(() => {
-    if (!isMobile || typeof window === "undefined") {
+    if (typeof window === "undefined") {
       return;
     }
-    let lockAttempted = false;
+    let isUnmounted = false;
+    let lockUnsupported = false;
+    let lockInFlight = false;
     const tryLockPortraitOrientation = async () => {
-      if (lockAttempted) {
+      if (isUnmounted || lockUnsupported || lockInFlight) {
         return;
       }
-      lockAttempted = true;
       const orientationApi = window.screen.orientation as
         | (ScreenOrientation & {
             lock?: (
@@ -445,23 +446,45 @@ export function HelloMarble() {
           })
         | undefined;
       if (!orientationApi || typeof orientationApi.lock !== "function") {
+        lockUnsupported = true;
         return;
       }
+      lockInFlight = true;
       try {
         await orientationApi.lock("portrait-primary");
       } catch {
         // Browsers can reject lock requests unless in fullscreen/PWA/user gesture.
+      } finally {
+        lockInFlight = false;
       }
     };
     void tryLockPortraitOrientation();
     const onGesture = () => {
       void tryLockPortraitOrientation();
     };
-    window.addEventListener("pointerdown", onGesture, { passive: true });
-    return () => {
-      window.removeEventListener("pointerdown", onGesture);
+    const onFocus = () => {
+      void tryLockPortraitOrientation();
     };
-  }, [isMobile]);
+    const onOrientationChange = () => {
+      void tryLockPortraitOrientation();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void tryLockPortraitOrientation();
+      }
+    };
+    window.addEventListener("pointerdown", onGesture, { passive: true });
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("orientationchange", onOrientationChange);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      isUnmounted = true;
+      window.removeEventListener("pointerdown", onGesture);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("orientationchange", onOrientationChange);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     tiltStatusRef.current = tiltStatus;

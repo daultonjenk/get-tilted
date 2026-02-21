@@ -83,8 +83,8 @@ android {
         applicationId "dev.gettilted.app"
         minSdkVersion 21
         targetSdkVersion 35
-        versionCode 80301
-        versionName "0.8.3.1"
+        versionCode 80302
+        versionName "0.8.3.2"
 
         resValue "string", "appName", twaManifest.name
         resValue "string", "launcherName", twaManifest.launcherName

@@ -304,3 +304,23 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.3.2 update:
+- Hardened gameplay portrait locking in `client/src/game/HelloMarble.tsx`:
+  - removed the one-shot lock gate so failed orientation lock attempts can retry.
+  - removed viewport-width `isMobile` gating for lock effect so landscape rotation cannot disable the lock listener path.
+  - added retry triggers on `pointerdown`, `focus`, `visibilitychange` (when visible), and `orientationchange`.
+  - kept graceful no-op behavior when `screen.orientation.lock` is unavailable.
+- Added explicit Android activity lock in `android/app/src/main/AndroidManifest.xml`:
+  - `LauncherActivity` now declares `android:screenOrientation="portrait"` for additional wrapper-level enforcement.
+- Bumped app version to `0.8.3.2` in `client/src/buildInfo.ts`.
+- Synced Android wrapper version metadata to `0.8.3.2` (`versionCode 80302`) in:
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
+
+Verification:
+- `npm run android:twa:sync` passes.
+- `npm run android:twa:update` passes.
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
