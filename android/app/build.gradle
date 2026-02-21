@@ -47,7 +47,7 @@ def twaManifest = [
     // 'customtabs' and 'webview'.
     fallbackType: 'customtabs',
     enableSiteSettingsShortcut: 'true',
-    orientation: 'any',
+    orientation: 'portrait',
 ]
 
 android {
@@ -83,8 +83,8 @@ android {
         applicationId "dev.gettilted.app"
         minSdkVersion 21
         targetSdkVersion 35
-        versionCode 80300
-        versionName "0.8.3.0"
+        versionCode 80301
+        versionName "0.8.3.1"
 
         resValue "string", "appName", twaManifest.name
         resValue "string", "launcherName", twaManifest.launcherName

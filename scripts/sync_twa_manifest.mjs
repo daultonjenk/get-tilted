@@ -70,7 +70,7 @@ async function main() {
     name: appName,
     launcherName,
     display: "standalone",
-    orientation: "any",
+    orientation: "portrait",
     themeColor: DEFAULTS.color,
     themeColorDark: DEFAULTS.color,
     navigationColor: DEFAULTS.color,

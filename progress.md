@@ -287,3 +287,20 @@ Verification:
 - `npm run test` passes.
 - `npm run build` passes.
 - Attempted `develop-web-game` Playwright workflow client invocation, but it remains blocked in this environment (`ERR_MODULE_NOT_FOUND: Cannot find package 'playwright' imported from ~/.codex/skills/develop-web-game/scripts/web_game_playwright_client.js`).
+
+v0.8.3.1 update:
+- Locked Android/TWA orientation to portrait to prevent device rotation from disrupting tilt gameplay in Play Store internal testing.
+- Updated web app manifest orientation to `portrait-primary` in `client/public/manifest.webmanifest`.
+- Updated Android TWA orientation source-of-truth to `portrait` in `android/twa-manifest.json` and `scripts/sync_twa_manifest.mjs`.
+- Updated Android wrapper orientation/version values:
+  - `android/app/build.gradle`: `orientation` set to `portrait`, version updated to `0.8.3.1` (`versionCode 80301`).
+  - `android/app/src/main/java/dev/gettilted/app/LauncherActivity.java`: uses `SCREEN_ORIENTATION_USER_PORTRAIT` on Android versions above Oreo for launch behavior alignment.
+  - `android/app/src/main/res/raw/web_app_manifest.json`: orientation updated to `portrait-primary`.
+- Bumped app version to `0.8.3.1` in `client/src/buildInfo.ts`.
+
+Verification:
+- `npm run android:twa:sync` passes.
+- `npm run android:twa:update` passes.
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
