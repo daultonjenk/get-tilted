@@ -335,3 +335,17 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.3.4 update:
+- Synced Android wrapper version metadata with the app version to avoid Play upload rejection on `versionCode`.
+- Bumped app version to `0.8.3.4` in `client/src/buildInfo.ts`.
+- Ran `npm run android:twa:sync` to update `android/twa-manifest.json` (`appVersion: 0.8.3.4`, `appVersionCode: 80304`).
+- Updated `android/app/build.gradle` to `versionName "0.8.3.4"` and `versionCode 80304`.
+- Updated `AGENTS.md` build-version discipline with a required sync rule:
+  - every `APP_VERSION` change must also update Android wrapper version fields in `android/twa-manifest.json` and `android/app/build.gradle`.
+  - added a pre-Play-upload check list to verify version parity across all three files.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.

@@ -176,6 +176,13 @@ Implementation expectation:
 - The version token in the commit message must exactly match `APP_VERSION` in `client/src/buildInfo.ts` for that same commit.
 - This exact-match rule applies to all commits (including docs-only, tiny fixes, and minor patches) unless the exceptional-case rule below is used.
 - If a commit message introduces a new `v#.#.#.#` token, `client/src/buildInfo.ts` must be updated to that exact version in that commit.
+- When `APP_VERSION` is changed, Android wrapper versions must be kept in sync in the same commit:
+  - `android/twa-manifest.json` → `appVersion` and `appVersionCode`
+  - `android/app/build.gradle` → `versionName` and `versionCode`
+- Before preparing any Play upload, verify these three files match exactly:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
 - Only in truly exceptional cases (for example, emergency revert/cherry-pick constraints) may a different commit message format be used.
 - Ensure to update progress.md with all changes made in this version, with the version number at the beginning of your description of changes.
 ---
