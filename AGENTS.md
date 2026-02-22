@@ -179,3 +179,15 @@ Implementation expectation:
 - Only in truly exceptional cases (for example, emergency revert/cherry-pick constraints) may a different commit message format be used.
 - Ensure to update progress.md with all changes made in this version, with the version number at the beginning of your description of changes.
 ---
+
+## 9) Android AAB redeploy rule (required)
+
+Use this checklist to decide if a new Android `.aab` must be uploaded to Play:
+
+- **AAB required** when changes touch anything in `android/`, Bubblewrap/TWA wrapper config, signing/package metadata, app icons/splash, Android manifest/activity settings, permissions, intent filters, `android/twa-manifest.json`, or any Android resource generated into the wrapper.
+- **AAB not required** for web-only gameplay/UI/network/content fixes that live only in `client/`, `server/`, `worker/`, or `shared/` and do not require wrapper metadata changes.
+- **When in doubt, ship both**: deploy Cloudflare Pages update and upload a new internal-testing `.aab` so testers get wrapper + web changes together.
+
+Release reminder:
+- Changes are not complete for testers until required Play internal track rollout is done and testers install the new build.
+---

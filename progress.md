@@ -324,3 +324,14 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.3.3 update:
+- Added a new required section in `AGENTS.md` documenting when Play Store redeploy with a new Android `.aab` is required.
+- Added a concise decision checklist separating wrapper-level Android changes (AAB required) from web-only changes (AAB not required).
+- Added an explicit release reminder to complete Play internal rollout and tester install when AAB changes are required.
+- Bumped app version to `0.8.3.3` in `client/src/buildInfo.ts`.
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
