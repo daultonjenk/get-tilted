@@ -156,9 +156,15 @@ const COLLIDER_LATERAL_PADDING_X = 0.04;
 const BLUEPRINT_SET_PIECE_MIN_CLEARANCE_MULTIPLIER = 1.15;
 const BLUEPRINT_SET_PIECE_GATE_CLEARANCE_MULTIPLIER = 1.35;
 const BLUEPRINT_SET_PIECE_GATE_CLEARANCE_MAX_MULTIPLIER = 1.5;
-const BLUEPRINT_SET_PIECE_COUNT = 8;
 const BLUEPRINT_SET_PIECE_OBSTACLE_RATE = 0.75;
 const BLUEPRINT_SET_PIECE_MIN_LENGTH = 8;
+const BLUEPRINT_SET_PIECE_SAFE_START_MAIN_COUNT = 2;
+const BLUEPRINT_SET_PIECE_OBSTACLE_HEIGHT = MARBLE_RADIUS * 2 * 1.15;
+const BLUEPRINT_SET_PIECE_EDGE_PADDING_RATIO = 0.22;
+const BLUEPRINT_SET_PIECE_EDGE_PADDING_MIN = 2.1;
+const BLUEPRINT_SET_PIECE_EDGE_PADDING_MAX = 3.5;
+const BLUEPRINT_SET_PIECE_EVENT_GAP_MIN = 1.45;
+const BLUEPRINT_SET_PIECE_EVENT_GAP_MAX = 3.1;
 const BLUEPRINT_OBSTACLE_CORNER_RADIUS_SCALE = 0.22;
 const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MIN = 0.08;
 const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MAX = 0.32;
@@ -771,16 +777,31 @@ function selectBlueprintObstaclePieceIds(
     return new Set();
   }
 
+  const mainLaneEligible = eligible.filter((placement) => placement.lane === "main");
+  const spawnSafetySource = mainLaneEligible.length > 0 ? mainLaneEligible : eligible;
+  const protectedStartIds = new Set(
+    spawnSafetySource
+      .slice(0, BLUEPRINT_SET_PIECE_SAFE_START_MAIN_COUNT)
+      .map((placement) => placement.id),
+  );
+  const selectionPool = eligible.filter((placement) => !protectedStartIds.has(placement.id));
+  if (selectionPool.length === 0) {
+    return new Set();
+  }
+
   const targetCount = Math.max(
     0,
-    Math.min(eligible.length, Math.round(eligible.length * BLUEPRINT_SET_PIECE_OBSTACLE_RATE)),
+    Math.min(
+      selectionPool.length,
+      Math.round(selectionPool.length * BLUEPRINT_SET_PIECE_OBSTACLE_RATE),
+    ),
   );
   if (targetCount === 0) {
     return new Set();
   }
 
-  const shuffled = [...eligible];
-  const random = makeSeededRandom(`${seed}|blueprint-piece-obstacles-v1`);
+  const shuffled = [...selectionPool];
+  const random = makeSeededRandom(`${seed}|blueprint-piece-obstacles-v2`);
   for (let i = shuffled.length - 1; i > 0; i -= 1) {
     const j = Math.floor(random() * (i + 1));
     const swap = shuffled[i]!;
@@ -810,7 +831,7 @@ function addBlueprintPieceSetObstacles(params: {
     minGap,
     MARBLE_RADIUS * 2 * BLUEPRINT_SET_PIECE_GATE_CLEARANCE_MAX_MULTIPLIER,
   );
-  const obstacleHeight = RAIL_H;
+  const obstacleHeight = BLUEPRINT_SET_PIECE_OBSTACLE_HEIGHT;
   const obstacleDepth = Math.max(RAIL_THICK * 1.25, 0.44);
   const verticalOffset = obstacleHeight * 0.5 + 0.015;
   const innerInset = RAIL_INSET + RAIL_THICK + 0.15;
@@ -894,17 +915,27 @@ function addBlueprintPieceSetObstacles(params: {
       continue;
     }
 
-    const edgePadding = clamp(lookup.totalLength * 0.14, 1.1, 2.2);
+    const pieceRandom = makeSeededRandom(`${seed}|${placement.id}|blueprint-piece-layout-v2`);
+    const randomRange = (min: number, max: number): number => lerp(min, max, pieceRandom());
+    const randomSign = (): -1 | 1 => (pieceRandom() < 0.5 ? -1 : 1);
+
+    const edgePadding = clamp(
+      lookup.totalLength * BLUEPRINT_SET_PIECE_EDGE_PADDING_RATIO,
+      BLUEPRINT_SET_PIECE_EDGE_PADDING_MIN,
+      BLUEPRINT_SET_PIECE_EDGE_PADDING_MAX,
+    );
     const startDistance = edgePadding;
     const endDistance = lookup.totalLength - edgePadding;
     const setPieceSpan = endDistance - startDistance;
-    if (setPieceSpan < 5.4) {
+    if (setPieceSpan < 4.8) {
       continue;
     }
-    const spacing = setPieceSpan / (BLUEPRINT_SET_PIECE_COUNT - 1);
-    const distances = Array.from({ length: BLUEPRINT_SET_PIECE_COUNT }, (_, index) => {
-      return startDistance + spacing * index;
-    });
+    const eventMinGap = clamp(
+      setPieceSpan * 0.2,
+      BLUEPRINT_SET_PIECE_EVENT_GAP_MIN,
+      BLUEPRINT_SET_PIECE_EVENT_GAP_MAX,
+    );
+    const includeRandomStep = setPieceSpan >= 6.5 && pieceRandom() < 0.72;
 
     const withPose = (distance: number, handler: (pose: BlueprintSweepPose) => void): void => {
       const pose = sampleBlueprintSweepPoseAtDistance(pieceSamples, pieceFrames, lookup, distance);
@@ -964,29 +995,97 @@ function addBlueprintPieceSetObstacles(params: {
       });
     };
 
+    const gateA = startDistance + setPieceSpan * randomRange(0.15, 0.2);
+    const blocker = clamp(
+      startDistance + setPieceSpan * randomRange(0.38, 0.46),
+      gateA + eventMinGap,
+      endDistance - (includeRandomStep ? eventMinGap * 2 : eventMinGap),
+    );
+    const randomDistance = includeRandomStep
+      ? clamp(
+          startDistance + setPieceSpan * randomRange(0.58, 0.69),
+          blocker + eventMinGap,
+          endDistance - eventMinGap,
+        )
+      : null;
+    const gateB = clamp(
+      startDistance + setPieceSpan * randomRange(0.8, 0.88),
+      (randomDistance ?? blocker) + eventMinGap,
+      endDistance,
+    );
+
     if (placement.kind === "straight") {
-      placeCenteredGate(distances[0]!, gateGap);
-      placeWallJut(distances[1]!, -1, TRACK_W * 0.31);
-      placeMiddleBlock(distances[2]!, TRACK_W * 0.26, TRACK_W * 0.17);
-      placeWallJut(distances[3]!, 1, TRACK_W * 0.31);
-      placeMiddleBlock(distances[4]!, TRACK_W * 0.25, -TRACK_W * 0.16);
-      placeCenteredGate(distances[5]!, gateGap + 0.08, -0.65);
-      placeWallJut(distances[6]!, -1, TRACK_W * 0.24);
-      placeCenteredGate(distances[7]!, gateGap + 0.02);
+      const gateOffsetA = randomSign() * randomRange(0.24, 0.66);
+      const gateOffsetB = clamp(
+        -gateOffsetA + randomRange(-0.2, 0.2),
+        -0.85,
+        0.85,
+      );
+
+      placeCenteredGate(gateA, gateGap + randomRange(0.02, 0.12), gateOffsetA);
+      placeMiddleBlock(
+        blocker,
+        TRACK_W * randomRange(0.24, 0.31),
+        randomSign() * randomRange(0.04, 0.2),
+      );
+
+      if (randomDistance != null) {
+        const randomPattern = Math.floor(pieceRandom() * 3);
+        if (randomPattern === 0) {
+          placeWallJut(randomDistance, randomSign(), TRACK_W * randomRange(0.18, 0.26));
+        } else if (randomPattern === 1) {
+          placeMiddleBlock(
+            randomDistance,
+            TRACK_W * randomRange(0.2, 0.27),
+            randomSign() * randomRange(TRACK_W * 0.14, TRACK_W * 0.26),
+          );
+        } else {
+          placeWallJut(
+            randomDistance,
+            gateOffsetA >= 0 ? -1 : 1,
+            TRACK_W * randomRange(0.17, 0.24),
+          );
+        }
+      }
+
+      placeCenteredGate(gateB, gateGap + randomRange(0.03, 0.14), gateOffsetB);
       continue;
     }
 
     const turnSign = placement.turnDeg < 0 ? -1 : 1;
     const innerSide: -1 | 1 = turnSign > 0 ? -1 : 1;
     const outerSide: -1 | 1 = innerSide < 0 ? 1 : -1;
-    placeCenteredGate(distances[0]!, gateGap + 0.12, outerSide * 0.45);
-    placeWallJut(distances[1]!, innerSide, TRACK_W * 0.25);
-    placeMiddleBlock(distances[2]!, TRACK_W * 0.24, outerSide * TRACK_W * 0.18);
-    placeWallJut(distances[3]!, outerSide, TRACK_W * 0.29);
-    placeCenteredGate(distances[4]!, gateGap + 0.06, outerSide * 0.32);
-    placeWallJut(distances[5]!, innerSide, TRACK_W * 0.22);
-    placeMiddleBlock(distances[6]!, TRACK_W * 0.21, innerSide * TRACK_W * 0.15);
-    placeCenteredGate(distances[7]!, gateGap + 0.1, -outerSide * 0.4);
+    const biasSide: -1 | 1 = pieceRandom() < 0.5 ? innerSide : outerSide;
+    const gateOffsetA = biasSide * randomRange(0.22, 0.62);
+    const gateOffsetB = clamp(
+      -biasSide * randomRange(0.2, 0.58) + randomRange(-0.14, 0.14),
+      -0.82,
+      0.82,
+    );
+
+    placeCenteredGate(gateA, gateGap + randomRange(0.08, 0.18), gateOffsetA);
+    placeMiddleBlock(
+      blocker,
+      TRACK_W * randomRange(0.23, 0.3),
+      biasSide * randomRange(TRACK_W * 0.04, TRACK_W * 0.16),
+    );
+
+    if (randomDistance != null) {
+      const randomPattern = Math.floor(pieceRandom() * 3);
+      if (randomPattern === 0) {
+        placeWallJut(randomDistance, biasSide, TRACK_W * randomRange(0.18, 0.25));
+      } else if (randomPattern === 1) {
+        placeWallJut(randomDistance, biasSide < 0 ? 1 : -1, TRACK_W * randomRange(0.18, 0.25));
+      } else {
+        placeMiddleBlock(
+          randomDistance,
+          TRACK_W * randomRange(0.19, 0.26),
+          (biasSide < 0 ? 1 : -1) * randomRange(TRACK_W * 0.12, TRACK_W * 0.22),
+        );
+      }
+    }
+
+    placeCenteredGate(gateB, gateGap + randomRange(0.07, 0.17), gateOffsetB);
   }
 }
 

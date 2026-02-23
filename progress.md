@@ -482,3 +482,25 @@ Verification:
 - `npm run typecheck` passes.
 - `npm run build` passes.
 - Browser smoke capture from local run saved at `output/web-game/shot-0.png` confirms obstacle fields render with mixed wall-jut and center blockers on modular pieces and app boots without runtime crash.
+
+v0.8.5.1 update:
+- Reduced obstacle density and spacing pressure in modular piece obstacles in `client/src/game/track/createTrack.ts`:
+  - removed fixed 8-point obstacle rhythm and switched to wider-spaced 4-event templates that yield 5 or 6 obstacles per enabled piece (`gate + blocker + optional random + gate`),
+  - increased edge padding and enforced larger minimum gap between obstacle events.
+- Added deterministic spawn safety for early progression:
+  - first 2 eligible main-lane pieces are excluded from obstacle selection.
+- Lowered set-piece obstacle height to improve down-track visibility:
+  - obstacle height now `1.15x` marble diameter (`1.15` world units) instead of rail height.
+- Increased straight/arc pattern variety while preserving a rough common template:
+  - per-piece deterministic RNG now varies gate offsets, blocker offsets, and random-step obstacle type,
+  - arc pieces bias variations by inner/outer turn side.
+- Kept rounded obstacle corners and wall-flush edge behavior from `v0.8.5.0`.
+- Bumped version to `0.8.5.1` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80501`)
+  - `android/app/build.gradle` (`versionCode` `80501`)
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
