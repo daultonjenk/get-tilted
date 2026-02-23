@@ -4285,12 +4285,6 @@ export function HelloMarble() {
                   >
                     <option value="straight">Straight</option>
                     <option value="arc90">Arc 90</option>
-                    <option value="sCurve">S-Curve</option>
-                    <option value="ramp">Ramp</option>
-                    <option value="bridge">Bridge</option>
-                    <option value="tunnel">Tunnel</option>
-                    <option value="splitY">Split Y</option>
-                    <option value="mergeY">Merge Y</option>
                   </select>
                 </label>
                 <label className="optionsSliderField" htmlFor="trackPieceLength">

@@ -97,6 +97,7 @@ export const TRACK_PIECE_COUNT_MAX = 48;
 export const TRACK_PIECE_COUNT_DEFAULT = 16;
 const TRACK_SEED_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const FALLBACK_TRACK_WIDTH = 9;
+const ENABLED_RUNTIME_KINDS: ReadonlySet<TrackPieceKind> = new Set(["straight", "arc90"]);
 
 const DEFAULT_CUSTOM_TEMPLATE: Omit<TrackPieceTemplate, "id" | "label"> = {
   kind: "straight",
@@ -649,6 +650,52 @@ export function resolveBranchLane(marbleId: string, nodeId: string, seed: string
   return hashSeed(token) % 2 === 0 ? "left" : "right";
 }
 
+function fallbackStraightPiece(): TrackPieceTemplate {
+  return {
+    ...DEFAULT_CUSTOM_TEMPLATE,
+    id: "forced-starter-straight",
+    label: "Straight",
+    kind: "straight",
+    length: 13,
+    turnDeg: 0,
+    bankDeg: 0,
+    turnDirection: "left",
+    weight: 1,
+  };
+}
+
+function fallbackArcPiece(direction: "left" | "right"): TrackPieceTemplate {
+  return {
+    ...DEFAULT_CUSTOM_TEMPLATE,
+    id: `forced-starter-arc-${direction}`,
+    label: direction === "left" ? "Arc 90 Left" : "Arc 90 Right",
+    kind: "arc90",
+    length: 14,
+    turnDeg: 90,
+    bankDeg: direction === "left" ? 8 : -8,
+    turnDirection: direction,
+    weight: 1,
+  };
+}
+
+function buildStarterSequence(
+  catalog: TrackPieceTemplate[],
+  pieceCount: number,
+): TrackPieceTemplate[] {
+  if (pieceCount <= 0) {
+    return [];
+  }
+  const straight = catalog.find((piece) => piece.kind === "straight") ?? fallbackStraightPiece();
+  const arcLeft =
+    catalog.find((piece) => piece.kind === "arc90" && piece.turnDirection === "left") ??
+    fallbackArcPiece("left");
+  const arcRight =
+    catalog.find((piece) => piece.kind === "arc90" && piece.turnDirection === "right") ??
+    fallbackArcPiece("right");
+  const sequence: TrackPieceTemplate[] = [straight, arcLeft, straight, arcRight, straight];
+  return sequence.slice(0, Math.min(sequence.length, pieceCount));
+}
+
 export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackBlueprint {
   const seed = sanitizeTrackSeed(options.config.seed);
   const pieceCount = sanitizeTrackPieceCount(options.config.pieceCount);
@@ -666,7 +713,10 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
     : [...BUILTIN_TRACK_PIECES];
   const sanitizedCatalog = catalog
     .map((piece, index) => sanitizeTrackPieceTemplate(piece, `piece-${index + 1}`))
-    .filter((piece): piece is TrackPieceTemplate => piece != null);
+    .filter(
+      (piece): piece is TrackPieceTemplate =>
+        piece != null && ENABLED_RUNTIME_KINDS.has(piece.kind),
+    );
 
   const random = makeSeededRandom(seed);
   const placements: TrackPiecePlacement[] = [];
@@ -689,16 +739,21 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
   let placementSeq = 1;
   let branchSeq = 1;
   let bendPairSeq = 1;
+  const starterSequence = buildStarterSequence(sanitizedCatalog, pieceCount);
 
   for (let i = 0; i < pieceCount; i += 1) {
-    const picked = resolvePieceForStep(
-      i,
-      pieceCount,
-      splitActive,
-      sanitizedCatalog,
-      random,
-      enableBranchPieces,
-    );
+    const forcedStarterPiece = starterSequence[i] ?? null;
+    const picked =
+      forcedStarterPiece ??
+      resolvePieceForStep(
+        i,
+        pieceCount,
+        splitActive,
+        sanitizedCatalog,
+        random,
+        enableBranchPieces,
+      );
+    const isForcedStarterPiece = forcedStarterPiece != null;
 
     if (enableBranchPieces && !splitActive && picked.kind === "splitY") {
       const mainLane = lanes.get("main");
@@ -814,6 +869,7 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
       const shouldPairHardArc =
         enforceBendPairs &&
         isMainLane &&
+        !isForcedStarterPiece &&
         picked.kind === "arc90" &&
         picked.turnDeg >= 80 &&
         !enableBranchPieces;
@@ -864,7 +920,11 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
         continue;
       }
 
-      const yawLimitDeg = isMainLane ? maxHeadingDriftDeg : MAX_YAW_DEG;
+      const yawLimitDeg = isMainLane
+        ? isForcedStarterPiece
+          ? MAX_YAW_DEG
+          : maxHeadingDriftDeg
+        : MAX_YAW_DEG;
       const built = buildPlacement(
         picked,
         lane,

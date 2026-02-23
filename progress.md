@@ -450,3 +450,16 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.4.0 update:
+- Restricted active modular generation/runtime catalog to `straight` + `arc90` only, and filtered all other piece kinds out of blueprint picks.
+- Added a deterministic starter sequence for each generated blueprint (`straight -> arc left -> straight -> arc right -> straight`) to establish an early S-curve flow.
+- Added a new modular-track obstacle authoring pass that places thick static blockers directly onto the curved path:
+  - entrance/exit paired gates with center gap target ~1.35x marble diameter (bounded by 1.15x minimum and 1.5x max),
+  - alternating side-jut and center blockers,
+  - one offset gate + one offset center block to introduce non-repetitive variation.
+- Updated Track Lab piece-type UI to only expose `Straight` and `Arc 90` options so editor choices match runtime-enabled pieces.
+- Bumped version to `0.8.4.0` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
