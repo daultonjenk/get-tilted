@@ -836,6 +836,7 @@ export function HelloMarble() {
     const localRenderPrevMarbleQuat = new THREE.Quaternion();
     const localRenderCurrMarblePos = new THREE.Vector3();
     const localRenderCurrMarbleQuat = new THREE.Quaternion();
+    const boardPrevQuat = new THREE.Quaternion();
     const boardUpWorld = new THREE.Vector3();
     const boardRightWorld = new THREE.Vector3();
     const boardForwardWorld = new THREE.Vector3();
@@ -1962,6 +1963,12 @@ export function HelloMarble() {
       refreshCurvedContainment();
       scene.add(track.group);
 
+      boardPrevQuat.set(
+        boardBody.quaternion.x,
+        boardBody.quaternion.y,
+        boardBody.quaternion.z,
+        boardBody.quaternion.w,
+      );
       currentPitch = 0;
       currentRoll = 0;
       respawnMarble(false);
@@ -2358,17 +2365,54 @@ export function HelloMarble() {
         pivotSmoothed.z - rotatedPivot.z,
       );
 
-      // Zero board body velocities: the marble responds purely to gravity on
-      // the tilted surface (Super Monkey Ball model). Computing finite-difference
-      // velocity/angular-velocity for the kinematic board caused position-
-      // dependent spurious impulses that grew with distance along the track.
-      boardBody.velocity.set(0, 0, 0);
-      boardBody.angularVelocity.set(0, 0, 0);
+      // Compute board angular velocity from quaternion delta, then derive a
+      // linear velocity that makes the surface at the pivot point stationary.
+      // This eliminates the Z-dependent spurious impulse bug: previously,
+      // finite-difference position/velocity both scaled with Z, and their
+      // imperfect cancellation grew with distance along the track.
+      // With v_body = -(ω × rotatedPivot), the contact velocity at the pivot
+      // is exactly zero, and all other contacts (walls, floor) get the correct
+      // physically-based surface velocity rather than an artificial zero.
+      if (controllerDt > 0.00001) {
+        // deltaQuat = currentQuat * prevQuat^-1
+        tempQuatB.set(qFinalCannon.x, qFinalCannon.y, qFinalCannon.z, qFinalCannon.w);
+        tempQuatC.copy(boardPrevQuat).invert();
+        tempQuatB.multiply(tempQuatC).normalize();
+
+        const w = clamp(tempQuatB.w, -1, 1);
+        let angle = 2 * Math.acos(w);
+        if (angle > Math.PI) angle -= 2 * Math.PI;
+        const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
+        const invDt = 1 / controllerDt;
+        if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
+          const angularSpeed = angle * invDt;
+          const ox = (tempQuatB.x / sinHalf) * angularSpeed;
+          const oy = (tempQuatB.y / sinHalf) * angularSpeed;
+          const oz = (tempQuatB.z / sinHalf) * angularSpeed;
+          boardBody.angularVelocity.set(ox, oy, oz);
+          // v_body = -(ω × rotatedPivot)
+          const rpx = rotatedPivot.x;
+          const rpy = rotatedPivot.y;
+          const rpz = rotatedPivot.z;
+          boardBody.velocity.set(
+            oz * rpy - oy * rpz,
+            ox * rpz - oz * rpx,
+            oy * rpx - ox * rpy,
+          );
+        } else {
+          boardBody.velocity.set(0, 0, 0);
+          boardBody.angularVelocity.set(0, 0, 0);
+        }
+      } else {
+        boardBody.velocity.set(0, 0, 0);
+        boardBody.angularVelocity.set(0, 0, 0);
+      }
 
       boardBody.quaternion.copy(qFinalCannon);
       boardBody.position.copy(boardPosition);
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
+      boardPrevQuat.set(qFinalCannon.x, qFinalCannon.y, qFinalCannon.z, qFinalCannon.w);
     };
 
     let lastGravityG = Number.NaN;
