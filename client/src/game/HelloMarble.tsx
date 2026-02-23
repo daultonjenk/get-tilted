@@ -2365,15 +2365,40 @@ export function HelloMarble() {
         pivotSmoothed.z - rotatedPivot.z,
       );
 
-      // Compute board angular velocity from quaternion delta, then derive a
-      // linear velocity that makes the surface at the pivot point stationary.
-      // This eliminates the Z-dependent spurious impulse bug: previously,
-      // finite-difference position/velocity both scaled with Z, and their
-      // imperfect cancellation grew with distance along the track.
-      // With v_body = -(ω × rotatedPivot), the contact velocity at the pivot
-      // is exactly zero, and all other contacts (walls, floor) get the correct
-      // physically-based surface velocity rather than an artificial zero.
+      // Compute board velocity as the analytical derivative of boardPosition:
+      //   v_board = -(ω × rotatedPivot)  +  (I - Q) * v_marble_XZ
+      //
+      // The first term is the angular-rotation contribution (pivot-anchored).
+      // The second term is the marble-tracking contribution: as the marble moves,
+      // the board must shift to keep its pivot at the marble's XZ position. This
+      // term makes the board floor surface "follow" the marble, providing a
+      // small normal-direction closing velocity that furnishes the forward drive
+      // (via the contact-normal Z component) that gravity alone cannot reliably
+      // supply through friction on a static kinematic surface.
+      //
+      // Both terms are Z-position-independent:
+      //   - -(ω × rotatedPivot) computed analytically from ω (no finite-diff error)
+      //   - (I-Q)*v_marble bounded by marble speed, not marble distance
+      // Contact velocity at marble = ω×(0,my,0) + (I-Q)*v_marble — no mz terms.
+      // This eliminates the original throwing bug (finite-diff error ∝ mz*ω) while
+      // restoring the responsive feel the original code had.
       if (controllerDt > 0.00001) {
+        // Marble-tracking contribution: (I - Q) * v_marble_XZ
+        // Computed as v_marble - Q*v_marble (no allocations; uses rotation matrix).
+        const mvx = marbleBody.velocity.x;
+        const mvz = marbleBody.velocity.z;
+        const qqx = qFinalCannon.x;
+        const qqy = qFinalCannon.y;
+        const qqz = qFinalCannon.z;
+        const qqw = qFinalCannon.w;
+        // Q * (mvx, 0, mvz):
+        const Qmv_x = mvx * (1 - 2 * (qqy * qqy + qqz * qqz)) + mvz * (2 * (qqx * qqz + qqy * qqw));
+        const Qmv_y = mvx * (2 * (qqx * qqy + qqz * qqw))      + mvz * (2 * (qqy * qqz - qqx * qqw));
+        const Qmv_z = mvx * (2 * (qqx * qqz - qqy * qqw))      + mvz * (1 - 2 * (qqx * qqx + qqy * qqy));
+        const trkVx = mvx - Qmv_x;
+        const trkVy = 0   - Qmv_y;
+        const trkVz = mvz - Qmv_z;
+
         // deltaQuat = currentQuat * prevQuat^-1
         tempQuatB.set(qFinalCannon.x, qFinalCannon.y, qFinalCannon.z, qFinalCannon.w);
         tempQuatC.copy(boardPrevQuat).invert();
@@ -2390,17 +2415,18 @@ export function HelloMarble() {
           const oy = (tempQuatB.y / sinHalf) * angularSpeed;
           const oz = (tempQuatB.z / sinHalf) * angularSpeed;
           boardBody.angularVelocity.set(ox, oy, oz);
-          // v_body = -(ω × rotatedPivot)
+          // v_body = -(ω × rotatedPivot) + (I-Q)*v_marble
           const rpx = rotatedPivot.x;
           const rpy = rotatedPivot.y;
           const rpz = rotatedPivot.z;
           boardBody.velocity.set(
-            oz * rpy - oy * rpz,
-            ox * rpz - oz * rpx,
-            oy * rpx - ox * rpy,
+            (oz * rpy - oy * rpz) + trkVx,
+            (ox * rpz - oz * rpx) + trkVy,
+            (oy * rpx - ox * rpy) + trkVz,
           );
         } else {
-          boardBody.velocity.set(0, 0, 0);
+          // Board not rotating this frame; only the marble-tracking term applies.
+          boardBody.velocity.set(trkVx, trkVy, trkVz);
           boardBody.angularVelocity.set(0, 0, 0);
         }
       } else {
