@@ -368,3 +368,33 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.3.14 update:
+- Added a hybrid shadow system in `client/src/game/HelloMarble.tsx` with two manual debug-selectable modes:
+  - `dynamic`: Three.js shadow maps (marble casts real-time shadows on the tilting track).
+  - `projected`: blob-shadow projection mode as fallback.
+- Enabled dynamic shadow defaults and runtime tuning controls:
+  - `shadowMode` (`dynamic` | `projected`)
+  - `shadowMapSize` (`512` | `1024`)
+- Configured directional light shadow camera/bias settings and dynamic light framing around the marble for better local shadow stability while racing.
+- Reworked projected blob behavior so it no longer follows the marble upward:
+  - added downward raycast projection against `track.group`
+  - aligned blob orientation to hit-surface normal
+  - scaled/faded blob by marble-to-surface distance.
+- Added diagnostics to validate active shadow path at runtime:
+  - `shadowMode`
+  - `shadowMapSize`
+  - `dynamicShadowEnabled`
+- Added new tuning fields to shared tuning model and sanitation pipeline:
+  - `client/src/game/gameTypes.ts`
+  - `client/src/game/gameConstants.ts`
+  - `client/src/game/gameUtils.ts`
+- Bumped app version to `0.8.3.14` in `client/src/buildInfo.ts`.
+- Synced Android wrapper versions to `0.8.3.14` (`versionCode 80314`) in:
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
