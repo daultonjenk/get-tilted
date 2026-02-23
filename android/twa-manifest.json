@@ -23,8 +23,8 @@
     "path": "./keys/get-tilted-upload.jks",
     "alias": "get-tilted-upload"
   },
-  "appVersionCode": 80311,
-  "appVersion": "0.8.3.11",
+  "appVersionCode": 80312,
+  "appVersion": "0.8.3.12",
   "webManifestUrl": "https://get-tilted.pages.dev/manifest.webmanifest",
   "fullScopeUrl": "https://get-tilted.pages.dev/",
   "fallbackType": "customtabs",

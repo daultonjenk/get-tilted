@@ -28,6 +28,7 @@ export type TrackPhysicsDebug = {
 export type TrackBuildResult = {
   group: THREE.Group;
   bodies: CANNON.Body[];
+  wallBody: CANNON.Body;
   movingObstacleBodies: CANNON.Body[];
   containmentLocal: {
     mainHalfX: number;
@@ -742,6 +743,7 @@ function countBodyShapes(bodies: CANNON.Body[]): number {
 
 function addBlueprintPrimitiveColliders(
   boardBody: CANNON.Body,
+  boardWallBody: CANNON.Body,
   samples: BlueprintSweepSample[],
   frames: BlueprintSweepFrame[],
 ): { colliderPieceCount: number; primitiveShapeCount: number } {
@@ -774,6 +776,15 @@ function addBlueprintPrimitiveColliders(
         orientedQuat.z,
         orientedQuat.w,
       ),
+    );
+  };
+
+  const addSpanBoxWall = (center: THREE.Vector3, halfExtents: THREE.Vector3): void => {
+    primitiveShapeCount += 1;
+    boardWallBody.addShape(
+      new CANNON.Box(new CANNON.Vec3(halfExtents.x, halfExtents.y, halfExtents.z)),
+      new CANNON.Vec3(center.x, center.y, center.z),
+      new CANNON.Quaternion(orientedQuat.x, orientedQuat.y, orientedQuat.z, orientedQuat.w),
     );
   };
 
@@ -849,7 +860,7 @@ function addBlueprintPrimitiveColliders(
         .copy(spanCenter)
         .addScaledVector(spanRight, -sideOffset)
         .addScaledVector(spanUp, railCenterYOffset);
-      addSpanBox(railCenter, leftRailHalfExtents);
+      addSpanBoxWall(railCenter, leftRailHalfExtents);
     }
     if (sampleA.railRight || sampleB.railRight) {
       rightRailHalfExtents.set(
@@ -861,7 +872,7 @@ function addBlueprintPrimitiveColliders(
         .copy(spanCenter)
         .addScaledVector(spanRight, sideOffset)
         .addScaledVector(spanUp, railCenterYOffset);
-      addSpanBox(railCenter, rightRailHalfExtents);
+      addSpanBoxWall(railCenter, rightRailHalfExtents);
     }
 
     if (sampleA.tunnelRoof || sampleB.tunnelRoof) {
@@ -876,7 +887,7 @@ function addBlueprintPrimitiveColliders(
         roofCenter
           .copy(spanCenter)
           .addScaledVector(spanUp, roofBottom + roofHeight * 0.5);
-        addSpanBox(roofCenter, roofHalfExtents);
+        addSpanBoxWall(roofCenter, roofHalfExtents);
       }
     }
   }
@@ -894,6 +905,10 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
   const boardBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
   boardBody.position.set(0, 0, 0);
   boardBody.quaternion.set(0, 0, 0, 1);
+
+  const boardWallBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+  boardWallBody.position.set(0, 0, 0);
+  boardWallBody.quaternion.set(0, 0, 0, 1);
 
   const trackSurfaceTexture = createTrackSurfaceTexture();
   const floorMaterial = new THREE.MeshStandardMaterial({
@@ -1031,6 +1046,7 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
   if (BLUEPRINT_COLLIDER_MODE === "primitive") {
     const primitiveStats = addBlueprintPrimitiveColliders(
       boardBody,
+      boardWallBody,
       colliderSamples,
       colliderFrames,
     );
@@ -1104,30 +1120,37 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
         };
       },
     );
-    const colliderGeometries = [
-      colliderFloorGeometry,
+    // Floor → boardBody (friction: contactFriction)
+    if (colliderFloorGeometry) {
+      const mergedFloor = mergeGeometries([colliderFloorGeometry], false);
+      mergedFloor.computeVertexNormals();
+      boardBody.addShape(geometryToTrimesh(mergedFloor));
+      mergedFloor.dispose();
+      colliderFloorGeometry.dispose();
+    }
+    // Rails + roof → boardWallBody (friction: 0)
+    const wallGeometries = [
       colliderLeftRailGeometry,
       colliderRightRailGeometry,
       colliderRoofGeometry,
-    ].filter((geometry): geometry is THREE.BufferGeometry => geometry != null);
-    const mergedGeometry =
-      colliderGeometries.length > 0 ? mergeGeometries(colliderGeometries, false) : null;
-    if (mergedGeometry) {
-      mergedGeometry.computeVertexNormals();
-      boardBody.addShape(geometryToTrimesh(mergedGeometry));
-      mergedGeometry.dispose();
-      exoticTrimeshPieceCount = 1;
-      colliderPieceCount = Math.max(colliderSamples.length - 1, 1);
+    ].filter((g): g is THREE.BufferGeometry => g != null);
+    const mergedWalls = wallGeometries.length > 0 ? mergeGeometries(wallGeometries, false) : null;
+    if (mergedWalls) {
+      mergedWalls.computeVertexNormals();
+      boardWallBody.addShape(geometryToTrimesh(mergedWalls));
+      mergedWalls.dispose();
     }
-    for (const geometry of colliderGeometries) {
-      geometry.dispose();
+    for (const g of wallGeometries) {
+      g.dispose();
     }
+    exoticTrimeshPieceCount = 1;
+    colliderPieceCount = Math.max(colliderSamples.length - 1, 1);
   }
 
   const startBackWallWidth = TRACK_W - (RAIL_INSET * 2 + RAIL_THICK);
   const startBackWallY = RAIL_H / 2 - FLOOR_THICK / 2 + RAIL_FLOOR_OVERLAP;
   const startBackWallZ = startTopBackPoint.z + RAIL_THICK / 2 + START_BACK_WALL_PADDING;
-  addPart(group, boardBody, {
+  addPart(group, boardWallBody, {
     size: new THREE.Vector3(startBackWallWidth, RAIL_H, RAIL_THICK),
     position: new THREE.Vector3(0, startBackWallY, startBackWallZ),
     rotation: new THREE.Euler(0, 0, 0, "XYZ"),
@@ -1164,6 +1187,8 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
 
   boardBody.aabbNeedsUpdate = true;
   boardBody.updateAABB();
+  boardWallBody.aabbNeedsUpdate = true;
+  boardWallBody.updateAABB();
 
   const spawnForward = frames[0]?.tangent ?? new THREE.Vector3(0, 0, 1);
   const spawnCenter = samples[0]?.center ?? startTopBackPoint;
@@ -1214,7 +1239,8 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
 
   return {
     group,
-    bodies: [boardBody],
+    bodies: [boardBody, boardWallBody],
+    wallBody: boardWallBody,
     movingObstacleBodies: [],
     containmentLocal: {
       mainHalfX: computeContainmentHalfX(maxSegmentWidth),
@@ -1230,7 +1256,7 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     trialFinishZ,
     physicsDebug: {
       colliderPieceCount,
-      primitiveShapeCount: countBodyShapes([boardBody]),
+      primitiveShapeCount: countBodyShapes([boardBody, boardWallBody]),
       exoticTrimeshPieceCount,
     },
     updateMovingObstacles: () => {},
@@ -1252,6 +1278,10 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const boardBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
   boardBody.position.set(0, 0, 0);
   boardBody.quaternion.set(0, 0, 0, 1);
+
+  const boardWallBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+  boardWallBody.position.set(0, 0, 0);
+  boardWallBody.quaternion.set(0, 0, 0, 1);
 
   const trackSurfaceTexture = createTrackSurfaceTexture();
   const floorMaterial = new THREE.MeshStandardMaterial({ map: trackSurfaceTexture });
@@ -1325,7 +1355,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
         .addScaledVector(right, sideOffset * direction)
         .addScaledVector(up, verticalOffset);
 
-      addPart(group, boardBody, {
+      addPart(group, boardWallBody, {
         size: new THREE.Vector3(RAIL_THICK, RAIL_H, length),
         position: railCenter,
         rotation,
@@ -1780,7 +1810,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   const startBackWallWidth = TRACK_W - (RAIL_INSET * 2 + RAIL_THICK);
   const startBackWallY = RAIL_H / 2 - FLOOR_THICK / 2 + RAIL_FLOOR_OVERLAP;
   const startBackWallZ = startTopBackPoint.z + RAIL_THICK / 2 + START_BACK_WALL_PADDING;
-  addPart(group, boardBody, {
+  addPart(group, boardWallBody, {
     size: new THREE.Vector3(startBackWallWidth, RAIL_H, RAIL_THICK),
     position: new THREE.Vector3(0, startBackWallY, startBackWallZ),
     rotation: new THREE.Euler(0, 0, 0, "XYZ"),
@@ -1830,6 +1860,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
   boardBody.aabbNeedsUpdate = true;
   boardBody.updateAABB();
+  boardWallBody.aabbNeedsUpdate = true;
+  boardWallBody.updateAABB();
 
   const spawn = startTopBackPoint
     .clone()
@@ -1998,7 +2030,8 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
   return {
     group,
-    bodies: [boardBody, ...obstacleBodies],
+    bodies: [boardBody, boardWallBody, ...obstacleBodies],
+    wallBody: boardWallBody,
     movingObstacleBodies,
     containmentLocal: {
       mainHalfX: computeContainmentHalfX(TRACK_W),
@@ -2014,7 +2047,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     trialFinishZ,
     physicsDebug: {
       colliderPieceCount: 0,
-      primitiveShapeCount: countBodyShapes([boardBody, ...obstacleBodies]),
+      primitiveShapeCount: countBodyShapes([boardBody, boardWallBody, ...obstacleBodies]),
       exoticTrimeshPieceCount: 0,
     },
     updateMovingObstacles,

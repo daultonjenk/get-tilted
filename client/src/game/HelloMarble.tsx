@@ -702,6 +702,7 @@ export function HelloMarble() {
     if (!boardBody) {
       throw new Error("Track did not provide board physics body");
     }
+    let boardWallBody = track.wallBody;
 
     const world = new CANNON.World();
     const solver = world.solver as unknown as {
@@ -714,9 +715,11 @@ export function HelloMarble() {
     world.addBody(boardBody);
 
     const boardMat = new CANNON.Material("board");
+    const boardWallMat = new CANNON.Material("board-wall");
     const movingObstacleMat = new CANNON.Material("moving-obstacle");
     const marbleMat = new CANNON.Material("marble");
     boardBody.material = boardMat;
+    boardWallBody.material = boardWallMat;
     track.setMovingObstacleMaterial(movingObstacleMat);
 
     const boardContactMat = new CANNON.ContactMaterial(marbleMat, boardMat, {
@@ -728,6 +731,16 @@ export function HelloMarble() {
       frictionEquationRelaxation: 5,
     });
     world.addContactMaterial(boardContactMat);
+    world.addBody(boardWallBody);
+    const boardWallContactMat = new CANNON.ContactMaterial(marbleMat, boardWallMat, {
+      friction: 0,
+      restitution: 0,
+      contactEquationStiffness: 5e7,
+      contactEquationRelaxation: 6,
+      frictionEquationStiffness: 5e7,
+      frictionEquationRelaxation: 5,
+    });
+    world.addContactMaterial(boardWallContactMat);
     const movingObstacleContactMat = new CANNON.ContactMaterial(marbleMat, movingObstacleMat, {
       friction: MOVING_OBSTACLE_CONTACT_FRICTION,
       restitution: tuningRef.current.contactRestitution,
@@ -737,7 +750,9 @@ export function HelloMarble() {
       frictionEquationRelaxation: 5,
     });
     world.addContactMaterial(movingObstacleContactMat);
-    for (const body of track.bodies.slice(1)) {
+    // bodies[0] = boardBody (added above), bodies[1] = boardWallBody (added above)
+    // bodies[2+] = obstacle bodies
+    for (const body of track.bodies.slice(2)) {
       world.addBody(body);
     }
 
@@ -757,40 +772,6 @@ export function HelloMarble() {
     marbleBodyWithCcd.ccdSpeedThreshold = tuningRef.current.ccdSpeedThreshold;
     marbleBodyWithCcd.ccdIterations = tuningRef.current.ccdIterations;
     world.addBody(marbleBody);
-
-    // Per-surface friction: floor retains contactFriction for rolling feel; walls get zero
-    // friction so the marble slides freely along them as a guide rail.
-    // We cancel friction impulses on wall contacts (normal mostly perpendicular to board up)
-    // by restoring the pre-step tangential velocity after each physics step.
-    const preStepMarbleVel = new CANNON.Vec3();
-    const wallFrictionBoardUp = new CANNON.Vec3();
-    world.addEventListener("preStep", () => {
-      preStepMarbleVel.copy(marbleBody.velocity);
-    });
-    world.addEventListener("postStep", () => {
-      wallFrictionBoardUp.set(0, 1, 0);
-      boardBody.quaternion.vmult(wallFrictionBoardUp, wallFrictionBoardUp);
-      for (const contact of world.contacts) {
-        const isMarbleBoard =
-          (contact.bi === marbleBody && contact.bj === boardBody) ||
-          (contact.bi === boardBody && contact.bj === marbleBody);
-        if (!isMarbleBoard) continue;
-        // Derive normal pointing from board surface toward marble.
-        let nx = contact.ni.x, ny = contact.ni.y, nz = contact.ni.z;
-        if (contact.bi === marbleBody) { nx = -nx; ny = -ny; nz = -nz; }
-        // Skip floor contacts (normal mostly aligned with board up).
-        const upDot = Math.abs(nx * wallFrictionBoardUp.x + ny * wallFrictionBoardUp.y + nz * wallFrictionBoardUp.z);
-        if (upDot > 0.5) continue;
-        // Wall contact: keep post-step normal velocity (collision resolution) but restore
-        // pre-step tangential velocity (cancel friction impulse along the wall surface).
-        const preN = preStepMarbleVel.x * nx + preStepMarbleVel.y * ny + preStepMarbleVel.z * nz;
-        const curN = marbleBody.velocity.x * nx + marbleBody.velocity.y * ny + marbleBody.velocity.z * nz;
-        const delta = curN - preN;
-        marbleBody.velocity.x = preStepMarbleVel.x + nx * delta;
-        marbleBody.velocity.y = preStepMarbleVel.y + ny * delta;
-        marbleBody.velocity.z = preStepMarbleVel.z + nz * delta;
-      }
-    });
 
     const marbleSegments = 32;
     const ghostSegments = 24;
@@ -1040,8 +1021,8 @@ export function HelloMarble() {
 
       for (const contact of world.contacts) {
         const isMarbleBoardPair =
-          (contact.bi === marbleBody && contact.bj === boardBody) ||
-          (contact.bi === boardBody && contact.bj === marbleBody);
+          (contact.bi === marbleBody && (contact.bj === boardBody || contact.bj === boardWallBody)) ||
+          ((contact.bi === boardBody || contact.bi === boardWallBody) && contact.bj === marbleBody);
         if (!isMarbleBoardPair) {
           continue;
         }
@@ -1997,6 +1978,7 @@ export function HelloMarble() {
       if (!nextBoardBody) {
         return;
       }
+      const nextBoardWallBody = nextTrack.wallBody;
 
       for (const body of track.bodies) {
         world.removeBody(body);
@@ -2007,8 +1989,13 @@ export function HelloMarble() {
       track = nextTrack;
       boardBody = nextBoardBody;
       boardBody.material = boardMat;
+      boardWallBody = nextBoardWallBody;
+      boardWallBody.material = boardWallMat;
       track.setMovingObstacleMaterial(movingObstacleMat);
-      for (const body of track.bodies) {
+      world.addBody(boardBody);
+      world.addBody(boardWallBody);
+      // bodies[0] = boardBody, bodies[1] = boardWallBody, bodies[2+] = obstacles
+      for (const body of track.bodies.slice(2)) {
         world.addBody(body);
       }
       movingObstacleBodySet = new Set(track.movingObstacleBodies);
@@ -2493,6 +2480,15 @@ export function HelloMarble() {
       boardBody.position.copy(boardPosition);
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
+
+      // Keep wall body perfectly in sync with floor body every tick.
+      boardWallBody.velocity.copy(boardBody.velocity);
+      boardWallBody.angularVelocity.copy(boardBody.angularVelocity);
+      boardWallBody.quaternion.copy(boardBody.quaternion);
+      boardWallBody.position.copy(boardBody.position);
+      boardWallBody.aabbNeedsUpdate = true;
+      boardWallBody.updateAABB();
+
       boardPrevQuat.set(qFinalCannon.x, qFinalCannon.y, qFinalCannon.z, qFinalCannon.w);
     };
 
