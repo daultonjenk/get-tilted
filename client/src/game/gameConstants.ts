@@ -37,7 +37,7 @@ export const MOBILE_SAFE_RENDER_SCALE_MAX = 1;
 export const MOBILE_RENDER_SCALE_MIN = 0.75;
 export const MOBILE_RENDER_SCALE_MAX = 2;
 
-export const TUNING_STORAGE_KEY = "get-tilted:v0.8.3.0:tuning";
+export const TUNING_STORAGE_KEY = "get-tilted:v0.8.3.5:tuning";
 export const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 export const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 export const PLAYER_NAME_STORAGE_KEY = "get-tilted:v0.7.2.8:player-name";
@@ -74,7 +74,6 @@ export const DEFAULT_TUNING: TuningState = {
   extraDownForce: 0.7,
   renderScaleMobile: 1,
   mobileSafeFallback: false,
-  legacyTrackController: true,
   localMarbleRenderInterpolation: true,
   localTrackRenderInterpolation: true,
   debugUpdateHzMobile: 5,

@@ -133,9 +133,6 @@ export function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.mobileSafeFallback === "boolean") {
     base.mobileSafeFallback = value.mobileSafeFallback;
   }
-  if (typeof value.legacyTrackController === "boolean") {
-    base.legacyTrackController = value.legacyTrackController;
-  }
   if (typeof value.localRenderInterpolation === "boolean") {
     // Backward compatibility for old presets/imports.
     base.localMarbleRenderInterpolation = value.localRenderInterpolation;

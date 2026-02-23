@@ -836,18 +836,6 @@ export function HelloMarble() {
     const localRenderPrevMarbleQuat = new THREE.Quaternion();
     const localRenderCurrMarblePos = new THREE.Vector3();
     const localRenderCurrMarbleQuat = new THREE.Quaternion();
-    const boardPrevPos = new CANNON.Vec3(0, 0, 0);
-    boardPrevPos.copy(boardBody.position);
-    const boardPrevQuat = new THREE.Quaternion(
-      boardBody.quaternion.x,
-      boardBody.quaternion.y,
-      boardBody.quaternion.z,
-      boardBody.quaternion.w,
-    );
-    const boardNextQuat = new THREE.Quaternion();
-    const boardPrevQuatInv = new THREE.Quaternion();
-    const boardDeltaQuat = new THREE.Quaternion();
-    const boardAngularAxis = new THREE.Vector3();
     const boardUpWorld = new THREE.Vector3();
     const boardRightWorld = new THREE.Vector3();
     const boardForwardWorld = new THREE.Vector3();
@@ -1974,13 +1962,6 @@ export function HelloMarble() {
       refreshCurvedContainment();
       scene.add(track.group);
 
-      boardPrevPos.copy(boardBody.position);
-      boardPrevQuat.set(
-        boardBody.quaternion.x,
-        boardBody.quaternion.y,
-        boardBody.quaternion.z,
-        boardBody.quaternion.w,
-      );
       currentPitch = 0;
       currentRoll = 0;
       respawnMarble(false);
@@ -2331,7 +2312,6 @@ export function HelloMarble() {
     const updateTrackController = (
       currentTuning: TuningState,
       controllerDt: number,
-      useLegacyDeltaGuard: boolean,
     ): void => {
       track.group.quaternion.set(
         boardBody.quaternion.x,
@@ -2378,129 +2358,17 @@ export function HelloMarble() {
         pivotSmoothed.z - rotatedPivot.z,
       );
 
-      if (useLegacyDeltaGuard) {
-        if (controllerDt > 0.00001) {
-          const invDelta = 1 / controllerDt;
-          boardBody.velocity.set(
-            (boardPosition.x - boardPrevPos.x) * invDelta,
-            (boardPosition.y - boardPrevPos.y) * invDelta,
-            (boardPosition.z - boardPrevPos.z) * invDelta,
-          );
-
-          boardNextQuat.set(
-            qFinalCannon.x,
-            qFinalCannon.y,
-            qFinalCannon.z,
-            qFinalCannon.w,
-          );
-          boardPrevQuatInv.copy(boardPrevQuat).invert();
-          boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
-          const w = clamp(boardDeltaQuat.w, -1, 1);
-          let angle = 2 * Math.acos(w);
-          if (angle > Math.PI) {
-            angle -= 2 * Math.PI;
-          }
-          const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
-          if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
-            boardAngularAxis.set(
-              boardDeltaQuat.x / sinHalf,
-              boardDeltaQuat.y / sinHalf,
-              boardDeltaQuat.z / sinHalf,
-            );
-            const angularSpeed = angle * invDelta;
-            boardBody.angularVelocity.set(
-              boardAngularAxis.x * angularSpeed,
-              boardAngularAxis.y * angularSpeed,
-              boardAngularAxis.z * angularSpeed,
-            );
-          } else {
-            boardBody.angularVelocity.set(0, 0, 0);
-          }
-        } else {
-          boardBody.velocity.set(0, 0, 0);
-          boardBody.angularVelocity.set(0, 0, 0);
-          boardNextQuat.set(
-            qFinalCannon.x,
-            qFinalCannon.y,
-            qFinalCannon.z,
-            qFinalCannon.w,
-          );
-        }
-      } else {
-        const invDelta = 1 / controllerDt;
-        boardBody.velocity.set(
-          (boardPosition.x - boardPrevPos.x) * invDelta,
-          (boardPosition.y - boardPrevPos.y) * invDelta,
-          (boardPosition.z - boardPrevPos.z) * invDelta,
-        );
-
-        boardNextQuat.set(
-          qFinalCannon.x,
-          qFinalCannon.y,
-          qFinalCannon.z,
-          qFinalCannon.w,
-        );
-        boardPrevQuatInv.copy(boardPrevQuat).invert();
-        boardDeltaQuat.copy(boardNextQuat).multiply(boardPrevQuatInv).normalize();
-        const w = clamp(boardDeltaQuat.w, -1, 1);
-        let angle = 2 * Math.acos(w);
-        if (angle > Math.PI) {
-          angle -= 2 * Math.PI;
-        }
-        const sinHalf = Math.sqrt(Math.max(1 - w * w, 0));
-        if (sinHalf > 0.00001 && Math.abs(angle) > 0.00001) {
-          boardAngularAxis.set(
-            boardDeltaQuat.x / sinHalf,
-            boardDeltaQuat.y / sinHalf,
-            boardDeltaQuat.z / sinHalf,
-          );
-          const angularSpeed = angle * invDelta;
-          boardBody.angularVelocity.set(
-            boardAngularAxis.x * angularSpeed,
-            boardAngularAxis.y * angularSpeed,
-            boardAngularAxis.z * angularSpeed,
-          );
-        } else {
-          boardBody.angularVelocity.set(0, 0, 0);
-        }
-      }
+      // Zero board body velocities: the marble responds purely to gravity on
+      // the tilted surface (Super Monkey Ball model). Computing finite-difference
+      // velocity/angular-velocity for the kinematic board caused position-
+      // dependent spurious impulses that grew with distance along the track.
+      boardBody.velocity.set(0, 0, 0);
+      boardBody.angularVelocity.set(0, 0, 0);
 
       boardBody.quaternion.copy(qFinalCannon);
       boardBody.position.copy(boardPosition);
       boardBody.aabbNeedsUpdate = true;
       boardBody.updateAABB();
-      if (useLegacyDeltaGuard) {
-        track.group.position.set(boardPosition.x, boardPosition.y, boardPosition.z);
-      }
-      boardPrevPos.copy(boardPosition);
-      boardPrevQuat.copy(boardNextQuat);
-    };
-
-    const updateTrackControllerLegacy = (
-      delta: number,
-      currentTuning: TuningState,
-    ): void => {
-      updateTrackController(currentTuning, delta, true);
-      localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
-      localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
-      localRenderCurrBoardPos.set(
-        boardBody.position.x,
-        boardBody.position.y,
-        boardBody.position.z,
-      );
-      localRenderCurrBoardQuat.set(
-        boardBody.quaternion.x,
-        boardBody.quaternion.y,
-        boardBody.quaternion.z,
-        boardBody.quaternion.w,
-      );
-    };
-
-    const updateTrackControllerFixed = (
-      fixedDt: number,
-      currentTuning: TuningState,
-    ): void => {
-      updateTrackController(currentTuning, fixedDt, false);
     };
 
     let lastGravityG = Number.NaN;
@@ -2555,9 +2423,7 @@ export function HelloMarble() {
         movingObstacleContactMat.restitution = contactRestitution;
         lastMovingObstacleRestitution = contactRestitution;
       }
-      if (!currentTuning.legacyTrackController) {
-        updateTrackControllerFixed(fixedDt, currentTuning);
-      }
+      updateTrackController(currentTuning, fixedDt);
       track.updateMovingObstacles(fixedDt, boardBody.position, boardBody.quaternion);
 
       if (currentTuning.enableExtraDownforce) {
@@ -2796,11 +2662,6 @@ export function HelloMarble() {
         }
       }
 
-      const useLegacyTrackController = currentTuning.legacyTrackController;
-      if (useLegacyTrackController) {
-        updateTrackControllerLegacy(delta, currentTuning);
-      }
-
       accumulator += delta;
       const maxCatchupSteps = Math.max(
         1,
@@ -2809,10 +2670,8 @@ export function HelloMarble() {
       let physicsMs = 0;
       let simulatedSteps = 0;
       while (accumulator >= TIMESTEP && simulatedSteps < maxCatchupSteps) {
-        if (!useLegacyTrackController) {
-          localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
-          localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
-        }
+        localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
+        localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
         localRenderPrevMarblePos.copy(localRenderCurrMarblePos);
         localRenderPrevMarbleQuat.copy(localRenderCurrMarbleQuat);
         physicsMs += simulateFixedStep(nowMs, TIMESTEP);
@@ -4812,16 +4671,6 @@ export function HelloMarble() {
                 }
               />
               Mobile Safe Fallback (dynamic governor)
-            </label>
-            <label className="controlLabel controlLabelCheckbox">
-              <input
-                type="checkbox"
-                checked={tuning.legacyTrackController}
-                onChange={(event) =>
-                  updateTuning("legacyTrackController", event.target.checked)
-                }
-              />
-              Legacy Track Controller
             </label>
             <label className="controlLabel controlLabelCheckbox">
               <input

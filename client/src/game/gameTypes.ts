@@ -33,7 +33,6 @@ export type TuningState = {
   extraDownForce: number;
   renderScaleMobile: number;
   mobileSafeFallback: boolean;
-  legacyTrackController: boolean;
   localMarbleRenderInterpolation: boolean;
   localTrackRenderInterpolation: boolean;
   debugUpdateHzMobile: number;
