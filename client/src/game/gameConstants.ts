@@ -7,7 +7,7 @@ export const LOOK_HEIGHT = 1.2;
 export const LOOK_AHEAD = 16;
 export const TOPDOWN_HEIGHT = 16;
 export const TOPDOWN_Z_OFFSET = 2;
-export const BOARD_TILT_SMOOTH = 12;
+export const BOARD_TILT_SMOOTH = 20;
 export const PIVOT_SMOOTH = 10;
 export const TRACK_FLOOR_TOP_Y = 0.3;
 export const PENETRATION_EPSILON = 0.004;
@@ -37,7 +37,7 @@ export const MOBILE_SAFE_RENDER_SCALE_MAX = 1;
 export const MOBILE_RENDER_SCALE_MIN = 0.75;
 export const MOBILE_RENDER_SCALE_MAX = 2;
 
-export const TUNING_STORAGE_KEY = "get-tilted:v0.8.3.5:tuning";
+export const TUNING_STORAGE_KEY = "get-tilted:v0.8.3.8:tuning";
 export const BEST_TIME_STORAGE_KEY = "get-tilted:v0.3.8:best-time";
 export const DEV_JOIN_HOST_KEY = "get-tilted:v0.3.10.2:join-host";
 export const PLAYER_NAME_STORAGE_KEY = "get-tilted:v0.7.2.8:player-name";
@@ -59,13 +59,13 @@ export const DEFAULT_TUNING: TuningState = {
   gyroSensitivity: 1,
   maxSpeed: 20,
   maxTiltDeg: 14,
-  maxBoardAngVel: 5,
-  tiltFilterTau: 0.1,
-  linearDamping: 0.2,
-  angularDamping: 0.50,
+  maxBoardAngVel: 6,
+  tiltFilterTau: 0.05,
+  linearDamping: 0.08,
+  angularDamping: 0.1,
   cameraPreset: "chaseCentered",
   bounce: 0,
-  contactFriction: 0.84,
+  contactFriction: 0.1,
   contactRestitution: 0,
   invertTiltX: true,
   invertTiltZ: false,
