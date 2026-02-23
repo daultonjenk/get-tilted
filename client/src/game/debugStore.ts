@@ -34,6 +34,10 @@ export type MarbleDebug = {
   colliderPieceCount: number;
   primitiveShapeCount: number;
   exoticTrimeshPieceCount: number;
+  floorShapeCount: number;
+  wallShapeCount: number;
+  estimatedBoardWallShapeTestsPerStep: number;
+  boardWallCollisionFiltered: boolean;
   railClampCorrectionsPerSec: number;
 };
 
@@ -98,6 +102,10 @@ const DEFAULT_DEBUG: MarbleDebug = {
   colliderPieceCount: 0,
   primitiveShapeCount: 0,
   exoticTrimeshPieceCount: 0,
+  floorShapeCount: 0,
+  wallShapeCount: 0,
+  estimatedBoardWallShapeTestsPerStep: 0,
+  boardWallCollisionFiltered: false,
   railClampCorrectionsPerSec: 0,
 };
 

@@ -349,3 +349,22 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.3.13 update:
+- Added collision filtering in `client/src/game/HelloMarble.tsx` so `boardBody` (floor), `boardWallBody` (walls/roof), and obstacle bodies only collide with the marble body, preventing board-vs-wall kinematic narrowphase work.
+- Kept per-surface contact materials unchanged (`board` friction tuning on floor, `board-wall` friction `0`) to preserve rolling/gliding behavior while removing redundant body-pair checks.
+- Added diagnostics metrics for collision cost visibility:
+  - `floorShapeCount`
+  - `wallShapeCount`
+  - `estimatedBoardWallShapeTestsPerStep`
+  - `boardWallCollisionFiltered`
+- Wired new metrics through `createTrack` physics debug output, debug store state, and the diagnostics panel in `HelloMarble`.
+- Bumped app version to `0.8.3.13` in `client/src/buildInfo.ts`.
+- Synced Android wrapper versions to `0.8.3.13` (`versionCode 80313`) in:
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.

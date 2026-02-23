@@ -23,6 +23,9 @@ export type TrackPhysicsDebug = {
   colliderPieceCount: number;
   primitiveShapeCount: number;
   exoticTrimeshPieceCount: number;
+  floorShapeCount: number;
+  wallShapeCount: number;
+  estimatedBoardWallShapeTestsPerStep: number;
 };
 
 export type TrackBuildResult = {
@@ -1258,6 +1261,9 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
       colliderPieceCount,
       primitiveShapeCount: countBodyShapes([boardBody, boardWallBody]),
       exoticTrimeshPieceCount,
+      floorShapeCount: boardBody.shapes.length,
+      wallShapeCount: boardWallBody.shapes.length,
+      estimatedBoardWallShapeTestsPerStep: boardBody.shapes.length * boardWallBody.shapes.length,
     },
     updateMovingObstacles: () => {},
     setMovingObstacleMaterial: () => {},
@@ -2049,6 +2055,9 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       colliderPieceCount: 0,
       primitiveShapeCount: countBodyShapes([boardBody, boardWallBody, ...obstacleBodies]),
       exoticTrimeshPieceCount: 0,
+      floorShapeCount: boardBody.shapes.length,
+      wallShapeCount: boardWallBody.shapes.length,
+      estimatedBoardWallShapeTestsPerStep: boardBody.shapes.length * boardWallBody.shapes.length,
     },
     updateMovingObstacles,
     setMovingObstacleMaterial,

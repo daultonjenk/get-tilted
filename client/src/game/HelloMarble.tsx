@@ -142,6 +142,13 @@ const WALL_SQUEEZE_POP_CLEARANCE_Z = 0.16;
 const WALL_SQUEEZE_MIN_ESCAPE_FORWARD_SPEED = 2.6;
 const WALL_SQUEEZE_CONFIRM_FRAMES = 2;
 const MOVING_OBSTACLE_CONTACT_FRICTION = 0.02;
+const COLLISION_GROUP_MARBLE = 1 << 0;
+const COLLISION_GROUP_TRACK_FLOOR = 1 << 1;
+const COLLISION_GROUP_TRACK_WALL = 1 << 2;
+const COLLISION_GROUP_OBSTACLE = 1 << 3;
+const COLLISION_MASK_MARBLE =
+  COLLISION_GROUP_TRACK_FLOOR | COLLISION_GROUP_TRACK_WALL | COLLISION_GROUP_OBSTACLE;
+const COLLISION_MASK_TRACK = COLLISION_GROUP_MARBLE;
 type MenuScreen = "main" | "options" | "trackLab";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
@@ -704,6 +711,28 @@ export function HelloMarble() {
     }
     let boardWallBody = track.wallBody;
 
+    const applyTrackCollisionFiltering = (
+      floorBody: CANNON.Body,
+      wallBody: CANNON.Body,
+      obstacleBodies: CANNON.Body[],
+    ): void => {
+      floorBody.collisionFilterGroup = COLLISION_GROUP_TRACK_FLOOR;
+      floorBody.collisionFilterMask = COLLISION_MASK_TRACK;
+      wallBody.collisionFilterGroup = COLLISION_GROUP_TRACK_WALL;
+      wallBody.collisionFilterMask = COLLISION_MASK_TRACK;
+      for (const obstacleBody of obstacleBodies) {
+        obstacleBody.collisionFilterGroup = COLLISION_GROUP_OBSTACLE;
+        obstacleBody.collisionFilterMask = COLLISION_MASK_TRACK;
+      }
+    };
+
+    const isBoardWallCollisionFiltered = (
+      floorBody: CANNON.Body,
+      wallBody: CANNON.Body,
+    ): boolean =>
+      (floorBody.collisionFilterMask & wallBody.collisionFilterGroup) === 0 &&
+      (wallBody.collisionFilterMask & floorBody.collisionFilterGroup) === 0;
+
     const world = new CANNON.World();
     const solver = world.solver as unknown as {
       iterations: number;
@@ -712,6 +741,7 @@ export function HelloMarble() {
     solver.iterations = tuningRef.current.physicsSolverIterations;
     solver.tolerance = 1e-4;
     world.gravity.set(0, -tuningRef.current.gravityG, 0);
+    applyTrackCollisionFiltering(boardBody, boardWallBody, track.bodies.slice(2));
     world.addBody(boardBody);
 
     const boardMat = new CANNON.Material("board");
@@ -765,6 +795,8 @@ export function HelloMarble() {
       angularDamping: tuningRef.current.angularDamping,
       material: marbleMat,
     });
+    marbleBody.collisionFilterGroup = COLLISION_GROUP_MARBLE;
+    marbleBody.collisionFilterMask = COLLISION_MASK_MARBLE;
     const marbleBodyWithCcd = marbleBody as CANNON.Body & {
       ccdSpeedThreshold: number;
       ccdIterations: number;
@@ -894,6 +926,11 @@ export function HelloMarble() {
     let colliderPieceCount = track.physicsDebug.colliderPieceCount;
     let primitiveShapeCount = track.physicsDebug.primitiveShapeCount;
     let exoticTrimeshPieceCount = track.physicsDebug.exoticTrimeshPieceCount;
+    let floorShapeCount = track.physicsDebug.floorShapeCount;
+    let wallShapeCount = track.physicsDebug.wallShapeCount;
+    let estimatedBoardWallShapeTestsPerStep =
+      track.physicsDebug.estimatedBoardWallShapeTestsPerStep;
+    let boardWallCollisionFiltered = isBoardWallCollisionFiltered(boardBody, boardWallBody);
 
     const motionTiltRef: { current: TiltSample } = {
       current: { x: 0, y: 0, z: 0 },
@@ -1992,6 +2029,7 @@ export function HelloMarble() {
       boardWallBody = nextBoardWallBody;
       boardWallBody.material = boardWallMat;
       track.setMovingObstacleMaterial(movingObstacleMat);
+      applyTrackCollisionFiltering(boardBody, boardWallBody, track.bodies.slice(2));
       world.addBody(boardBody);
       world.addBody(boardWallBody);
       // bodies[0] = boardBody, bodies[1] = boardWallBody, bodies[2+] = obstacles
@@ -2002,6 +2040,11 @@ export function HelloMarble() {
       colliderPieceCount = track.physicsDebug.colliderPieceCount;
       primitiveShapeCount = track.physicsDebug.primitiveShapeCount;
       exoticTrimeshPieceCount = track.physicsDebug.exoticTrimeshPieceCount;
+      floorShapeCount = track.physicsDebug.floorShapeCount;
+      wallShapeCount = track.physicsDebug.wallShapeCount;
+      estimatedBoardWallShapeTestsPerStep =
+        track.physicsDebug.estimatedBoardWallShapeTestsPerStep;
+      boardWallCollisionFiltered = isBoardWallCollisionFiltered(boardBody, boardWallBody);
       refreshCurvedContainment();
       scene.add(track.group);
 
@@ -3168,6 +3211,10 @@ export function HelloMarble() {
           colliderPieceCount,
           primitiveShapeCount,
           exoticTrimeshPieceCount,
+          floorShapeCount,
+          wallShapeCount,
+          estimatedBoardWallShapeTestsPerStep,
+          boardWallCollisionFiltered,
           railClampCorrectionsPerSec: railClampCorrectionsPerSecEma,
         });
         debugStore.updateNet({
@@ -5259,6 +5306,12 @@ export function HelloMarble() {
             <p>Collider pieces: {debug.colliderPieceCount}</p>
             <p>Primitive shapes: {debug.primitiveShapeCount}</p>
             <p>Exotic Trimesh pieces: {debug.exoticTrimeshPieceCount}</p>
+            <p>Floor shapes: {debug.floorShapeCount}</p>
+            <p>Wall shapes: {debug.wallShapeCount}</p>
+            <p>
+              Est board-wall shape tests/step: {debug.estimatedBoardWallShapeTestsPerStep}
+            </p>
+            <p>Board-wall collision filtered: {debug.boardWallCollisionFiltered ? "yes" : "no"}</p>
             <p>Rail clamp corrections/sec: {debug.railClampCorrectionsPerSec.toFixed(2)}</p>
             <p>
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}
