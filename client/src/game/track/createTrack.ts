@@ -157,6 +157,13 @@ const BLUEPRINT_SET_PIECE_MIN_CLEARANCE_MULTIPLIER = 1.15;
 const BLUEPRINT_SET_PIECE_GATE_CLEARANCE_MULTIPLIER = 1.35;
 const BLUEPRINT_SET_PIECE_GATE_CLEARANCE_MAX_MULTIPLIER = 1.5;
 const BLUEPRINT_SET_PIECE_COUNT = 8;
+const BLUEPRINT_SET_PIECE_OBSTACLE_RATE = 0.75;
+const BLUEPRINT_SET_PIECE_MIN_LENGTH = 8;
+const BLUEPRINT_OBSTACLE_CORNER_RADIUS_SCALE = 0.22;
+const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MIN = 0.08;
+const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MAX = 0.32;
+const BLUEPRINT_OBSTACLE_CORNER_CURVE_SEGMENTS = 8;
+const BLUEPRINT_OBSTACLE_WALL_TOUCH_EPSILON = 0.03;
 
 // Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
@@ -635,20 +642,165 @@ function sampleBlueprintSweepPoseAtDistance(
   };
 }
 
-function addBlueprintSSetPieceObstacles(params: {
-  group: THREE.Group;
-  boardWallBody: CANNON.Body;
-  samples: BlueprintSweepSample[];
-  frames: BlueprintSweepFrame[];
-  material: THREE.Material;
-}): void {
-  const { group, boardWallBody, samples, frames, material } = params;
-  if (samples.length < 3 || frames.length !== samples.length) {
-    return;
+type RoundedObstacleCornerRadii = {
+  bottomLeft: number;
+  bottomRight: number;
+  topRight: number;
+  topLeft: number;
+};
+
+function normalizeRoundedRectRadii(
+  width: number,
+  depth: number,
+  radii: RoundedObstacleCornerRadii,
+): RoundedObstacleCornerRadii {
+  const maxRadius = Math.max(0, Math.min(width, depth) * 0.5 - 1e-4);
+  let bottomLeft = clamp(radii.bottomLeft, 0, maxRadius);
+  let bottomRight = clamp(radii.bottomRight, 0, maxRadius);
+  let topRight = clamp(radii.topRight, 0, maxRadius);
+  let topLeft = clamp(radii.topLeft, 0, maxRadius);
+
+  const scalePair = (a: number, b: number, maxSum: number): [number, number] => {
+    const sum = a + b;
+    if (sum <= maxSum || sum <= 1e-6) {
+      return [a, b];
+    }
+    const scale = maxSum / sum;
+    return [a * scale, b * scale];
+  };
+
+  [bottomLeft, bottomRight] = scalePair(bottomLeft, bottomRight, width);
+  [topLeft, topRight] = scalePair(topLeft, topRight, width);
+  [bottomLeft, topLeft] = scalePair(bottomLeft, topLeft, depth);
+  [bottomRight, topRight] = scalePair(bottomRight, topRight, depth);
+
+  return { bottomLeft, bottomRight, topRight, topLeft };
+}
+
+function createRoundedObstacleGeometry(
+  width: number,
+  height: number,
+  depth: number,
+  radii: RoundedObstacleCornerRadii,
+): THREE.ExtrudeGeometry {
+  const halfWidth = width * 0.5;
+  const halfDepth = depth * 0.5;
+  const normalized = normalizeRoundedRectRadii(width, depth, radii);
+
+  const shape = new THREE.Shape();
+  shape.moveTo(-halfWidth + normalized.bottomLeft, -halfDepth);
+  shape.lineTo(halfWidth - normalized.bottomRight, -halfDepth);
+  if (normalized.bottomRight > 0) {
+    shape.absarc(
+      halfWidth - normalized.bottomRight,
+      -halfDepth + normalized.bottomRight,
+      normalized.bottomRight,
+      -Math.PI / 2,
+      0,
+      false,
+    );
+  } else {
+    shape.lineTo(halfWidth, -halfDepth);
+  }
+  shape.lineTo(halfWidth, halfDepth - normalized.topRight);
+  if (normalized.topRight > 0) {
+    shape.absarc(
+      halfWidth - normalized.topRight,
+      halfDepth - normalized.topRight,
+      normalized.topRight,
+      0,
+      Math.PI / 2,
+      false,
+    );
+  } else {
+    shape.lineTo(halfWidth, halfDepth);
+  }
+  shape.lineTo(-halfWidth + normalized.topLeft, halfDepth);
+  if (normalized.topLeft > 0) {
+    shape.absarc(
+      -halfWidth + normalized.topLeft,
+      halfDepth - normalized.topLeft,
+      normalized.topLeft,
+      Math.PI / 2,
+      Math.PI,
+      false,
+    );
+  } else {
+    shape.lineTo(-halfWidth, halfDepth);
+  }
+  shape.lineTo(-halfWidth, -halfDepth + normalized.bottomLeft);
+  if (normalized.bottomLeft > 0) {
+    shape.absarc(
+      -halfWidth + normalized.bottomLeft,
+      -halfDepth + normalized.bottomLeft,
+      normalized.bottomLeft,
+      Math.PI,
+      Math.PI * 1.5,
+      false,
+    );
+  } else {
+    shape.lineTo(-halfWidth, -halfDepth);
+  }
+  shape.closePath();
+
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: height,
+    bevelEnabled: false,
+    curveSegments: BLUEPRINT_OBSTACLE_CORNER_CURVE_SEGMENTS,
+  });
+  geometry.rotateX(Math.PI / 2);
+  geometry.translate(0, height * 0.5, 0);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function selectBlueprintObstaclePieceIds(
+  placements: TrackBlueprint["placements"],
+  seed: string,
+): Set<string> {
+  const eligible = placements
+    .filter(
+      (placement) =>
+        (placement.kind === "straight" || placement.kind === "arc90") &&
+        !placement.isCompensatingTurn &&
+        placement.points.length >= 2,
+    )
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  if (eligible.length === 0) {
+    return new Set();
   }
 
-  const lookup = buildBlueprintSweepDistanceLookup(samples);
-  if (lookup.totalLength < 24) {
+  const targetCount = Math.max(
+    0,
+    Math.min(eligible.length, Math.round(eligible.length * BLUEPRINT_SET_PIECE_OBSTACLE_RATE)),
+  );
+  if (targetCount === 0) {
+    return new Set();
+  }
+
+  const shuffled = [...eligible];
+  const random = makeSeededRandom(`${seed}|blueprint-piece-obstacles-v1`);
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    const swap = shuffled[i]!;
+    shuffled[i] = shuffled[j]!;
+    shuffled[j] = swap;
+  }
+
+  return new Set(shuffled.slice(0, targetCount).map((placement) => placement.id));
+}
+
+function addBlueprintPieceSetObstacles(params: {
+  group: THREE.Group;
+  boardWallBody: CANNON.Body;
+  placements: TrackBlueprint["placements"];
+  seed: string;
+  material: THREE.Material;
+}): void {
+  const { group, boardWallBody, placements, seed, material } = params;
+  const selectedPieceIds = selectBlueprintObstaclePieceIds(placements, seed);
+  if (selectedPieceIds.size === 0) {
     return;
   }
 
@@ -663,14 +815,6 @@ function addBlueprintSSetPieceObstacles(params: {
   const verticalOffset = obstacleHeight * 0.5 + 0.015;
   const innerInset = RAIL_INSET + RAIL_THICK + 0.15;
 
-  const startDistance = clamp(6, 2, Math.max(2, lookup.totalLength * 0.2));
-  const endDistance = Math.min(startDistance + 34, lookup.totalLength - 8);
-  const setPieceSpan = endDistance - startDistance;
-  if (setPieceSpan < 18) {
-    return;
-  }
-  const spacing = setPieceSpan / (BLUEPRINT_SET_PIECE_COUNT - 1);
-
   const basis = new THREE.Matrix4();
   const rotation = new THREE.Euler(0, 0, 0, "XYZ");
   const localQuat = new CANNON.Quaternion();
@@ -680,6 +824,8 @@ function addBlueprintSSetPieceObstacles(params: {
     centerX: number,
     width: number,
     depth = obstacleDepth,
+    flushLeft = false,
+    flushRight = false,
   ): void => {
     if (width <= 0.2 || depth <= 0.2) {
       return;
@@ -691,93 +837,157 @@ function addBlueprintSSetPieceObstacles(params: {
       .clone()
       .addScaledVector(pose.right, centerX)
       .addScaledVector(pose.up, verticalOffset);
-    addVisualPart(group, {
-      size: new THREE.Vector3(width, obstacleHeight, depth),
-      position: center,
-      rotation,
-      material,
-      outline: { color: 0x3d0b0b, scale: 1.002 },
+
+    const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+    const leftEdge = centerX - width * 0.5;
+    const rightEdge = centerX + width * 0.5;
+    const touchingLeftWall = flushLeft || leftEdge <= -innerHalf + BLUEPRINT_OBSTACLE_WALL_TOUCH_EPSILON;
+    const touchingRightWall =
+      flushRight || rightEdge >= innerHalf - BLUEPRINT_OBSTACLE_WALL_TOUCH_EPSILON;
+    const cornerRadius = clamp(
+      Math.min(width, depth) * BLUEPRINT_OBSTACLE_CORNER_RADIUS_SCALE,
+      BLUEPRINT_OBSTACLE_CORNER_RADIUS_MIN,
+      BLUEPRINT_OBSTACLE_CORNER_RADIUS_MAX,
+    );
+    const geometry = createRoundedObstacleGeometry(width, obstacleHeight, depth, {
+      bottomLeft: touchingLeftWall ? 0 : cornerRadius,
+      topLeft: touchingLeftWall ? 0 : cornerRadius,
+      bottomRight: touchingRightWall ? 0 : cornerRadius,
+      topRight: touchingRightWall ? 0 : cornerRadius,
     });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(center);
+    mesh.rotation.set(rotation.x, rotation.y, rotation.z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    const edgeLines = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({ color: 0x3d0b0b }),
+    );
+    edgeLines.scale.set(1.002, 1.002, 1.002);
+    mesh.add(edgeLines);
+    group.add(mesh);
+
     localQuat.set(quat.x, quat.y, quat.z, quat.w);
     boardWallBody.addShape(
-      new CANNON.Box(
-        new CANNON.Vec3(width * 0.5, obstacleHeight * 0.5, depth * 0.5),
-      ),
+      geometryToTrimesh(geometry),
       new CANNON.Vec3(center.x, center.y, center.z),
       localQuat,
     );
   };
 
-  const withPose = (distance: number, handler: (pose: BlueprintSweepPose) => void): void => {
-    const pose = sampleBlueprintSweepPoseAtDistance(samples, frames, lookup, distance);
-    if (pose) {
-      handler(pose);
+  for (const placement of placements) {
+    if (!selectedPieceIds.has(placement.id)) {
+      continue;
     }
-  };
+    if (placement.kind !== "straight" && placement.kind !== "arc90") {
+      continue;
+    }
 
-  const placeCenteredGate = (distance: number, gap: number, gapOffset = 0): void => {
-    withPose(distance, (pose) => {
-      const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
-      const traversableWidth = innerHalf * 2;
-      const clampedGap = clamp(gap, minGap, Math.max(minGap, traversableWidth - 0.8));
-      const minOffset = -innerHalf + clampedGap * 0.5 + 0.22;
-      const maxOffset = innerHalf - clampedGap * 0.5 - 0.22;
-      const safeOffset = clamp(gapOffset, minOffset, maxOffset);
-      const leftInnerX = safeOffset - clampedGap * 0.5;
-      const rightInnerX = safeOffset + clampedGap * 0.5;
-      const leftWidth = leftInnerX + innerHalf;
-      const rightWidth = innerHalf - rightInnerX;
-      if (leftWidth > 0.28) {
-        addObstacleAtPose(pose, -innerHalf + leftWidth * 0.5, leftWidth);
-      }
-      if (rightWidth > 0.28) {
-        addObstacleAtPose(pose, rightInnerX + rightWidth * 0.5, rightWidth);
-      }
+    const pieceSamples = buildBlueprintSweepSamples([placement], BLUEPRINT_RENDER_SAMPLE_STEP);
+    const pieceFrames = buildBlueprintSweepFrames(pieceSamples);
+    if (pieceSamples.length < 3 || pieceFrames.length !== pieceSamples.length) {
+      continue;
+    }
+    const lookup = buildBlueprintSweepDistanceLookup(pieceSamples);
+    if (lookup.totalLength < BLUEPRINT_SET_PIECE_MIN_LENGTH) {
+      continue;
+    }
+
+    const edgePadding = clamp(lookup.totalLength * 0.14, 1.1, 2.2);
+    const startDistance = edgePadding;
+    const endDistance = lookup.totalLength - edgePadding;
+    const setPieceSpan = endDistance - startDistance;
+    if (setPieceSpan < 5.4) {
+      continue;
+    }
+    const spacing = setPieceSpan / (BLUEPRINT_SET_PIECE_COUNT - 1);
+    const distances = Array.from({ length: BLUEPRINT_SET_PIECE_COUNT }, (_, index) => {
+      return startDistance + spacing * index;
     });
-  };
 
-  const placeWallJut = (distance: number, side: -1 | 1, protrusion: number): void => {
-    withPose(distance, (pose) => {
-      const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
-      const maxProtrusion = Math.max(0.8, innerHalf * 2 - minGap - 0.45);
-      const width = clamp(protrusion, 0.75, maxProtrusion);
-      if (side < 0) {
-        const minX = -innerHalf;
-        addObstacleAtPose(pose, minX + width * 0.5, width);
-      } else {
-        const maxX = innerHalf;
-        addObstacleAtPose(pose, maxX - width * 0.5, width);
+    const withPose = (distance: number, handler: (pose: BlueprintSweepPose) => void): void => {
+      const pose = sampleBlueprintSweepPoseAtDistance(pieceSamples, pieceFrames, lookup, distance);
+      if (pose) {
+        handler(pose);
       }
-    });
-  };
+    };
 
-  const placeMiddleBlock = (distance: number, width: number, offset = 0): void => {
-    withPose(distance, (pose) => {
-      const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
-      const maxWidth = Math.max(0.8, innerHalf * 2 - minGap * 2);
-      const clampedWidth = clamp(width, 0.75, maxWidth);
-      const half = clampedWidth * 0.5;
-      const minCenter = -innerHalf + minGap + half;
-      const maxCenter = innerHalf - minGap - half;
-      if (maxCenter <= minCenter) {
-        return;
-      }
-      addObstacleAtPose(pose, clamp(offset, minCenter, maxCenter), clampedWidth);
-    });
-  };
+    const placeCenteredGate = (distance: number, gap: number, gapOffset = 0): void => {
+      withPose(distance, (pose) => {
+        const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+        const traversableWidth = innerHalf * 2;
+        const clampedGap = clamp(gap, minGap, Math.max(minGap, traversableWidth - 0.8));
+        const minOffset = -innerHalf + clampedGap * 0.5 + 0.22;
+        const maxOffset = innerHalf - clampedGap * 0.5 - 0.22;
+        const safeOffset = clamp(gapOffset, minOffset, maxOffset);
+        const leftInnerX = safeOffset - clampedGap * 0.5;
+        const rightInnerX = safeOffset + clampedGap * 0.5;
+        const leftWidth = leftInnerX + innerHalf;
+        const rightWidth = innerHalf - rightInnerX;
+        if (leftWidth > 0.28) {
+          addObstacleAtPose(pose, -innerHalf + leftWidth * 0.5, leftWidth, obstacleDepth, true, false);
+        }
+        if (rightWidth > 0.28) {
+          addObstacleAtPose(pose, rightInnerX + rightWidth * 0.5, rightWidth, obstacleDepth, false, true);
+        }
+      });
+    };
 
-  const distances = Array.from({ length: BLUEPRINT_SET_PIECE_COUNT }, (_, index) => {
-    return startDistance + spacing * index;
-  });
+    const placeWallJut = (distance: number, side: -1 | 1, protrusion: number): void => {
+      withPose(distance, (pose) => {
+        const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+        const maxProtrusion = Math.max(0.8, innerHalf * 2 - minGap - 0.45);
+        const width = clamp(protrusion, 0.75, maxProtrusion);
+        if (side < 0) {
+          const minX = -innerHalf;
+          addObstacleAtPose(pose, minX + width * 0.5, width, obstacleDepth, true, false);
+        } else {
+          const maxX = innerHalf;
+          addObstacleAtPose(pose, maxX - width * 0.5, width, obstacleDepth, false, true);
+        }
+      });
+    };
 
-  placeCenteredGate(distances[0]!, gateGap);
-  placeWallJut(distances[1]!, -1, TRACK_W * 0.32);
-  placeMiddleBlock(distances[2]!, TRACK_W * 0.28);
-  placeWallJut(distances[3]!, 1, TRACK_W * 0.34);
-  placeCenteredGate(distances[4]!, gateGap + 0.08, -0.85);
-  placeWallJut(distances[5]!, -1, TRACK_W * 0.26);
-  placeMiddleBlock(distances[6]!, TRACK_W * 0.24, 0.78);
-  placeCenteredGate(distances[7]!, gateGap);
+    const placeMiddleBlock = (distance: number, width: number, offset = 0): void => {
+      withPose(distance, (pose) => {
+        const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+        const maxWidth = Math.max(0.8, innerHalf * 2 - minGap * 2);
+        const clampedWidth = clamp(width, 0.75, maxWidth);
+        const half = clampedWidth * 0.5;
+        const minCenter = -innerHalf + minGap + half;
+        const maxCenter = innerHalf - minGap - half;
+        if (maxCenter <= minCenter) {
+          return;
+        }
+        addObstacleAtPose(pose, clamp(offset, minCenter, maxCenter), clampedWidth);
+      });
+    };
+
+    if (placement.kind === "straight") {
+      placeCenteredGate(distances[0]!, gateGap);
+      placeWallJut(distances[1]!, -1, TRACK_W * 0.31);
+      placeMiddleBlock(distances[2]!, TRACK_W * 0.26, TRACK_W * 0.17);
+      placeWallJut(distances[3]!, 1, TRACK_W * 0.31);
+      placeMiddleBlock(distances[4]!, TRACK_W * 0.25, -TRACK_W * 0.16);
+      placeCenteredGate(distances[5]!, gateGap + 0.08, -0.65);
+      placeWallJut(distances[6]!, -1, TRACK_W * 0.24);
+      placeCenteredGate(distances[7]!, gateGap + 0.02);
+      continue;
+    }
+
+    const turnSign = placement.turnDeg < 0 ? -1 : 1;
+    const innerSide: -1 | 1 = turnSign > 0 ? -1 : 1;
+    const outerSide: -1 | 1 = innerSide < 0 ? 1 : -1;
+    placeCenteredGate(distances[0]!, gateGap + 0.12, outerSide * 0.45);
+    placeWallJut(distances[1]!, innerSide, TRACK_W * 0.25);
+    placeMiddleBlock(distances[2]!, TRACK_W * 0.24, outerSide * TRACK_W * 0.18);
+    placeWallJut(distances[3]!, outerSide, TRACK_W * 0.29);
+    placeCenteredGate(distances[4]!, gateGap + 0.06, outerSide * 0.32);
+    placeWallJut(distances[5]!, innerSide, TRACK_W * 0.22);
+    placeMiddleBlock(distances[6]!, TRACK_W * 0.21, innerSide * TRACK_W * 0.15);
+    placeCenteredGate(distances[7]!, gateGap + 0.1, -outerSide * 0.4);
+  }
 }
 
 function toSweepWorldPoint(
@@ -1420,11 +1630,11 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     uvScale: [Math.max(startBackWallWidth * 0.3, 1), Math.max(RAIL_H, 1)],
   });
 
-  addBlueprintSSetPieceObstacles({
+  addBlueprintPieceSetObstacles({
     group,
     boardWallBody,
-    samples,
-    frames,
+    placements: sourcePlacements,
+    seed: blueprint.seed,
     material: setPieceObstacleMaterial,
   });
 

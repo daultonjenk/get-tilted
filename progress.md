@@ -463,3 +463,22 @@ v0.8.4.0 update:
   - `client/src/buildInfo.ts`
   - `android/twa-manifest.json`
   - `android/app/build.gradle`
+
+v0.8.5.0 update:
+- Replaced the single whole-path S-set-piece obstacle pass with per-piece obstacle generation in `client/src/game/track/createTrack.ts`.
+- Added deterministic piece selection at a 75% obstacle / 25% non-obstacle rate for eligible modular pieces (`straight` and `arc90`, excluding compensating turn pairs), seeded from blueprint seed.
+- Added two piece-local obstacle layouts:
+  - straight pieces: alternating centered gates, wall-jut blockers, and off-center middle blockers,
+  - 90-degree arc pieces: curvature-aware alternating inner/outer wall juts, offset center blockers, and shifted gates.
+- Implemented rounded obstacle geometry/collision for set-piece blockers using extruded rounded-rectangle trimeshes, so marble collision matches visuals.
+- Added wall-contact-aware corner behavior so obstacle sides touching a rail remain flush (no rounding on the touching side).
+- Bumped version to `0.8.5.0` and synced Android wrapper versions to match:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80500`)
+  - `android/app/build.gradle` (`versionCode` `80500`)
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
+- Browser smoke capture from local run saved at `output/web-game/shot-0.png` confirms obstacle fields render with mixed wall-jut and center blockers on modular pieces and app boots without runtime crash.
