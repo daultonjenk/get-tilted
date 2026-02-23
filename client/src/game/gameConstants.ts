@@ -65,7 +65,7 @@ export const DEFAULT_TUNING: TuningState = {
   angularDamping: 0.1,
   cameraPreset: "chaseCentered",
   bounce: 0,
-  contactFriction: 0.1,
+  contactFriction: 0,
   contactRestitution: 0,
   invertTiltX: true,
   invertTiltZ: false,
