@@ -758,6 +758,40 @@ export function HelloMarble() {
     marbleBodyWithCcd.ccdIterations = tuningRef.current.ccdIterations;
     world.addBody(marbleBody);
 
+    // Per-surface friction: floor retains contactFriction for rolling feel; walls get zero
+    // friction so the marble slides freely along them as a guide rail.
+    // We cancel friction impulses on wall contacts (normal mostly perpendicular to board up)
+    // by restoring the pre-step tangential velocity after each physics step.
+    const preStepMarbleVel = new CANNON.Vec3();
+    const wallFrictionBoardUp = new CANNON.Vec3();
+    world.addEventListener("preStep", () => {
+      preStepMarbleVel.copy(marbleBody.velocity);
+    });
+    world.addEventListener("postStep", () => {
+      wallFrictionBoardUp.set(0, 1, 0);
+      boardBody.quaternion.vmult(wallFrictionBoardUp, wallFrictionBoardUp);
+      for (const contact of world.contacts) {
+        const isMarbleBoard =
+          (contact.bi === marbleBody && contact.bj === boardBody) ||
+          (contact.bi === boardBody && contact.bj === marbleBody);
+        if (!isMarbleBoard) continue;
+        // Derive normal pointing from board surface toward marble.
+        let nx = contact.ni.x, ny = contact.ni.y, nz = contact.ni.z;
+        if (contact.bi === marbleBody) { nx = -nx; ny = -ny; nz = -nz; }
+        // Skip floor contacts (normal mostly aligned with board up).
+        const upDot = Math.abs(nx * wallFrictionBoardUp.x + ny * wallFrictionBoardUp.y + nz * wallFrictionBoardUp.z);
+        if (upDot > 0.5) continue;
+        // Wall contact: keep post-step normal velocity (collision resolution) but restore
+        // pre-step tangential velocity (cancel friction impulse along the wall surface).
+        const preN = preStepMarbleVel.x * nx + preStepMarbleVel.y * ny + preStepMarbleVel.z * nz;
+        const curN = marbleBody.velocity.x * nx + marbleBody.velocity.y * ny + marbleBody.velocity.z * nz;
+        const delta = curN - preN;
+        marbleBody.velocity.x = preStepMarbleVel.x + nx * delta;
+        marbleBody.velocity.y = preStepMarbleVel.y + ny * delta;
+        marbleBody.velocity.z = preStepMarbleVel.z + nz * delta;
+      }
+    });
+
     const marbleSegments = 32;
     const ghostSegments = 24;
     const textureLoader = new THREE.TextureLoader();
@@ -2806,7 +2840,7 @@ export function HelloMarble() {
       boardPosThree.copy(track.group.position);
       boardQuatThree.copy(track.group.quaternion);
       ghostTrackUp.set(0, 1, 0).applyQuaternion(boardQuatThree).normalize();
-      marbleShadowMesh.position.copy(marbleMesh.position).addScaledVector(ghostTrackUp, -(marbleRadius - 0.01));
+      marbleShadowMesh.position.copy(marbleMesh.position).addScaledVector(ghostTrackUp, -(marbleRadius - 0.05));
       marbleShadowMesh.quaternion.setFromUnitVectors(shadowCircleNormal, ghostTrackUp);
 
       let extrapolatingPlayers = 0;
@@ -3013,15 +3047,15 @@ export function HelloMarble() {
         }
         case "broadcast": {
           cameraTarget.set(
-            marbleMesh.position.x + 6 * sideSign * zoomDistanceScale,
-            18 + heightBias,
+            marbleMesh.position.x,
+            12 + heightBias,
             marbleMesh.position.z - 12 * zoomDistanceScale,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 18 + heightBias;
+          camera.position.y = 12 + heightBias;
           lookTarget.set(
-            marbleMesh.position.x + sideSign * zoomDistanceScale,
-            heightBias * 0.12,
+            marbleMesh.position.x,
+            LOOK_HEIGHT + heightBias * 0.15,
             marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias,
           );
           break;
