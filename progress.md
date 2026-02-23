@@ -550,3 +550,19 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.5.4 update:
+- Disabled automatic modular obstacle generation by default for blueprint tracks:
+  - obstacle authoring pass in `createTrackFromBlueprint` is now opt-in (`enableAutomaticObstacles`),
+  - default runtime behavior now spawns only non-obstacle straight and non-obstacle 90-degree bend pieces.
+- Removed the Test Track-specific automatic obstacle override so Test Track no longer injects obstacle pieces automatically.
+- Left obstacle plumbing in place for future manual/explicit obstacle-piece work, but no automatic obstacle placement runs at this time.
+- Bumped version to `0.8.5.4` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80504`)
+  - `android/app/build.gradle` (`versionCode` `80504`)
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.

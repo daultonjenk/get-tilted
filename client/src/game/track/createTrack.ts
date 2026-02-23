@@ -9,6 +9,7 @@ export type CreateTrackOptions = {
   blueprint?: TrackBlueprint;
   blueprintObstacleSettings?: {
     safeStartStraightCount?: number;
+    enableAutomaticObstacles?: boolean;
   };
 };
 
@@ -1649,14 +1650,17 @@ function createTrackFromBlueprint(
     uvScale: [Math.max(startBackWallWidth * 0.3, 1), Math.max(RAIL_H, 1)],
   });
 
-  addBlueprintPieceSetObstacles({
-    group,
-    boardWallBody,
-    placements: sourcePlacements,
-    seed: blueprint.seed,
-    material: setPieceObstacleMaterial,
-    safeStartStraightCount: obstacleSettings?.safeStartStraightCount,
-  });
+  const enableAutomaticObstacles = obstacleSettings?.enableAutomaticObstacles ?? false;
+  if (enableAutomaticObstacles) {
+    addBlueprintPieceSetObstacles({
+      group,
+      boardWallBody,
+      placements: sourcePlacements,
+      seed: blueprint.seed,
+      material: setPieceObstacleMaterial,
+      safeStartStraightCount: obstacleSettings?.safeStartStraightCount,
+    });
+  }
 
   let lowestFloorY = Number.POSITIVE_INFINITY;
   let minTrackX = Number.POSITIVE_INFINITY;

@@ -252,7 +252,6 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
   return {
     seed,
     blueprint,
-    blueprintObstacleSettings: isTestTrack ? { safeStartStraightCount: 1 } : undefined,
   };
 }
 
