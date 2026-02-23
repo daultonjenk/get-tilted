@@ -75,6 +75,8 @@ export type BuildTrackBlueprintOptions = {
   enableBranchPieces?: boolean;
   maxHeadingDriftDeg?: number;
   enforceBendPairs?: boolean;
+  forcedMainPieceKinds?: TrackPieceKind[];
+  disableStarterSequence?: boolean;
 };
 
 type LaneCursor = {
@@ -696,6 +698,24 @@ function buildStarterSequence(
   return sequence.slice(0, Math.min(sequence.length, pieceCount));
 }
 
+function resolveForcedMainPiece(
+  kind: TrackPieceKind,
+  index: number,
+  catalog: TrackPieceTemplate[],
+): TrackPieceTemplate | null {
+  if (kind === "straight") {
+    return catalog.find((piece) => piece.kind === "straight") ?? fallbackStraightPiece();
+  }
+  if (kind === "arc90") {
+    const direction: "left" | "right" = index % 2 === 0 ? "left" : "right";
+    return (
+      catalog.find((piece) => piece.kind === "arc90" && piece.turnDirection === direction) ??
+      fallbackArcPiece(direction)
+    );
+  }
+  return null;
+}
+
 export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackBlueprint {
   const seed = sanitizeTrackSeed(options.config.seed);
   const pieceCount = sanitizeTrackPieceCount(options.config.pieceCount);
@@ -707,6 +727,7 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
     45,
   );
   const enforceBendPairs = options.enforceBendPairs ?? true;
+  const disableStarterSequence = options.disableStarterSequence ?? false;
 
   const catalog = options.includeCustomPieces
     ? [...BUILTIN_TRACK_PIECES, ...options.customPieces]
@@ -719,6 +740,9 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
     );
 
   const random = makeSeededRandom(seed);
+  const forcedKinds = (options.forcedMainPieceKinds ?? [])
+    .map((kind) => normalizeTrackPieceKind(kind))
+    .filter((kind): kind is TrackPieceKind => ENABLED_RUNTIME_KINDS.has(kind));
   const placements: TrackPiecePlacement[] = [];
   const branchNodes: TrackBranchNode[] = [];
 
@@ -739,10 +763,14 @@ export function buildTrackBlueprint(options: BuildTrackBlueprintOptions): TrackB
   let placementSeq = 1;
   let branchSeq = 1;
   let bendPairSeq = 1;
-  const starterSequence = buildStarterSequence(sanitizedCatalog, pieceCount);
+  const starterSequence = disableStarterSequence
+    ? []
+    : buildStarterSequence(sanitizedCatalog, pieceCount);
 
   for (let i = 0; i < pieceCount; i += 1) {
-    const forcedStarterPiece = starterSequence[i] ?? null;
+    const forcedCatalogPiece =
+      forcedKinds[i] != null ? resolveForcedMainPiece(forcedKinds[i]!, i, sanitizedCatalog) : null;
+    const forcedStarterPiece = forcedCatalogPiece ?? starterSequence[i] ?? null;
     const picked =
       forcedStarterPiece ??
       resolvePieceForStep(

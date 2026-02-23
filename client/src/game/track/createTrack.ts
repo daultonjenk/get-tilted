@@ -7,6 +7,9 @@ import type { TrackBlueprint } from "./modularTrack";
 export type CreateTrackOptions = {
   seed?: string;
   blueprint?: TrackBlueprint;
+  blueprintObstacleSettings?: {
+    safeStartStraightCount?: number;
+  };
 };
 
 export type TrackContainmentSample = {
@@ -759,6 +762,7 @@ function createRoundedObstacleGeometry(
 function selectBlueprintObstaclePieceIds(
   placements: TrackBlueprint["placements"],
   seed: string,
+  safeStartStraightCount: number,
 ): Set<string> {
   const eligible = placements
     .filter(
@@ -777,7 +781,7 @@ function selectBlueprintObstaclePieceIds(
   const spawnSafetySource = mainLaneEligible.length > 0 ? mainLaneEligible : eligible;
   const protectedStartIds = new Set(
     spawnSafetySource
-      .slice(0, BLUEPRINT_SET_PIECE_SAFE_START_MAIN_COUNT)
+      .slice(0, safeStartStraightCount)
       .map((placement) => placement.id),
   );
   const selectionPool = eligible.filter((placement) => !protectedStartIds.has(placement.id));
@@ -814,9 +818,18 @@ function addBlueprintPieceSetObstacles(params: {
   placements: TrackBlueprint["placements"];
   seed: string;
   material: THREE.Material;
+  safeStartStraightCount?: number;
 }): void {
   const { group, boardWallBody, placements, seed, material } = params;
-  const selectedPieceIds = selectBlueprintObstaclePieceIds(placements, seed);
+  const safeStartStraightCount = Math.max(
+    0,
+    Math.floor(params.safeStartStraightCount ?? BLUEPRINT_SET_PIECE_SAFE_START_MAIN_COUNT),
+  );
+  const selectedPieceIds = selectBlueprintObstaclePieceIds(
+    placements,
+    seed,
+    safeStartStraightCount,
+  );
   if (selectedPieceIds.size === 0) {
     return;
   }
@@ -1366,7 +1379,10 @@ function addBlueprintPrimitiveColliders(
   };
 }
 
-function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
+function createTrackFromBlueprint(
+  blueprint: TrackBlueprint,
+  obstacleSettings?: CreateTrackOptions["blueprintObstacleSettings"],
+): TrackBuildResult {
   const group = new THREE.Group();
   group.name = "track";
 
@@ -1639,6 +1655,7 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
     placements: sourcePlacements,
     seed: blueprint.seed,
     material: setPieceObstacleMaterial,
+    safeStartStraightCount: obstacleSettings?.safeStartStraightCount,
   });
 
   let lowestFloorY = Number.POSITIVE_INFINITY;
@@ -1752,7 +1769,7 @@ function createTrackFromBlueprint(blueprint: TrackBlueprint): TrackBuildResult {
 
 export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   if (opts?.blueprint) {
-    return createTrackFromBlueprint(opts.blueprint);
+    return createTrackFromBlueprint(opts.blueprint, opts.blueprintObstacleSettings);
   }
 
   const obstacleSeed = opts?.seed ?? DEFAULT_OBSTACLE_SEED;

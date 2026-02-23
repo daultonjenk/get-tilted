@@ -528,3 +528,25 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.5.3 update:
+- Added a dedicated Test Track flow from the main menu:
+  - replaced the `Track Lab` menu button with a new `Test Track` button that launches directly into a deterministic test layout.
+- Added a new solo-like game mode (`testTrack`) in gameplay state handling so countdown/start/unfreeze/result/debug behavior matches solo races.
+- Implemented deterministic test layout generation support:
+  - extended modular blueprint generation to accept forced piece kinds and optional starter-sequence disable,
+  - Test Track now forces a two-piece straight sequence.
+- Added per-blueprint obstacle spawn-safety override:
+  - normal tracks keep safe-start protection at 2 pieces,
+  - Test Track uses 1 safe straight piece, then the next straight piece is the obstacle set piece.
+- Kept the obstacle piece style locked to the single `custom-obstacle-S` pattern and straight-only obstacle selection, so bends stay non-obstacle.
+- Kept the zoomed-out camera baseline from `v0.8.5.2` (default zoom `0.7`) and the expanded zoom range (`0.5..1.4`).
+- Bumped version to `0.8.5.3` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80503`)
+  - `android/app/build.gradle` (`versionCode` `80503`)
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.

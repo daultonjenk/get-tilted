@@ -160,12 +160,14 @@ const CONTACT_SHADOW_SCALE_RANGE = 0.26;
 type MenuScreen = "main" | "options" | "trackLab";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
+type TrackLayoutPreset = "default" | "testTrack";
 
 type RuntimeTrackConfig = {
   seed: string;
   pieceCount: number;
   catalogMode: TrackCatalogMode;
   customPieces: TrackPieceTemplate[];
+  layoutPreset: TrackLayoutPreset;
 };
 
 type RuntimeContainmentSample = {
@@ -234,7 +236,8 @@ function toTrackDraft(piece: TrackPieceTemplate): TrackPieceDraft {
 
 function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOptions {
   const seed = sanitizeTrackSeed(config.seed);
-  const pieceCount = sanitizeTrackPieceCount(config.pieceCount);
+  const isTestTrack = config.layoutPreset === "testTrack";
+  const pieceCount = isTestTrack ? 2 : sanitizeTrackPieceCount(config.pieceCount);
   const blueprint = buildTrackBlueprint({
     config: { seed, pieceCount },
     customPieces: sanitizeTrackPieceLibrary(config.customPieces),
@@ -243,10 +246,13 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
     enableBranchPieces: false,
     maxHeadingDriftDeg: 18,
     enforceBendPairs: true,
+    forcedMainPieceKinds: isTestTrack ? ["straight", "straight"] : undefined,
+    disableStarterSequence: isTestTrack,
   });
   return {
     seed,
     blueprint,
+    blueprintObstacleSettings: isTestTrack ? { safeStartStraightCount: 1 } : undefined,
   };
 }
 
@@ -255,12 +261,14 @@ function buildTrackConfig(
   pieceCount: number,
   catalogMode: TrackCatalogMode,
   customPieces: TrackPieceTemplate[],
+  layoutPreset: TrackLayoutPreset = "default",
 ): RuntimeTrackConfig {
   return {
     seed: sanitizeTrackSeed(seed),
     pieceCount: sanitizeTrackPieceCount(pieceCount),
     catalogMode,
     customPieces: sanitizeTrackPieceLibrary(customPieces),
+    layoutPreset,
   };
 }
 
@@ -2110,7 +2118,7 @@ export function HelloMarble() {
     };
     resetRef.current = () => respawnMarble(false);
     respawnMarble(false);
-    if (gameModeRef.current !== "solo") {
+    if (gameModeRef.current !== "solo" && gameModeRef.current !== "testTrack") {
       freezeMarble();
     }
 
@@ -2162,7 +2170,7 @@ export function HelloMarble() {
       currentPitch = 0;
       currentRoll = 0;
       respawnMarble(false);
-      if (gameModeRef.current !== "solo") {
+      if (gameModeRef.current !== "solo" && gameModeRef.current !== "testTrack") {
         freezeMarble();
       }
     };
@@ -2909,7 +2917,7 @@ export function HelloMarble() {
           }
           if (!countdownGoHandledRef.current && nextIndex >= COUNTDOWN_LABELS.length - 1) {
             countdownGoHandledRef.current = true;
-            if (gameModeRef.current === "solo") {
+            if (gameModeRef.current === "solo" || gameModeRef.current === "testTrack") {
               unfreezeMarbleRef.current();
             }
             setControlsLocked(false);
@@ -2919,7 +2927,7 @@ export function HelloMarble() {
         } else if (elapsedMs >= stepMs * COUNTDOWN_LABELS.length) {
           if (!countdownGoHandledRef.current) {
             countdownGoHandledRef.current = true;
-            if (gameModeRef.current === "solo") {
+            if (gameModeRef.current === "solo" || gameModeRef.current === "testTrack") {
               unfreezeMarbleRef.current();
             }
             setControlsLocked(false);
@@ -3401,7 +3409,7 @@ export function HelloMarble() {
   const showingOptionsControls = showOptionsMenu && optionsSubmenu === "controls";
   const showingOptionsCamera = showOptionsMenu && optionsSubmenu === "camera";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
-  const showSoloResult = gameMode === "solo" && trialState === "finished";
+  const showSoloResult = (gameMode === "solo" || gameMode === "testTrack") && trialState === "finished";
   const multiplayerRaceInProgress =
     gameMode === "multiplayer" &&
     racePhase === "racing" &&
@@ -3841,7 +3849,7 @@ export function HelloMarble() {
     if (nextMode === gameMode) {
       return;
     }
-    if (nextMode !== "solo") {
+    if (nextMode !== "solo" && nextMode !== "testTrack") {
       soloStartSequenceRef.current += 1;
     }
     setGameMode(nextMode);
@@ -3866,6 +3874,19 @@ export function HelloMarble() {
           trackLabPieceCountRef.current,
           "builtin_plus_custom",
           trackLabCustomPiecesRef.current,
+        ),
+      );
+      void startSoloRaceSequence();
+      return;
+    }
+    if (nextMode === "testTrack") {
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          trackLabSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin",
+          [],
+          "testTrack",
         ),
       );
       void startSoloRaceSequence();
@@ -3972,9 +3993,9 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
-                onClick={() => setMenuScreen("trackLab")}
+                onClick={() => switchGameMode("testTrack")}
               >
-                Track Lab
+                Test Track
               </button>
               <button
                 type="button"
@@ -4695,7 +4716,8 @@ export function HelloMarble() {
           Recalibrate
         </button>
       ) : null}
-      {(showMultiplayerNetworkUi || gameMode === "solo") && debugMenuEnabled ? (
+      {(showMultiplayerNetworkUi || gameMode === "solo" || gameMode === "testTrack") &&
+      debugMenuEnabled ? (
         <DebugDrawer
           open={drawerOpen}
           onToggle={() => setDrawerOpen((open) => !open)}
