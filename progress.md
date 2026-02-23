@@ -398,3 +398,30 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.3.15 update:
+- Removed shadow mode switching and made dynamic shadow maps the only shadow rendering path in `client/src/game/HelloMarble.tsx`.
+- Kept manual quality control via `shadowMapSize` and removed `shadowMode` from tuning/state surface.
+- Tuned directional-light shadow parameters to reduce center-hole/peter-panning artifacts:
+  - `shadow.bias` tightened to `-0.00025`
+  - `shadow.normalBias` reduced to `0.012`
+  - `shadow.radius` adjusted to `1.5`
+- Added a subtle dynamic contact-shadow assist (surface-raycast anchored) to fill residual center-hole artifacts without reverting to projected-only shadow mode:
+  - anchored to nearest track surface normal
+  - fades out quickly with clearance when airborne
+  - remains below the marble on the track surface.
+- Updated debug diagnostics by removing shadow-mode state and retaining shadow map size visibility.
+- Updated tuning typing/sanitization by removing `shadowMode` while keeping `shadowMapSize`:
+  - `client/src/game/gameTypes.ts`
+  - `client/src/game/gameConstants.ts`
+  - `client/src/game/gameUtils.ts`
+  - `client/src/game/debugStore.ts`
+- Bumped app version to `0.8.3.15` in `client/src/buildInfo.ts`.
+- Synced Android wrapper versions to `0.8.3.15` (`versionCode 80315`) in:
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.

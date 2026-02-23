@@ -12,8 +12,6 @@ export type CameraPresetId =
   | "topdownForward"
   | "broadcast";
 
-export type ShadowMode = "dynamic" | "projected";
-
 export type TuningState = {
   gravityG: number;
   tiltStrength: number;
@@ -45,7 +43,6 @@ export type TuningState = {
   cameraZoom: number;
   cameraFov: number;
   cameraHeightBias: number;
-  shadowMode: ShadowMode;
   shadowMapSize: 512 | 1024;
 };
 

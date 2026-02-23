@@ -150,9 +150,12 @@ const COLLISION_MASK_MARBLE =
   COLLISION_GROUP_TRACK_FLOOR | COLLISION_GROUP_TRACK_WALL | COLLISION_GROUP_OBSTACLE;
 const COLLISION_MASK_TRACK = COLLISION_GROUP_MARBLE;
 const SHADOW_LIGHT_OFFSET = new THREE.Vector3(10, 14, 8);
-const SHADOW_RAYCAST_MAX_DIST = 20;
-const SHADOW_FADE_MAX_DIST = 10;
-const SHADOW_SURFACE_OFFSET = 0.03;
+const CONTACT_SHADOW_RAYCAST_MAX_DIST = 5;
+const CONTACT_SHADOW_FADE_MAX_DIST = 1.8;
+const CONTACT_SHADOW_SURFACE_OFFSET = 0.02;
+const CONTACT_SHADOW_MAX_OPACITY = 0.22;
+const CONTACT_SHADOW_BASE_SCALE = 0.52;
+const CONTACT_SHADOW_SCALE_RANGE = 0.26;
 type MenuScreen = "main" | "options" | "trackLab";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
@@ -691,9 +694,9 @@ export function HelloMarble() {
     }
     const renderer = new THREE.WebGLRenderer(rendererOptions);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, initialRenderScale));
-    renderer.shadowMap.enabled = tuningRef.current.shadowMode === "dynamic";
+    renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.shadowMap.autoUpdate = tuningRef.current.shadowMode === "dynamic";
+    renderer.shadowMap.autoUpdate = true;
     mount.appendChild(renderer.domElement);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -701,7 +704,7 @@ export function HelloMarble() {
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
     directionalLight.position.set(6, 8, 5);
-    directionalLight.castShadow = tuningRef.current.shadowMode === "dynamic";
+    directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.set(tuningRef.current.shadowMapSize, tuningRef.current.shadowMapSize);
     directionalLight.shadow.camera.near = 0.5;
     directionalLight.shadow.camera.far = 64;
@@ -709,9 +712,9 @@ export function HelloMarble() {
     directionalLight.shadow.camera.right = 12;
     directionalLight.shadow.camera.top = 12;
     directionalLight.shadow.camera.bottom = -12;
-    directionalLight.shadow.bias = -0.0006;
-    directionalLight.shadow.normalBias = 0.045;
-    directionalLight.shadow.radius = 2;
+    directionalLight.shadow.bias = -0.00025;
+    directionalLight.shadow.normalBias = 0.012;
+    directionalLight.shadow.radius = 1.5;
     (directionalLight.shadow.camera as THREE.OrthographicCamera).updateProjectionMatrix();
     scene.add(directionalLight);
     scene.add(directionalLight.target);
@@ -861,16 +864,16 @@ export function HelloMarble() {
         metalness: 0.08,
       }),
     );
-    marbleMesh.castShadow = tuningRef.current.shadowMode === "dynamic";
+    marbleMesh.castShadow = true;
     marbleMesh.receiveShadow = false;
     scene.add(marbleMesh);
-    // Blob shadow: soft radial gradient projected onto the track surface under the marble.
+    // Contact shadow assist: subtle fill to eliminate center-hole artifacts in dynamic shadow maps.
     const marbleShadowCanvas = document.createElement("canvas");
     marbleShadowCanvas.width = 128;
     marbleShadowCanvas.height = 128;
     const marbleShadowCtx = marbleShadowCanvas.getContext("2d")!;
     const marbleShadowGrad = marbleShadowCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    marbleShadowGrad.addColorStop(0, "rgba(0,0,0,0.55)");
+    marbleShadowGrad.addColorStop(0, "rgba(0,0,0,0.9)");
     marbleShadowGrad.addColorStop(1, "rgba(0,0,0,0)");
     marbleShadowCtx.fillStyle = marbleShadowGrad;
     marbleShadowCtx.fillRect(0, 0, 128, 128);
@@ -884,7 +887,8 @@ export function HelloMarble() {
       new THREE.CircleGeometry(marbleRadius * 1.4, 32),
       marbleShadowMaterial,
     );
-    marbleShadowMesh.visible = tuningRef.current.shadowMode === "projected";
+    marbleShadowMaterial.opacity = CONTACT_SHADOW_MAX_OPACITY;
+    marbleShadowMesh.visible = true;
     scene.add(marbleShadowMesh);
     const ghostPlayers = new Map<string, GhostRenderState>();
     let lastRaceSendAt = 0;
@@ -962,8 +966,6 @@ export function HelloMarble() {
     let estimatedBoardWallShapeTestsPerStep =
       track.physicsDebug.estimatedBoardWallShapeTestsPerStep;
     let boardWallCollisionFiltered = isBoardWallCollisionFiltered(boardBody, boardWallBody);
-    let dynamicShadowEnabled = tuningRef.current.shadowMode === "dynamic";
-    let lastShadowMode: TuningState["shadowMode"] | null = null;
     let lastShadowMapSize = -1;
 
     const motionTiltRef: { current: TiltSample } = {
@@ -1007,19 +1009,9 @@ export function HelloMarble() {
         directionalLight.shadow.mapSize.set(currentTuning.shadowMapSize, currentTuning.shadowMapSize);
         directionalLight.shadow.map?.dispose();
         directionalLight.shadow.map = null;
+        directionalLight.shadow.needsUpdate = true;
         lastShadowMapSize = currentTuning.shadowMapSize;
       }
-      if (lastShadowMode === currentTuning.shadowMode) {
-        return;
-      }
-      dynamicShadowEnabled = currentTuning.shadowMode === "dynamic";
-      renderer.shadowMap.enabled = dynamicShadowEnabled;
-      renderer.shadowMap.autoUpdate = dynamicShadowEnabled;
-      directionalLight.castShadow = dynamicShadowEnabled;
-      marbleMesh.castShadow = dynamicShadowEnabled;
-      marbleShadowMesh.visible = !dynamicShadowEnabled;
-      directionalLight.shadow.needsUpdate = true;
-      lastShadowMode = currentTuning.shadowMode;
     };
 
     const updateDynamicShadowFraming = (): void => {
@@ -1030,13 +1022,12 @@ export function HelloMarble() {
       directionalLight.updateMatrixWorld();
     };
 
-    const updateProjectedBlobShadow = (trackUp: THREE.Vector3): void => {
-      marbleShadowMesh.visible = true;
+    const updateContactShadowAssist = (trackUp: THREE.Vector3): void => {
       track.group.updateMatrixWorld(true);
       shadowRayOrigin.copy(marbleMesh.position).addScaledVector(trackUp, marbleRadius + 0.75);
       shadowRayDirection.copy(trackUp).multiplyScalar(-1);
       shadowRaycaster.set(shadowRayOrigin, shadowRayDirection);
-      shadowRaycaster.far = SHADOW_RAYCAST_MAX_DIST;
+      shadowRaycaster.far = CONTACT_SHADOW_RAYCAST_MAX_DIST;
       shadowHitResults.length = 0;
       shadowRaycaster.intersectObject(track.group, true, shadowHitResults);
       const surfaceHit = shadowHitResults.find((hit) => (hit.object as THREE.Mesh).isMesh);
@@ -1056,12 +1047,26 @@ export function HelloMarble() {
         shadowHitNormalWorld.copy(trackUp);
       }
 
-      const hitDistance = marbleMesh.position.distanceTo(surfaceHit.point);
-      const distanceAlpha = clamp(1 - hitDistance / SHADOW_FADE_MAX_DIST, 0.15, 0.6);
-      const distanceScale = 1 + clamp(hitDistance / SHADOW_FADE_MAX_DIST, 0, 1) * 1.1;
-      marbleShadowMaterial.opacity = distanceAlpha;
-      marbleShadowMesh.scale.set(distanceScale, distanceScale, 1);
-      marbleShadowMesh.position.copy(surfaceHit.point).addScaledVector(shadowHitNormalWorld, SHADOW_SURFACE_OFFSET);
+      const surfaceDistance = marbleMesh.position.distanceTo(surfaceHit.point);
+      const clearance = Math.max(0, surfaceDistance - marbleRadius);
+      const clearanceAlpha = clamp(1 - clearance / CONTACT_SHADOW_FADE_MAX_DIST, 0, 1);
+      const opacity = clearanceAlpha * CONTACT_SHADOW_MAX_OPACITY;
+      if (opacity <= 0.002) {
+        marbleShadowMesh.visible = false;
+        return;
+      }
+
+      const distanceRatio = clamp(clearance / CONTACT_SHADOW_FADE_MAX_DIST, 0, 1);
+      marbleShadowMaterial.opacity = opacity;
+      marbleShadowMesh.visible = true;
+      marbleShadowMesh.scale.set(
+        CONTACT_SHADOW_BASE_SCALE + distanceRatio * CONTACT_SHADOW_SCALE_RANGE,
+        CONTACT_SHADOW_BASE_SCALE + distanceRatio * CONTACT_SHADOW_SCALE_RANGE,
+        1,
+      );
+      marbleShadowMesh.position
+        .copy(surfaceHit.point)
+        .addScaledVector(shadowHitNormalWorld, CONTACT_SHADOW_SURFACE_OFFSET);
       marbleShadowMesh.quaternion.setFromUnitVectors(shadowCircleNormal, shadowHitNormalWorld);
     };
 
@@ -2979,11 +2984,8 @@ export function HelloMarble() {
       boardPosThree.copy(track.group.position);
       boardQuatThree.copy(track.group.quaternion);
       ghostTrackUp.set(0, 1, 0).applyQuaternion(boardQuatThree).normalize();
-      if (dynamicShadowEnabled) {
-        updateDynamicShadowFraming();
-      } else {
-        updateProjectedBlobShadow(ghostTrackUp);
-      }
+      updateDynamicShadowFraming();
+      updateContactShadowAssist(ghostTrackUp);
 
       let extrapolatingPlayers = 0;
       const interpNowMs = raceClient.getServerNowMs();
@@ -3318,9 +3320,7 @@ export function HelloMarble() {
           wallShapeCount,
           estimatedBoardWallShapeTestsPerStep,
           boardWallCollisionFiltered,
-          shadowMode: currentTuning.shadowMode,
           shadowMapSize: currentTuning.shadowMapSize,
-          dynamicShadowEnabled,
           railClampCorrectionsPerSec: railClampCorrectionsPerSecEma,
         });
         debugStore.updateNet({
@@ -4952,24 +4952,7 @@ export function HelloMarble() {
               Mobile Safe Fallback (dynamic governor)
             </label>
             <label className="controlLabel">
-              Shadow Mode
-              <div className="controlRow">
-                <select
-                  value={tuning.shadowMode}
-                  onChange={(event) =>
-                    updateTuning(
-                      "shadowMode",
-                      event.target.value === "projected" ? "projected" : "dynamic",
-                    )
-                  }
-                >
-                  <option value="dynamic">Dynamic</option>
-                  <option value="projected">Projected Blob</option>
-                </select>
-              </div>
-            </label>
-            <label className="controlLabel">
-              Shadow Map Size
+              Dynamic Shadow Map Size
               <div className="controlRow">
                 <select
                   value={tuning.shadowMapSize}
@@ -5452,9 +5435,7 @@ export function HelloMarble() {
               Est board-wall shape tests/step: {debug.estimatedBoardWallShapeTestsPerStep}
             </p>
             <p>Board-wall collision filtered: {debug.boardWallCollisionFiltered ? "yes" : "no"}</p>
-            <p>Shadow mode: {debug.shadowMode}</p>
             <p>Shadow map size: {debug.shadowMapSize}</p>
-            <p>Dynamic shadow active: {debug.dynamicShadowEnabled ? "yes" : "no"}</p>
             <p>Rail clamp corrections/sec: {debug.railClampCorrectionsPerSec.toFixed(2)}</p>
             <p>
               Marble: {debug.posX.toFixed(2)}, {debug.posY.toFixed(2)}, {debug.posZ.toFixed(2)}

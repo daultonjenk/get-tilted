@@ -84,7 +84,6 @@ export const DEFAULT_TUNING: TuningState = {
   cameraZoom: 1,
   cameraFov: 65,
   cameraHeightBias: 0,
-  shadowMode: "dynamic",
   shadowMapSize: 1024,
 };
 

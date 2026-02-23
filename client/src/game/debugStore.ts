@@ -38,9 +38,7 @@ export type MarbleDebug = {
   wallShapeCount: number;
   estimatedBoardWallShapeTestsPerStep: number;
   boardWallCollisionFiltered: boolean;
-  shadowMode: "dynamic" | "projected";
   shadowMapSize: number;
-  dynamicShadowEnabled: boolean;
   railClampCorrectionsPerSec: number;
 };
 
@@ -109,9 +107,7 @@ const DEFAULT_DEBUG: MarbleDebug = {
   wallShapeCount: 0,
   estimatedBoardWallShapeTestsPerStep: 0,
   boardWallCollisionFiltered: false,
-  shadowMode: "dynamic",
   shadowMapSize: 1024,
-  dynamicShadowEnabled: false,
   railClampCorrectionsPerSec: 0,
 };
 
