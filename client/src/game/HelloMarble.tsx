@@ -795,6 +795,26 @@ export function HelloMarble() {
       }),
     );
     scene.add(marbleMesh);
+    // Blob shadow: soft radial gradient projected onto the track surface under the marble.
+    const marbleShadowCanvas = document.createElement("canvas");
+    marbleShadowCanvas.width = 128;
+    marbleShadowCanvas.height = 128;
+    const marbleShadowCtx = marbleShadowCanvas.getContext("2d")!;
+    const marbleShadowGrad = marbleShadowCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    marbleShadowGrad.addColorStop(0, "rgba(0,0,0,0.55)");
+    marbleShadowGrad.addColorStop(1, "rgba(0,0,0,0)");
+    marbleShadowCtx.fillStyle = marbleShadowGrad;
+    marbleShadowCtx.fillRect(0, 0, 128, 128);
+    const marbleShadowTex = new THREE.CanvasTexture(marbleShadowCanvas);
+    const marbleShadowMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(marbleRadius * 1.4, 32),
+      new THREE.MeshBasicMaterial({
+        map: marbleShadowTex,
+        transparent: true,
+        depthWrite: false,
+      }),
+    );
+    scene.add(marbleShadowMesh);
     const ghostPlayers = new Map<string, GhostRenderState>();
     let lastRaceSendAt = 0;
     let lastSentRaceStateT = 0;
@@ -818,6 +838,7 @@ export function HelloMarble() {
     const tempQuatB = new THREE.Quaternion();
     const tempQuatC = new THREE.Quaternion();
     const tempQuatD = new THREE.Quaternion();
+    const shadowCircleNormal = new THREE.Vector3(0, 0, 1);
     // Pre-allocated tuples for network sends to avoid per-send GC pressure.
     const sendPos: [number, number, number] = [0, 0, 0];
     const sendQuat: [number, number, number, number] = [0, 0, 0, 0];
@@ -2785,6 +2806,8 @@ export function HelloMarble() {
       boardPosThree.copy(track.group.position);
       boardQuatThree.copy(track.group.quaternion);
       ghostTrackUp.set(0, 1, 0).applyQuaternion(boardQuatThree).normalize();
+      marbleShadowMesh.position.copy(marbleMesh.position).addScaledVector(ghostTrackUp, -(marbleRadius - 0.01));
+      marbleShadowMesh.quaternion.setFromUnitVectors(shadowCircleNormal, ghostTrackUp);
 
       let extrapolatingPlayers = 0;
       const interpNowMs = raceClient.getServerNowMs();
@@ -3179,6 +3202,9 @@ export function HelloMarble() {
       world.removeBody(marbleBody);
       marbleMesh.geometry.dispose();
       (marbleMesh.material as THREE.Material).dispose();
+      marbleShadowMesh.geometry.dispose();
+      (marbleShadowMesh.material as THREE.Material).dispose();
+      marbleShadowTex.dispose();
     };
   }, []);
 
