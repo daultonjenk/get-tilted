@@ -160,7 +160,7 @@ export function sanitizeTuning(input: unknown): TuningState {
     base.ccdIterations = Math.round(clamp(value.ccdIterations, 1, 40));
   }
   if (typeof value.cameraZoom === "number") {
-    base.cameraZoom = clamp(value.cameraZoom, 0.7, 1.4);
+    base.cameraZoom = clamp(value.cameraZoom, 0.5, 1.4);
   }
   if (typeof value.cameraFov === "number") {
     base.cameraFov = clamp(value.cameraFov, 50, 90);

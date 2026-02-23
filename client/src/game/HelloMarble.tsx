@@ -3109,7 +3109,7 @@ export function HelloMarble() {
 
       const cameraAlpha = 1 - Math.exp(-8 * delta);
       const sideSign = currentTuning.invertCameraSide ? -1 : 1;
-      const zoomDistanceScale = 1 / clamp(currentTuning.cameraZoom, 0.7, 1.4);
+      const zoomDistanceScale = 1 / clamp(currentTuning.cameraZoom, 0.5, 1.4);
       const heightBias = currentTuning.cameraHeightBias;
       const pitchLookAheadBias = clamp(-heightBias * 0.6, -5, 5);
       const nextFov = clamp(currentTuning.cameraFov, 50, 90);
@@ -4127,7 +4127,7 @@ export function HelloMarble() {
                     <input
                       id="optionsCameraZoom"
                       type="range"
-                      min={0.7}
+                      min={0.5}
                       max={1.4}
                       step={0.01}
                       value={tuning.cameraZoom}
@@ -4655,7 +4655,7 @@ export function HelloMarble() {
               <p>Zoom</p>
               <input
                 type="range"
-                min={0.7}
+                min={0.5}
                 max={1.4}
                 step={0.01}
                 value={tuning.cameraZoom}

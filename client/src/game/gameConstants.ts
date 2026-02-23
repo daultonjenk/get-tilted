@@ -81,7 +81,7 @@ export const DEFAULT_TUNING: TuningState = {
   physicsSolverIterations: 16,
   ccdSpeedThreshold: 0.75,
   ccdIterations: 20,
-  cameraZoom: 1,
+  cameraZoom: 0.7,
   cameraFov: 65,
   cameraHeightBias: 0,
   shadowMapSize: 1024,

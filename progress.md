@@ -504,3 +504,27 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.5.2 update:
+- Simplified modular obstacle piece behavior so only one obstacle style is used again:
+  - restored the single `custom-obstacle-S` placement pattern for obstacle-enabled pieces,
+  - removed the newer per-piece obstacle variant logic that created obstacle straight and obstacle arc variants.
+- Restricted obstacle-piece selection pool to straight placements only:
+  - 90-degree bends now remain non-obstacle pieces by default,
+  - track still uses non-obstacle straight and non-obstacle arc90 geometry pieces.
+- Kept deterministic selection and spawn-safety behavior:
+  - first 2 eligible main-lane straight pieces remain obstacle-free.
+- Updated default camera zoom baseline:
+  - `DEFAULT_TUNING.cameraZoom` now starts at `0.7` (previously `1.0`), matching the old fully zoomed-out baseline.
+- Expanded camera zoom range so players can zoom both in and out from the new default:
+  - camera zoom clamp updated to `0.5..1.4`,
+  - options and in-race zoom sliders updated to min `0.5`.
+- Bumped version to `0.8.5.2` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80502`)
+  - `android/app/build.gradle` (`versionCode` `80502`)
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
