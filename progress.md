@@ -336,6 +336,31 @@ Verification:
 - `npm run typecheck` passes.
 - `npm run build` passes.
 
+v0.8.3.16 update:
+- Retuned default handling in `client/src/game/gameConstants.ts` for faster counter-tilt response while preserving control:
+  - `maxTiltDeg`: `16`
+  - `maxBoardAngVel`: `7.5`
+  - `linearDamping`: `0.12`
+  - `angularDamping`: `0.18`
+  - `tiltFilterTau`: `0.2`
+  - `contactFriction`: `0.84` (restored to historical high-grip range used in earlier versions)
+- Reworked debug numeric tuning controls in `client/src/game/HelloMarble.tsx` to remove keyboard-heavy `type="number"` inputs and use slider + stepper interactions.
+- Added reusable `client/src/ui/DebugScalarControl.tsx` with:
+  - range slider
+  - large `- / +` buttons
+  - clamped step snapping
+  - compact value readout chip
+- Updated debug control styling in `client/src/index.css` for mobile-safe touch targets and clearer scalar rows.
+- Bumped app version to `0.8.3.16` in `client/src/buildInfo.ts`.
+- Synced Android wrapper versions to `0.8.3.16` (`versionCode 80316`) in:
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
+
+Verification:
+- `npm run lint` passes.
+- `npm run typecheck` passes.
+- `npm run build` passes.
+
 v0.8.3.4 update:
 - Synced Android wrapper version metadata with the app version to avoid Play upload rejection on `versionCode`.
 - Bumped app version to `0.8.3.4` in `client/src/buildInfo.ts`.

@@ -1097,6 +1097,30 @@ textarea {
   align-items: center;
 }
 
+.controlRowStepper {
+  grid-template-columns: 52px minmax(0, 1fr) 52px;
+  gap: 0.5rem;
+}
+
+.controlStepperButton {
+  min-height: 48px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  padding: 0;
+}
+
+.controlValueChip {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 0.15rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid rgb(155 206 255 / 45%);
+  border-radius: 999px;
+  background: rgb(16 44 76 / 92%);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+}
+
 .controlCheck {
   display: flex;
   align-items: center;
@@ -1358,5 +1382,9 @@ textarea {
 
   .controlRow {
     grid-template-columns: 1fr 92px;
+  }
+
+  .controlRowStepper {
+    grid-template-columns: 52px minmax(0, 1fr) 52px;
   }
 }

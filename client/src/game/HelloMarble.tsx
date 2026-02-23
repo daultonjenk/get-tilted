@@ -23,6 +23,7 @@ import {
   type TiltState,
 } from "./input/tilt";
 import { DebugDrawer, type DebugTabId } from "../ui/DebugDrawer";
+import { DebugScalarControl } from "../ui/DebugScalarControl";
 import {
   RaceClient,
   type JoinTimingSnapshot,
@@ -4711,236 +4712,86 @@ export function HelloMarble() {
         {activeDebugTab === "tuning" ? (
           <div className="debugSection">
             <p className="tiltMessage">{statusMessage}</p>
-            <label className="controlLabel">
-              Max Speed
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={4}
-                  max={20}
-                  step={0.1}
-                  value={tuning.maxSpeed}
-                  onChange={(event) =>
-                    updateTuning("maxSpeed", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.1}
-                  value={tuning.maxSpeed}
-                  onChange={(event) =>
-                    updateTuning("maxSpeed", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Tilt Strength
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0.5}
-                  max={2}
-                  step={0.01}
-                  value={tuning.tiltStrength}
-                  onChange={(event) =>
-                    updateTuning("tiltStrength", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.tiltStrength}
-                  onChange={(event) =>
-                    updateTuning("tiltStrength", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Gyro Gain (Debug)
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0.8}
-                  max={1.2}
-                  step={0.01}
-                  value={tuning.gyroSensitivity}
-                  onChange={(event) =>
-                    updateTuning("gyroSensitivity", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.gyroSensitivity}
-                  onChange={(event) =>
-                    updateTuning("gyroSensitivity", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Gravity G
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={8}
-                  max={24}
-                  step={0.1}
-                  value={tuning.gravityG}
-                  onChange={(event) =>
-                    updateTuning("gravityG", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.1}
-                  value={tuning.gravityG}
-                  onChange={(event) =>
-                    updateTuning("gravityG", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Max Tilt Deg
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={6}
-                  max={25}
-                  step={0.1}
-                  value={tuning.maxTiltDeg}
-                  onChange={(event) =>
-                    updateTuning("maxTiltDeg", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.1}
-                  value={tuning.maxTiltDeg}
-                  onChange={(event) =>
-                    updateTuning("maxTiltDeg", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Max Board Angular Velocity
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={1}
-                  max={10}
-                  step={0.1}
-                  value={tuning.maxBoardAngVel}
-                  onChange={(event) =>
-                    updateTuning("maxBoardAngVel", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.1}
-                  value={tuning.maxBoardAngVel}
-                  onChange={(event) =>
-                    updateTuning("maxBoardAngVel", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Contact Friction
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0}
-                  max={1.1}
-                  step={0.01}
-                  value={tuning.contactFriction}
-                  onChange={(event) =>
-                    updateTuning("contactFriction", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.contactFriction}
-                  onChange={(event) =>
-                    updateTuning("contactFriction", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Bounce
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0}
-                  max={0.99}
-                  step={0.01}
-                  value={tuning.bounce}
-                  onChange={(event) =>
-                    updateTuning("bounce", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.bounce}
-                  onChange={(event) =>
-                    updateTuning("bounce", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Tilt Filter Tau
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0.05}
-                  max={0.25}
-                  step={0.01}
-                  value={tuning.tiltFilterTau}
-                  onChange={(event) =>
-                    updateTuning("tiltFilterTau", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.tiltFilterTau}
-                  onChange={(event) =>
-                    updateTuning("tiltFilterTau", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Mobile Render Scale
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0.75}
-                  max={2}
-                  step={0.01}
-                  value={tuning.renderScaleMobile}
-                  onChange={(event) =>
-                    updateTuning("renderScaleMobile", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.renderScaleMobile}
-                  onChange={(event) =>
-                    updateTuning("renderScaleMobile", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
+            <DebugScalarControl
+              label="Max Speed"
+              min={4}
+              max={20}
+              step={0.1}
+              value={tuning.maxSpeed}
+              onChange={(value) => updateTuning("maxSpeed", value)}
+            />
+            <DebugScalarControl
+              label="Tilt Strength"
+              min={0.5}
+              max={2}
+              step={0.01}
+              value={tuning.tiltStrength}
+              onChange={(value) => updateTuning("tiltStrength", value)}
+            />
+            <DebugScalarControl
+              label="Gyro Gain (Debug)"
+              min={0.8}
+              max={1.2}
+              step={0.01}
+              value={tuning.gyroSensitivity}
+              onChange={(value) => updateTuning("gyroSensitivity", value)}
+            />
+            <DebugScalarControl
+              label="Gravity G"
+              min={8}
+              max={24}
+              step={0.1}
+              value={tuning.gravityG}
+              onChange={(value) => updateTuning("gravityG", value)}
+            />
+            <DebugScalarControl
+              label="Max Tilt Deg"
+              min={6}
+              max={25}
+              step={0.1}
+              value={tuning.maxTiltDeg}
+              onChange={(value) => updateTuning("maxTiltDeg", value)}
+            />
+            <DebugScalarControl
+              label="Max Board Angular Velocity"
+              min={1}
+              max={10}
+              step={0.1}
+              value={tuning.maxBoardAngVel}
+              onChange={(value) => updateTuning("maxBoardAngVel", value)}
+            />
+            <DebugScalarControl
+              label="Contact Friction"
+              min={0}
+              max={1.1}
+              step={0.01}
+              value={tuning.contactFriction}
+              onChange={(value) => updateTuning("contactFriction", value)}
+            />
+            <DebugScalarControl
+              label="Bounce"
+              min={0}
+              max={0.99}
+              step={0.01}
+              value={tuning.bounce}
+              onChange={(value) => updateTuning("bounce", value)}
+            />
+            <DebugScalarControl
+              label="Tilt Filter Tau"
+              min={0.05}
+              max={0.25}
+              step={0.01}
+              value={tuning.tiltFilterTau}
+              onChange={(value) => updateTuning("tiltFilterTau", value)}
+            />
+            <DebugScalarControl
+              label="Mobile Render Scale"
+              min={0.75}
+              max={2}
+              step={0.01}
+              value={tuning.renderScaleMobile}
+              onChange={(value) => updateTuning("renderScaleMobile", value)}
+            />
             <label className="controlLabel controlLabelCheckbox">
               <input
                 type="checkbox"
@@ -4988,167 +4839,66 @@ export function HelloMarble() {
               />
               Track Render Interpolation
             </label>
-            <label className="controlLabel">
-              Mobile Debug Hz
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={2}
-                  max={15}
-                  step={1}
-                  value={tuning.debugUpdateHzMobile}
-                  onChange={(event) =>
-                    updateTuning("debugUpdateHzMobile", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={1}
-                  value={tuning.debugUpdateHzMobile}
-                  onChange={(event) =>
-                    updateTuning("debugUpdateHzMobile", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Linear Damping
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0}
-                  max={0.5}
-                  step={0.01}
-                  value={tuning.linearDamping}
-                  onChange={(event) =>
-                    updateTuning("linearDamping", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.linearDamping}
-                  onChange={(event) =>
-                    updateTuning("linearDamping", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Angular Damping
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0}
-                  max={0.5}
-                  step={0.01}
-                  value={tuning.angularDamping}
-                  onChange={(event) =>
-                    updateTuning("angularDamping", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.angularDamping}
-                  onChange={(event) =>
-                    updateTuning("angularDamping", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Physics Max Substeps
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={1}
-                  max={6}
-                  step={1}
-                  value={tuning.physicsMaxSubSteps}
-                  onChange={(event) =>
-                    updateTuning("physicsMaxSubSteps", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={1}
-                  value={tuning.physicsMaxSubSteps}
-                  onChange={(event) =>
-                    updateTuning("physicsMaxSubSteps", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              Solver Iterations
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={8}
-                  max={24}
-                  step={1}
-                  value={tuning.physicsSolverIterations}
-                  onChange={(event) =>
-                    updateTuning("physicsSolverIterations", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={1}
-                  value={tuning.physicsSolverIterations}
-                  onChange={(event) =>
-                    updateTuning("physicsSolverIterations", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              CCD Speed Threshold
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0.05}
-                  max={4}
-                  step={0.01}
-                  value={tuning.ccdSpeedThreshold}
-                  onChange={(event) =>
-                    updateTuning("ccdSpeedThreshold", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.01}
-                  value={tuning.ccdSpeedThreshold}
-                  onChange={(event) =>
-                    updateTuning("ccdSpeedThreshold", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
-            <label className="controlLabel">
-              CCD Iterations
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={1}
-                  max={40}
-                  step={1}
-                  value={tuning.ccdIterations}
-                  onChange={(event) =>
-                    updateTuning("ccdIterations", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={1}
-                  value={tuning.ccdIterations}
-                  onChange={(event) =>
-                    updateTuning("ccdIterations", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
+            <DebugScalarControl
+              label="Mobile Debug Hz"
+              min={2}
+              max={15}
+              step={1}
+              value={tuning.debugUpdateHzMobile}
+              onChange={(value) => updateTuning("debugUpdateHzMobile", value)}
+              formatValue={(value) => value.toFixed(0)}
+            />
+            <DebugScalarControl
+              label="Linear Damping"
+              min={0}
+              max={0.5}
+              step={0.01}
+              value={tuning.linearDamping}
+              onChange={(value) => updateTuning("linearDamping", value)}
+            />
+            <DebugScalarControl
+              label="Angular Damping"
+              min={0}
+              max={0.5}
+              step={0.01}
+              value={tuning.angularDamping}
+              onChange={(value) => updateTuning("angularDamping", value)}
+            />
+            <DebugScalarControl
+              label="Physics Max Substeps"
+              min={1}
+              max={6}
+              step={1}
+              value={tuning.physicsMaxSubSteps}
+              onChange={(value) => updateTuning("physicsMaxSubSteps", value)}
+              formatValue={(value) => value.toFixed(0)}
+            />
+            <DebugScalarControl
+              label="Solver Iterations"
+              min={8}
+              max={24}
+              step={1}
+              value={tuning.physicsSolverIterations}
+              onChange={(value) => updateTuning("physicsSolverIterations", value)}
+              formatValue={(value) => value.toFixed(0)}
+            />
+            <DebugScalarControl
+              label="CCD Speed Threshold"
+              min={0.05}
+              max={4}
+              step={0.01}
+              value={tuning.ccdSpeedThreshold}
+              onChange={(value) => updateTuning("ccdSpeedThreshold", value)}
+            />
+            <DebugScalarControl
+              label="CCD Iterations"
+              min={1}
+              max={40}
+              step={1}
+              value={tuning.ccdIterations}
+              onChange={(value) => updateTuning("ccdIterations", value)}
+              formatValue={(value) => value.toFixed(0)}
+            />
             <label className="controlCheck">
               <input
                 type="checkbox"
@@ -5159,29 +4909,14 @@ export function HelloMarble() {
               />
               Enable Extra Downforce
             </label>
-            <label className="controlLabel">
-              Extra Downforce
-              <div className="controlRow">
-                <input
-                  type="range"
-                  min={0}
-                  max={12}
-                  step={0.1}
-                  value={tuning.extraDownForce}
-                  onChange={(event) =>
-                    updateTuning("extraDownForce", Number(event.target.value))
-                  }
-                />
-                <input
-                  type="number"
-                  step={0.1}
-                  value={tuning.extraDownForce}
-                  onChange={(event) =>
-                    updateTuning("extraDownForce", Number(event.target.value))
-                  }
-                />
-              </div>
-            </label>
+            <DebugScalarControl
+              label="Extra Downforce"
+              min={0}
+              max={12}
+              step={0.1}
+              value={tuning.extraDownForce}
+              onChange={(value) => updateTuning("extraDownForce", value)}
+            />
             <div className="debugButtonRow">
               <button type="button" onClick={() => setTuning(buildCanonicalTuning())}>
                 Reset Defaults
