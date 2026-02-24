@@ -989,3 +989,33 @@ v0.8.7.1 full publish update (user-requested commit of all pending workspace cha
 - Smoke validation:
   - launched dev stack and captured Playwright smoke screenshot,
   - verified main menu render at `output/full-commit-smoke/shot-0.png` with `Version 0.8.7.1` visible.
+
+v0.8.7.2 full publish update (editor reference marble guide tool):
+- Added a non-scalable, non-resizable `Reference Marble` helper to the 2D editor for clearance checks against gaps/holes.
+- Extended editor layout model in `client/src/game/editor2d.ts` with optional `referenceMarble` position and clamping logic:
+  - new radius constant `EDITOR_REFERENCE_MARBLE_RADIUS = 0.5` (diameter `1.0`, matching in-game marble scale),
+  - new `clampEditorReferenceMarble(...)` helper,
+  - persisted in local editor storage but isolated from shape obstacle sizing controls.
+- Updated editor interactions in `client/src/game/HelloMarble.tsx`:
+  - new toolbar button: `Add Ref Marble` / `Select Ref Marble`,
+  - draggable reference marble marker rendered on the SVG canvas,
+  - selectable from canvas and shape list (`R. Reference Marble · fixed`),
+  - `Delete Selected` now removes selected reference marble,
+  - template switching rescales/clamps reference marble Z position consistently,
+  - canvas deselection and drag status text now handle reference marble state.
+- Export behavior safety:
+  - `Export JSON` now emits `{ version, template, trackWidth, obstacles }` only,
+  - reference marble remains excluded from exported obstacle payload.
+- Added dedicated styling in `client/src/game/editor2d.css` for reference marble marker and adjusted toolbar column layout for the added control.
+- Version discipline updates:
+  - `client/src/buildInfo.ts` -> `APP_VERSION = 0.8.7.2`
+  - `android/twa-manifest.json` -> `appVersion = 0.8.7.2`, `appVersionCode = 80702`
+  - `android/app/build.gradle` -> `versionName = 0.8.7.2`, `versionCode = 80702`
+- Full Publish Test Mode verification:
+  - `npm run lint` passed,
+  - `npm run typecheck` passed,
+  - `npm run build` passed.
+- Smoke testing:
+  - launched dev stack,
+  - navigated to Editor with Playwright skill script and clicked `Add Ref Marble`,
+  - visually confirmed reference marble marker appears and is selected in `output/editor-ref-smoke/shot-0.png`.

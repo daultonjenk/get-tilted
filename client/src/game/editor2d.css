@@ -12,7 +12,7 @@
 .editorToolbar {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(2, minmax(150px, 1fr));
+  grid-template-columns: minmax(180px, 1.2fr) repeat(3, minmax(140px, 1fr));
   gap: 0.58rem;
   align-items: end;
 }
@@ -103,6 +103,34 @@
 .editorObstacleIndex {
   fill: rgb(245 251 255 / 96%);
   font-size: 12px;
+  font-weight: 900;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.editorReferenceMarble {
+  cursor: grab;
+}
+
+.editorReferenceMarble:active {
+  cursor: grabbing;
+}
+
+.editorReferenceMarbleShape {
+  fill: rgb(125 233 255 / 54%);
+  stroke: rgb(197 248 255 / 96%);
+  stroke-width: 2.2;
+}
+
+.editorReferenceMarble.selected .editorReferenceMarbleShape {
+  fill: rgb(165 246 255 / 66%);
+  stroke: rgb(242 255 204 / 98%);
+  stroke-width: 2.8;
+}
+
+.editorReferenceMarbleLabel {
+  fill: rgb(245 253 255 / 95%);
+  font-size: 11px;
   font-weight: 900;
   text-anchor: middle;
   pointer-events: none;

@@ -135,6 +135,8 @@ import {
   type TrackPieceTemplate,
 } from "./track/modularTrack";
 import {
+  EDITOR_REFERENCE_MARBLE_RADIUS,
+  clampEditorReferenceMarble,
   clampEditorObstacle,
   createDefaultEditorLayout,
   createEditorViewTransform,
@@ -251,7 +253,8 @@ type EditorShapeDraft = {
 };
 
 type EditorDragState = {
-  obstacleId: string;
+  target: "obstacle" | "reference_marble";
+  obstacleId: string | null;
   pointerId: number;
   offsetX: number;
   offsetZ: number;
@@ -767,6 +770,7 @@ export function HelloMarble() {
   const [trackLabStatus, setTrackLabStatus] = useState("");
   const [editorLayout, setEditorLayout] = useState<EditorLayout>(() => readStoredEditorLayout());
   const [editorSelectedObstacleId, setEditorSelectedObstacleId] = useState<string | null>(null);
+  const [editorReferenceMarbleSelected, setEditorReferenceMarbleSelected] = useState(false);
   const [editorStatus, setEditorStatus] = useState("");
   const [editorAddShapeOpen, setEditorAddShapeOpen] = useState(false);
   const [editorImportText, setEditorImportText] = useState("");
@@ -1095,6 +1099,15 @@ export function HelloMarble() {
       setEditorSelectedObstacleId(null);
     }
   }, [editorLayout, editorSelectedObstacleId]);
+
+  useEffect(() => {
+    if (!editorReferenceMarbleSelected) {
+      return;
+    }
+    if (!editorLayout.referenceMarble) {
+      setEditorReferenceMarbleSelected(false);
+    }
+  }, [editorLayout.referenceMarble, editorReferenceMarbleSelected]);
 
   useEffect(() => {
     setEditorShapeDraft((prev) => sanitizeEditorShapeDraft(prev, editorLayout.template));
@@ -4224,6 +4237,7 @@ export function HelloMarble() {
     editorDragStateRef.current = null;
     setEditorAddShapeOpen(false);
     setEditorImportError("");
+    setEditorReferenceMarbleSelected(false);
     setMenuScreen("main");
   };
 
@@ -4295,6 +4309,22 @@ export function HelloMarble() {
       }),
     [editorLayout, editorViewTransform],
   );
+  const editorRenderedReferenceMarble = useMemo(() => {
+    if (!editorLayout.referenceMarble) {
+      return null;
+    }
+    const pose = sampleEditorPose(
+      editorLayout.template,
+      editorLayout.referenceMarble.z,
+      editorLayout.referenceMarble.x,
+    );
+    return {
+      center: worldToEditorView(editorViewTransform, pose.centerX, pose.centerZ),
+      radiusPx: Math.max(6, EDITOR_REFERENCE_MARBLE_RADIUS * editorViewTransform.scale),
+      x: editorLayout.referenceMarble.x,
+      z: editorLayout.referenceMarble.z,
+    };
+  }, [editorLayout, editorViewTransform]);
   const editorSelectedObstacle = editorSelectedObstacleId
     ? editorLayout.obstacles.find((obstacle) => obstacle.id === editorSelectedObstacleId) ?? null
     : null;
@@ -4325,9 +4355,12 @@ export function HelloMarble() {
       }
       const prevLength = getEditorTemplateLength(prev.template);
       const nextLength = getEditorTemplateLength(template);
-      const nextLayout: EditorLayout = {
+      const nextTemplateLayout = {
         ...prev,
         template,
+      };
+      const nextLayout: EditorLayout = {
+        ...nextTemplateLayout,
         obstacles: prev.obstacles.map((obstacle) => {
           const scaledZ = prevLength > 0 ? (obstacle.z / prevLength) * nextLength : obstacle.z;
           return clampEditorObstacle(
@@ -4335,12 +4368,18 @@ export function HelloMarble() {
               ...obstacle,
               z: scaledZ,
             },
-            {
-              ...prev,
-              template,
-            },
+            nextTemplateLayout,
           );
         }),
+        referenceMarble: prev.referenceMarble
+          ? clampEditorReferenceMarble(
+              {
+                ...prev.referenceMarble,
+                z: prevLength > 0 ? (prev.referenceMarble.z / prevLength) * nextLength : prev.referenceMarble.z,
+              },
+              nextTemplateLayout,
+            )
+          : null,
       };
       return nextLayout;
     });
@@ -4362,6 +4401,24 @@ export function HelloMarble() {
     setEditorShapeDraft(createDefaultEditorShapeDraft(editorLayout.template));
     setEditorAddShapeOpen(true);
     setEditorImportError("");
+  };
+
+  const addOrSelectReferenceMarble = () => {
+    if (editorLayout.referenceMarble) {
+      setEditorSelectedObstacleId(null);
+      setEditorReferenceMarbleSelected(true);
+      setEditorStatus("Reference marble selected.");
+      return;
+    }
+    const startZ = getEditorTemplateLength(editorLayout.template) * 0.2;
+    const nextReference = clampEditorReferenceMarble({ x: 0, z: startZ }, editorLayout);
+    setEditorLayout((prev) => ({
+      ...prev,
+      referenceMarble: nextReference,
+    }));
+    setEditorSelectedObstacleId(null);
+    setEditorReferenceMarbleSelected(true);
+    setEditorStatus("Reference marble added.");
   };
 
   const updateEditorShapeDraft = <K extends keyof EditorShapeDraft>(
@@ -4401,6 +4458,7 @@ export function HelloMarble() {
       obstacles: [...prev.obstacles, shaped],
     }));
     setEditorSelectedObstacleId(nextId);
+    setEditorReferenceMarbleSelected(false);
     setEditorAddShapeOpen(false);
     setEditorStatus(`${shaped.name} created.`);
   };
@@ -4477,8 +4535,17 @@ export function HelloMarble() {
   };
 
   const deleteSelectedEditorShape = () => {
+    if (editorReferenceMarbleSelected && editorLayout.referenceMarble) {
+      setEditorLayout((prev) => ({
+        ...prev,
+        referenceMarble: null,
+      }));
+      setEditorReferenceMarbleSelected(false);
+      setEditorStatus("Reference marble removed.");
+      return;
+    }
     if (!editorSelectedObstacleId) {
-      setEditorStatus("Select a shape to delete.");
+      setEditorStatus("Select a shape or reference marble to delete.");
       return;
     }
     const selected = editorLayout.obstacles.find((obstacle) => obstacle.id === editorSelectedObstacleId);
@@ -4487,17 +4554,25 @@ export function HelloMarble() {
       obstacles: prev.obstacles.filter((obstacle) => obstacle.id !== editorSelectedObstacleId),
     }));
     setEditorSelectedObstacleId(null);
+    setEditorReferenceMarbleSelected(false);
     setEditorStatus(selected ? `${selected.name} deleted.` : "Shape deleted.");
   };
 
   const clearEditorShapes = () => {
     setEditorLayout((prev) => ({ ...prev, obstacles: [] }));
     setEditorSelectedObstacleId(null);
+    setEditorReferenceMarbleSelected(false);
     setEditorStatus("All shapes cleared.");
   };
 
   const exportEditorLayout = async () => {
-    const payload = JSON.stringify(editorLayoutRef.current, null, 2);
+    const exportLayout = {
+      version: editorLayoutRef.current.version,
+      template: editorLayoutRef.current.template,
+      trackWidth: editorLayoutRef.current.trackWidth,
+      obstacles: editorLayoutRef.current.obstacles,
+    };
+    const payload = JSON.stringify(exportLayout, null, 2);
     setEditorImportText(payload);
     setEditorImportError("");
     if (!navigator.clipboard) {
@@ -4518,6 +4593,7 @@ export function HelloMarble() {
       const nextLayout = sanitizeEditorLayout(parsed, createDefaultEditorLayout());
       setEditorLayout(nextLayout);
       setEditorSelectedObstacleId(nextLayout.obstacles[0]?.id ?? null);
+      setEditorReferenceMarbleSelected(false);
       setEditorImportError("");
       setEditorStatus(
         `Imported ${nextLayout.obstacles.length} shape${
@@ -4536,6 +4612,7 @@ export function HelloMarble() {
       return;
     }
     setEditorSelectedObstacleId(null);
+    setEditorReferenceMarbleSelected(false);
   };
 
   const handleEditorObstaclePointerDown = (
@@ -4557,12 +4634,43 @@ export function HelloMarble() {
     }
     const projected = projectWorldPointToTemplate(editorLayoutRef.current, worldPoint.x, worldPoint.z);
     editorDragStateRef.current = {
+      target: "obstacle",
       obstacleId,
       pointerId: event.pointerId,
       offsetX: selected.x - projected.x,
       offsetZ: selected.z - projected.z,
     };
     setEditorSelectedObstacleId(obstacleId);
+    setEditorReferenceMarbleSelected(false);
+    editorSvgRef.current?.setPointerCapture(event.pointerId);
+  };
+
+  const handleEditorReferenceMarblePointerDown = (
+    event: ReactPointerEvent<SVGGElement>,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const referenceMarble = editorLayoutRef.current.referenceMarble;
+    if (!referenceMarble) {
+      return;
+    }
+    const worldPoint = getEditorWorldPointFromPointerEvent(event);
+    if (!worldPoint) {
+      return;
+    }
+    const projected = projectWorldPointToTemplate(editorLayoutRef.current, worldPoint.x, worldPoint.z);
+    editorDragStateRef.current = {
+      target: "reference_marble",
+      obstacleId: null,
+      pointerId: event.pointerId,
+      offsetX: referenceMarble.x - projected.x,
+      offsetZ: referenceMarble.z - projected.z,
+    };
+    setEditorSelectedObstacleId(null);
+    setEditorReferenceMarbleSelected(true);
     editorSvgRef.current?.setPointerCapture(event.pointerId);
   };
 
@@ -4583,6 +4691,21 @@ export function HelloMarble() {
       worldPoint.x,
       worldPoint.z,
     );
+    if (drag.target === "reference_marble") {
+      setEditorLayout((prev) => ({
+        ...prev,
+        referenceMarble: prev.referenceMarble
+          ? clampEditorReferenceMarble(
+              {
+                x: projected.x + drag.offsetX,
+                z: projected.z + drag.offsetZ,
+              },
+              prev,
+            )
+          : null,
+      }));
+      return;
+    }
     setEditorLayout((prev) => ({
       ...prev,
       obstacles: prev.obstacles.map((obstacle) => {
@@ -4603,7 +4726,11 @@ export function HelloMarble() {
 
   const endEditorDrag = () => {
     if (editorDragStateRef.current) {
-      setEditorStatus("Shape moved.");
+      setEditorStatus(
+        editorDragStateRef.current.target === "reference_marble"
+          ? "Reference marble moved."
+          : "Shape moved.",
+      );
     }
     editorDragStateRef.current = null;
   };
@@ -5589,9 +5716,19 @@ export function HelloMarble() {
                 >
                   Delete Selected
                 </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton editorToolbarButton"
+                  onClick={addOrSelectReferenceMarble}
+                >
+                  {editorLayout.referenceMarble ? "Select Ref Marble" : "Add Ref Marble"}
+                </button>
               </div>
               <p className="raceHint">
                 Top-down editor: drag shapes in X/Z space. Y remains fixed to track height.
+              </p>
+              <p className="raceHint">
+                Reference marble is a fixed-size guide and is excluded from exported obstacle JSON.
               </p>
               <p className="raceHint">
                 Template: {editorTemplateLabel} · Track Width {editorLayout.trackWidth.toFixed(1)} ·
@@ -5622,6 +5759,25 @@ export function HelloMarble() {
                     ) : null}
                     {editorTrackPathData.centerlinePath ? (
                       <path className="editorTrackCenterline" d={editorTrackPathData.centerlinePath} />
+                    ) : null}
+                    {editorRenderedReferenceMarble ? (
+                      <g
+                        className={`editorReferenceMarble ${
+                          editorReferenceMarbleSelected ? "selected" : ""
+                        }`}
+                        transform={`translate(${editorRenderedReferenceMarble.center.x.toFixed(2)} ${editorRenderedReferenceMarble.center.y.toFixed(2)})`}
+                        onPointerDown={handleEditorReferenceMarblePointerDown}
+                      >
+                        <circle
+                          cx={0}
+                          cy={0}
+                          r={editorRenderedReferenceMarble.radiusPx.toFixed(2)}
+                          className="editorReferenceMarbleShape"
+                        />
+                        <text className="editorReferenceMarbleLabel" x={0} y={4}>
+                          M
+                        </text>
+                      </g>
                     ) : null}
                     {editorRenderedObstacles.map((obstacle, index) => (
                       <g
@@ -5820,11 +5976,29 @@ export function HelloMarble() {
                       ) : null}
                     </>
                   ) : (
-                    <p className="raceHint">Select a shape from canvas or list to edit it.</p>
+                    <p className="raceHint">
+                      {editorReferenceMarbleSelected && editorRenderedReferenceMarble
+                        ? `Reference marble selected (fixed diameter ${(EDITOR_REFERENCE_MARBLE_RADIUS * 2).toFixed(2)}). X ${editorRenderedReferenceMarble.x.toFixed(2)}, Z ${editorRenderedReferenceMarble.z.toFixed(2)}`
+                        : "Select a shape from canvas or list to edit it."}
+                    </p>
                   )}
                 </div>
               </div>
               <div className="editorShapeList">
+                {editorLayout.referenceMarble ? (
+                  <button
+                    type="button"
+                    className={`trackLabPieceButton ${
+                      editorReferenceMarbleSelected ? "selected" : ""
+                    }`}
+                    onClick={() => {
+                      setEditorSelectedObstacleId(null);
+                      setEditorReferenceMarbleSelected(true);
+                    }}
+                  >
+                    R. Reference Marble · fixed
+                  </button>
+                ) : null}
                 {editorLayout.obstacles.length === 0 ? (
                   <p className="raceHint">No shapes yet. Add your first shape above.</p>
                 ) : (
@@ -5835,7 +6009,10 @@ export function HelloMarble() {
                       className={`trackLabPieceButton ${
                         obstacle.id === editorSelectedObstacleId ? "selected" : ""
                       }`}
-                      onClick={() => setEditorSelectedObstacleId(obstacle.id)}
+                      onClick={() => {
+                        setEditorSelectedObstacleId(obstacle.id);
+                        setEditorReferenceMarbleSelected(false);
+                      }}
                     >
                       {index + 1}. {obstacle.name} · {obstacle.shape}
                     </button>

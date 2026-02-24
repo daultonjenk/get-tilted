@@ -14,11 +14,17 @@ export type EditorObstacle = {
   yawDeg: number;
 };
 
+export type EditorReferenceMarble = {
+  x: number;
+  z: number;
+};
+
 export type EditorLayout = {
   version: 1;
   template: EditorTemplateKind;
   trackWidth: number;
   obstacles: EditorObstacle[];
+  referenceMarble: EditorReferenceMarble | null;
 };
 
 export type EditorSamplePose = {
@@ -50,6 +56,7 @@ const OBSTACLE_LENGTH_MAX = 14;
 const OBSTACLE_DEPTH_MIN = 0.2;
 const OBSTACLE_DEPTH_MAX = 8;
 const EDGE_PADDING = 0.24;
+export const EDITOR_REFERENCE_MARBLE_RADIUS = 0.5;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -188,13 +195,40 @@ function clampObstacleToTrack(obstacle: EditorObstacle, layout: EditorLayout): E
   };
 }
 
+function clampReferenceMarbleToTrack(
+  referenceMarble: EditorReferenceMarble,
+  layout: EditorLayout,
+): EditorReferenceMarble {
+  const templateLength = getEditorTemplateLength(layout.template);
+  const halfTrack = layout.trackWidth * 0.5;
+  const maxLateral = Math.max(0, halfTrack - EDITOR_REFERENCE_MARBLE_RADIUS - EDGE_PADDING);
+  return {
+    x: clamp(referenceMarble.x, -maxLateral, maxLateral),
+    z: clamp(referenceMarble.z, 0, templateLength),
+  };
+}
+
 export function createDefaultEditorLayout(): EditorLayout {
   return {
     version: 1,
     template: "straight",
     trackWidth: 9,
     obstacles: [],
+    referenceMarble: null,
   };
+}
+
+function sanitizeReferenceMarble(input: unknown): EditorReferenceMarble | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+  const value = input as Partial<EditorReferenceMarble>;
+  const x = asFiniteNumber(value.x);
+  const z = asFiniteNumber(value.z);
+  if (x == null || z == null) {
+    return null;
+  }
+  return { x, z };
 }
 
 function sanitizeObstacle(input: unknown, fallbackId: string): EditorObstacle | null {
@@ -246,11 +280,18 @@ export function sanitizeEditorLayout(input: unknown, fallback?: EditorLayout): E
     template,
     trackWidth,
     obstacles: [],
+    referenceMarble: null,
   };
   nextLayout.obstacles = rawObstacles
     .map((entry, index) => sanitizeObstacle(entry, `editor-obstacle-${index + 1}`))
     .filter((entry): entry is EditorObstacle => entry != null)
     .map((entry) => clampObstacleToTrack(entry, nextLayout));
+  const referenceMarble = sanitizeReferenceMarble(
+    (value as Partial<EditorLayout> & { referenceMarble?: unknown }).referenceMarble,
+  );
+  nextLayout.referenceMarble = referenceMarble
+    ? clampReferenceMarbleToTrack(referenceMarble, nextLayout)
+    : null;
   return nextLayout;
 }
 
@@ -415,4 +456,15 @@ export function clampEditorObstacle(obstacle: EditorObstacle, layout: EditorLayo
     clamped.length = diameter;
   }
   return clampObstacleToTrack(clamped, layout);
+}
+
+export function clampEditorReferenceMarble(
+  referenceMarble: EditorReferenceMarble,
+  layout: EditorLayout,
+): EditorReferenceMarble {
+  const clamped: EditorReferenceMarble = {
+    x: asFiniteNumber(referenceMarble.x) ?? 0,
+    z: asFiniteNumber(referenceMarble.z) ?? 0,
+  };
+  return clampReferenceMarbleToTrack(clamped, layout);
 }
