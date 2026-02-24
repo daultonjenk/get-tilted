@@ -1,5 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent, MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ChangeEvent,
+  MouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import {
@@ -130,6 +134,23 @@ import {
   type TrackPieceKind,
   type TrackPieceTemplate,
 } from "./track/modularTrack";
+import {
+  clampEditorObstacle,
+  createDefaultEditorLayout,
+  createEditorViewTransform,
+  getEditorTemplateLength,
+  getEditorTrackGeometry,
+  projectWorldPointToTemplate,
+  sanitizeEditorLayout,
+  sampleEditorPose,
+  viewToEditorWorld,
+  worldToEditorView,
+  type EditorLayout,
+  type EditorObstacle,
+  type EditorShapeKind,
+  type EditorTemplateKind,
+} from "./editor2d";
+import "./editor2d.css";
 
 const skinCatalog = getSkinCatalog();
 const defaultSkinId = getDefaultSkinId();
@@ -202,17 +223,39 @@ const TEST_TRACK_TUNABLE_PIECES: TestTrackTunablePieceSpec[] = TEST_TRACK_MANUAL
 ).map((entry, index) => ({ ...entry, trackIndex: index + 1 }));
 const TEST_TRACK_TRANSITION_STRAIGHT_LENGTH = 13;
 const TEST_TRACK_DEBUG_STORAGE_KEY = "get-tilted:v0.8.6.1:test-track-debug-settings";
+const EDITOR_LAYOUT_STORAGE_KEY = "get-tilted:v0.8.7.0:editor-layout";
+const EDITOR_VIEWBOX_WIDTH = 760;
+const EDITOR_VIEWBOX_HEIGHT = 420;
+const EDITOR_TRACK_PADDING = 34;
 const TEST_TRACK_OBSTACLE_SCALE_MIN = 0.5;
 const TEST_TRACK_OBSTACLE_SCALE_MAX = 1.8;
 const TEST_TRACK_LENGTH_SCALE_MIN = 0.6;
 const TEST_TRACK_LENGTH_SCALE_MAX = 1.8;
 const TEST_TRACK_WIDTH_MIN = 7;
 const TEST_TRACK_WIDTH_MAX = 12;
-type MenuScreen = "main" | "options" | "trackLab";
+type MenuScreen = "main" | "options" | "trackLab" | "editor";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
 type TrackLayoutPreset = "default" | "testTrack";
 const SOLO_TRACK_GENERATION_POLICY: TrackGenerationPolicy = "singleplayer_camera_friendly_10";
+
+type EditorShapeDraft = {
+  shape: EditorShapeKind;
+  name: string;
+  width: number;
+  length: number;
+  depth: number;
+  yawDeg: number;
+  x: number;
+  z: number;
+};
+
+type EditorDragState = {
+  obstacleId: string;
+  pointerId: number;
+  offsetX: number;
+  offsetZ: number;
+};
 
 type RuntimeTrackConfig = {
   seed: string;
@@ -358,6 +401,93 @@ function readStoredTestTrackDebugSettings(): TestTrackDebugSettings {
     return sanitizeTestTrackDebugSettings(JSON.parse(raw));
   } catch {
     return createDefaultTestTrackDebugSettings();
+  }
+}
+
+function createDefaultEditorShapeDraft(template: EditorTemplateKind): EditorShapeDraft {
+  const templateLength = getEditorTemplateLength(template);
+  const midDistance = Math.round(templateLength * 0.5 * 10) / 10;
+  return {
+    shape: "rectangle",
+    name: "Obstacle",
+    width: 1.4,
+    length: 1.8,
+    depth: 1.7,
+    yawDeg: 0,
+    x: 0,
+    z: midDistance,
+  };
+}
+
+function sanitizeEditorShapeDraft(
+  input: Partial<EditorShapeDraft>,
+  template: EditorTemplateKind,
+): EditorShapeDraft {
+  const defaults = createDefaultEditorShapeDraft(template);
+  const shape: EditorShapeKind =
+    input.shape === "triangle" || input.shape === "circle" ? input.shape : "rectangle";
+  const width = clamp(
+    typeof input.width === "number" && Number.isFinite(input.width)
+      ? input.width
+      : defaults.width,
+    0.35,
+    9,
+  );
+  const length = clamp(
+    typeof input.length === "number" && Number.isFinite(input.length)
+      ? input.length
+      : defaults.length,
+    0.35,
+    14,
+  );
+  const depth = clamp(
+    typeof input.depth === "number" && Number.isFinite(input.depth)
+      ? input.depth
+      : defaults.depth,
+    0.2,
+    8,
+  );
+  const yawDeg = clamp(
+    typeof input.yawDeg === "number" && Number.isFinite(input.yawDeg)
+      ? input.yawDeg
+      : defaults.yawDeg,
+    -180,
+    180,
+  );
+  const x =
+    typeof input.x === "number" && Number.isFinite(input.x) ? input.x : defaults.x;
+  const z = clamp(
+    typeof input.z === "number" && Number.isFinite(input.z) ? input.z : defaults.z,
+    0,
+    getEditorTemplateLength(template),
+  );
+  return {
+    shape,
+    name:
+      typeof input.name === "string" && input.name.trim().length > 0
+        ? input.name.trim().slice(0, 48)
+        : defaults.name,
+    width: shape === "circle" ? Math.max(width, length) : width,
+    length: shape === "circle" ? Math.max(width, length) : length,
+    depth,
+    yawDeg,
+    x,
+    z,
+  };
+}
+
+function readStoredEditorLayout(): EditorLayout {
+  if (typeof window === "undefined") {
+    return createDefaultEditorLayout();
+  }
+  const raw = window.localStorage.getItem(EDITOR_LAYOUT_STORAGE_KEY);
+  if (!raw) {
+    return createDefaultEditorLayout();
+  }
+  try {
+    return sanitizeEditorLayout(JSON.parse(raw), createDefaultEditorLayout());
+  } catch {
+    return createDefaultEditorLayout();
   }
 }
 
@@ -635,6 +765,15 @@ export function HelloMarble() {
     toTrackDraft(createDefaultCustomPiece("straight")),
   );
   const [trackLabStatus, setTrackLabStatus] = useState("");
+  const [editorLayout, setEditorLayout] = useState<EditorLayout>(() => readStoredEditorLayout());
+  const [editorSelectedObstacleId, setEditorSelectedObstacleId] = useState<string | null>(null);
+  const [editorStatus, setEditorStatus] = useState("");
+  const [editorAddShapeOpen, setEditorAddShapeOpen] = useState(false);
+  const [editorImportText, setEditorImportText] = useState("");
+  const [editorImportError, setEditorImportError] = useState("");
+  const [editorShapeDraft, setEditorShapeDraft] = useState<EditorShapeDraft>(() =>
+    createDefaultEditorShapeDraft("straight"),
+  );
   const [testTrackDebugSettings, setTestTrackDebugSettings] = useState<TestTrackDebugSettings>(() =>
     readStoredTestTrackDebugSettings(),
   );
@@ -670,6 +809,9 @@ export function HelloMarble() {
   const trackLabSeedRef = useRef(trackLabSeed);
   const trackLabPieceCountRef = useRef(trackLabPieceCount);
   const trackLabCustomPiecesRef = useRef(trackLabCustomPieces);
+  const editorLayoutRef = useRef(editorLayout);
+  const editorSvgRef = useRef<SVGSVGElement | null>(null);
+  const editorDragStateRef = useRef<EditorDragState | null>(null);
   const testTrackDebugSettingsRef = useRef(testTrackDebugSettings);
   const multiplayerTrackSeedRef = useRef(multiplayerTrackSeed);
 
@@ -935,6 +1077,28 @@ export function HelloMarble() {
       JSON.stringify(sanitizeTrackPieceLibrary(trackLabCustomPieces)),
     );
   }, [trackLabCustomPieces]);
+
+  useEffect(() => {
+    editorLayoutRef.current = sanitizeEditorLayout(editorLayout, createDefaultEditorLayout());
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      EDITOR_LAYOUT_STORAGE_KEY,
+      JSON.stringify(editorLayoutRef.current),
+    );
+  }, [editorLayout]);
+
+  useEffect(() => {
+    if (!editorSelectedObstacleId) {
+      return;
+    }
+    if (!editorLayout.obstacles.some((obstacle) => obstacle.id === editorSelectedObstacleId)) {
+      setEditorSelectedObstacleId(null);
+    }
+  }, [editorLayout, editorSelectedObstacleId]);
+
+  useEffect(() => {
+    setEditorShapeDraft((prev) => sanitizeEditorShapeDraft(prev, editorLayout.template));
+  }, [editorLayout.template]);
 
   useEffect(() => {
     testTrackDebugSettingsRef.current = sanitizeTestTrackDebugSettings(testTrackDebugSettings);
@@ -3776,6 +3940,7 @@ export function HelloMarble() {
   const showModePicker = gameMode === "unselected" && menuScreen === "main";
   const showOptionsMenu = gameMode === "unselected" && menuScreen === "options";
   const showTrackLabMenu = gameMode === "unselected" && menuScreen === "trackLab";
+  const showEditorMenu = gameMode === "unselected" && menuScreen === "editor";
   const showingOptionsRoot = showOptionsMenu && optionsSubmenu === "root";
   const showingOptionsControls = showOptionsMenu && optionsSubmenu === "controls";
   const showingOptionsCamera = showOptionsMenu && optionsSubmenu === "camera";
@@ -3794,6 +3959,7 @@ export function HelloMarble() {
     !showModePicker &&
     !showOptionsMenu &&
     !showTrackLabMenu &&
+    !showEditorMenu &&
     !showRaceLobby &&
     !showMultiplayerResult &&
     !showSoloResult;
@@ -4052,6 +4218,407 @@ export function HelloMarble() {
 
   const handleTrackLabBack = () => {
     setMenuScreen("main");
+  };
+
+  const handleEditorBack = () => {
+    editorDragStateRef.current = null;
+    setEditorAddShapeOpen(false);
+    setEditorImportError("");
+    setMenuScreen("main");
+  };
+
+  const editorTemplateLength = getEditorTemplateLength(editorLayout.template);
+  const editorTrackGeometry = useMemo(
+    () => getEditorTrackGeometry(editorLayout, 120),
+    [editorLayout],
+  );
+  const editorViewTransform = useMemo(
+    () =>
+      createEditorViewTransform(
+        editorLayout,
+        EDITOR_VIEWBOX_WIDTH,
+        EDITOR_VIEWBOX_HEIGHT,
+        EDITOR_TRACK_PADDING,
+      ),
+    [editorLayout],
+  );
+  const editorTemplateLabel = (() => {
+    if (editorLayout.template === "arc90_left") {
+      return "Arc 90 Left";
+    }
+    if (editorLayout.template === "arc90_right") {
+      return "Arc 90 Right";
+    }
+    if (editorLayout.template === "s_curve") {
+      return "S-Curve";
+    }
+    return "Straight";
+  })();
+  const editorTrackPathData = useMemo(() => {
+    const left = editorTrackGeometry.leftEdge.map((point) =>
+      worldToEditorView(editorViewTransform, point.x, point.z),
+    );
+    const right = editorTrackGeometry.rightEdge
+      .map((point) => worldToEditorView(editorViewTransform, point.x, point.z))
+      .reverse();
+    const centerline = editorTrackGeometry.centerline.map((point) =>
+      worldToEditorView(editorViewTransform, point.x, point.z),
+    );
+    const toPath = (points: Array<{ x: number; y: number }>): string =>
+      points
+        .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+        .join(" ");
+    const fillPath = [...left, ...right];
+    return {
+      fillPath: fillPath.length >= 3 ? `${toPath(fillPath)} Z` : "",
+      centerlinePath: centerline.length >= 2 ? toPath(centerline) : "",
+    };
+  }, [editorTrackGeometry, editorViewTransform]);
+  const editorRenderedObstacles = useMemo(
+    () =>
+      editorLayout.obstacles.map((obstacle) => {
+        const pose = sampleEditorPose(editorLayout.template, obstacle.z, obstacle.x);
+        const center = worldToEditorView(editorViewTransform, pose.centerX, pose.centerZ);
+        const headingDeg =
+          (Math.atan2(pose.tangentZ, pose.tangentX) * 180) / Math.PI + obstacle.yawDeg;
+        return {
+          ...obstacle,
+          center,
+          headingDeg,
+          widthPx: Math.max(6, obstacle.width * editorViewTransform.scale),
+          lengthPx: Math.max(
+            6,
+            (obstacle.shape === "circle" ? obstacle.width : obstacle.length) *
+              editorViewTransform.scale,
+          ),
+        };
+      }),
+    [editorLayout, editorViewTransform],
+  );
+  const editorSelectedObstacle = editorSelectedObstacleId
+    ? editorLayout.obstacles.find((obstacle) => obstacle.id === editorSelectedObstacleId) ?? null
+    : null;
+  const editorSelectedRenderedObstacle = editorSelectedObstacleId
+    ? editorRenderedObstacles.find((obstacle) => obstacle.id === editorSelectedObstacleId) ?? null
+    : null;
+
+  const getEditorWorldPointFromPointerEvent = (
+    event: ReactPointerEvent<SVGSVGElement | SVGGElement>,
+  ): { x: number; z: number } | null => {
+    const svg = editorSvgRef.current;
+    if (!svg) {
+      return null;
+    }
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    const viewX = ((event.clientX - rect.left) / rect.width) * EDITOR_VIEWBOX_WIDTH;
+    const viewY = ((event.clientY - rect.top) / rect.height) * EDITOR_VIEWBOX_HEIGHT;
+    return viewToEditorWorld(editorViewTransform, viewX, viewY);
+  };
+
+  const setEditorTemplate = (template: EditorTemplateKind) => {
+    setEditorLayout((prev) => {
+      if (prev.template === template) {
+        return prev;
+      }
+      const prevLength = getEditorTemplateLength(prev.template);
+      const nextLength = getEditorTemplateLength(template);
+      const nextLayout: EditorLayout = {
+        ...prev,
+        template,
+        obstacles: prev.obstacles.map((obstacle) => {
+          const scaledZ = prevLength > 0 ? (obstacle.z / prevLength) * nextLength : obstacle.z;
+          return clampEditorObstacle(
+            {
+              ...obstacle,
+              z: scaledZ,
+            },
+            {
+              ...prev,
+              template,
+            },
+          );
+        }),
+      };
+      return nextLayout;
+    });
+    setEditorShapeDraft((prev) => sanitizeEditorShapeDraft(prev, template));
+    setEditorStatus(
+      `Template switched to ${
+        template === "straight"
+          ? "Straight"
+          : template === "arc90_left"
+            ? "Arc 90 Left"
+            : template === "arc90_right"
+              ? "Arc 90 Right"
+              : "S-Curve"
+      }.`,
+    );
+  };
+
+  const openEditorAddShapeDialog = () => {
+    setEditorShapeDraft(createDefaultEditorShapeDraft(editorLayout.template));
+    setEditorAddShapeOpen(true);
+    setEditorImportError("");
+  };
+
+  const updateEditorShapeDraft = <K extends keyof EditorShapeDraft>(
+    key: K,
+    value: EditorShapeDraft[K],
+  ) => {
+    setEditorShapeDraft((prev) =>
+      sanitizeEditorShapeDraft(
+        {
+          ...prev,
+          [key]: value,
+        },
+        editorLayout.template,
+      ),
+    );
+  };
+
+  const createEditorShape = () => {
+    const draft = sanitizeEditorShapeDraft(editorShapeDraft, editorLayout.template);
+    const nextId = `editor-shape-${Date.now().toString(36)}`;
+    const shaped: EditorObstacle = clampEditorObstacle(
+      {
+        id: nextId,
+        name: draft.name,
+        shape: draft.shape,
+        x: draft.x,
+        z: draft.z,
+        width: draft.width,
+        length: draft.length,
+        depth: draft.depth,
+        yawDeg: draft.yawDeg,
+      },
+      editorLayout,
+    );
+    setEditorLayout((prev) => ({
+      ...prev,
+      obstacles: [...prev.obstacles, shaped],
+    }));
+    setEditorSelectedObstacleId(nextId);
+    setEditorAddShapeOpen(false);
+    setEditorStatus(`${shaped.name} created.`);
+  };
+
+  const updateSelectedEditorObstacle = <K extends keyof EditorObstacle>(
+    key: K,
+    value: EditorObstacle[K],
+  ) => {
+    if (!editorSelectedObstacleId) {
+      return;
+    }
+    setEditorLayout((prev) => ({
+      ...prev,
+      obstacles: prev.obstacles.map((obstacle) => {
+        if (obstacle.id !== editorSelectedObstacleId) {
+          return obstacle;
+        }
+        return clampEditorObstacle(
+          {
+            ...obstacle,
+            [key]: value,
+          },
+          prev,
+        );
+      }),
+    }));
+  };
+
+  const updateSelectedEditorObstacleDiameter = (diameter: number) => {
+    if (!editorSelectedObstacleId) {
+      return;
+    }
+    setEditorLayout((prev) => ({
+      ...prev,
+      obstacles: prev.obstacles.map((obstacle) => {
+        if (obstacle.id !== editorSelectedObstacleId) {
+          return obstacle;
+        }
+        return clampEditorObstacle(
+          {
+            ...obstacle,
+            width: diameter,
+            length: diameter,
+          },
+          prev,
+        );
+      }),
+    }));
+  };
+
+  const updateSelectedEditorShapeKind = (shape: EditorShapeKind) => {
+    if (!editorSelectedObstacleId) {
+      return;
+    }
+    setEditorLayout((prev) => ({
+      ...prev,
+      obstacles: prev.obstacles.map((obstacle) => {
+        if (obstacle.id !== editorSelectedObstacleId) {
+          return obstacle;
+        }
+        const nextWidth = shape === "circle" ? Math.max(obstacle.width, obstacle.length) : obstacle.width;
+        const nextLength = shape === "circle" ? Math.max(obstacle.width, obstacle.length) : obstacle.length;
+        return clampEditorObstacle(
+          {
+            ...obstacle,
+            shape,
+            width: nextWidth,
+            length: nextLength,
+          },
+          prev,
+        );
+      }),
+    }));
+  };
+
+  const deleteSelectedEditorShape = () => {
+    if (!editorSelectedObstacleId) {
+      setEditorStatus("Select a shape to delete.");
+      return;
+    }
+    const selected = editorLayout.obstacles.find((obstacle) => obstacle.id === editorSelectedObstacleId);
+    setEditorLayout((prev) => ({
+      ...prev,
+      obstacles: prev.obstacles.filter((obstacle) => obstacle.id !== editorSelectedObstacleId),
+    }));
+    setEditorSelectedObstacleId(null);
+    setEditorStatus(selected ? `${selected.name} deleted.` : "Shape deleted.");
+  };
+
+  const clearEditorShapes = () => {
+    setEditorLayout((prev) => ({ ...prev, obstacles: [] }));
+    setEditorSelectedObstacleId(null);
+    setEditorStatus("All shapes cleared.");
+  };
+
+  const exportEditorLayout = async () => {
+    const payload = JSON.stringify(editorLayoutRef.current, null, 2);
+    setEditorImportText(payload);
+    setEditorImportError("");
+    if (!navigator.clipboard) {
+      setEditorStatus("Layout exported to text box. Clipboard API unavailable.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(payload);
+      setEditorStatus("Layout JSON copied to clipboard.");
+    } catch {
+      setEditorStatus("Layout exported to text box.");
+    }
+  };
+
+  const importEditorLayout = () => {
+    try {
+      const parsed = JSON.parse(editorImportText);
+      const nextLayout = sanitizeEditorLayout(parsed, createDefaultEditorLayout());
+      setEditorLayout(nextLayout);
+      setEditorSelectedObstacleId(nextLayout.obstacles[0]?.id ?? null);
+      setEditorImportError("");
+      setEditorStatus(
+        `Imported ${nextLayout.obstacles.length} shape${
+          nextLayout.obstacles.length === 1 ? "" : "s"
+        }.`,
+      );
+    } catch {
+      setEditorImportError("Invalid layout JSON.");
+    }
+  };
+
+  const handleEditorCanvasPointerDown = (
+    event: ReactPointerEvent<SVGSVGElement>,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    setEditorSelectedObstacleId(null);
+  };
+
+  const handleEditorObstaclePointerDown = (
+    obstacleId: string,
+    event: ReactPointerEvent<SVGGElement>,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const selected = editorLayoutRef.current.obstacles.find((obstacle) => obstacle.id === obstacleId);
+    if (!selected) {
+      return;
+    }
+    const worldPoint = getEditorWorldPointFromPointerEvent(event);
+    if (!worldPoint) {
+      return;
+    }
+    const projected = projectWorldPointToTemplate(editorLayoutRef.current, worldPoint.x, worldPoint.z);
+    editorDragStateRef.current = {
+      obstacleId,
+      pointerId: event.pointerId,
+      offsetX: selected.x - projected.x,
+      offsetZ: selected.z - projected.z,
+    };
+    setEditorSelectedObstacleId(obstacleId);
+    editorSvgRef.current?.setPointerCapture(event.pointerId);
+  };
+
+  const handleEditorCanvasPointerMove = (
+    event: ReactPointerEvent<SVGSVGElement>,
+  ) => {
+    const drag = editorDragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    const worldPoint = getEditorWorldPointFromPointerEvent(event);
+    if (!worldPoint) {
+      return;
+    }
+    const projected = projectWorldPointToTemplate(
+      editorLayoutRef.current,
+      worldPoint.x,
+      worldPoint.z,
+    );
+    setEditorLayout((prev) => ({
+      ...prev,
+      obstacles: prev.obstacles.map((obstacle) => {
+        if (obstacle.id !== drag.obstacleId) {
+          return obstacle;
+        }
+        return clampEditorObstacle(
+          {
+            ...obstacle,
+            x: projected.x + drag.offsetX,
+            z: projected.z + drag.offsetZ,
+          },
+          prev,
+        );
+      }),
+    }));
+  };
+
+  const endEditorDrag = () => {
+    if (editorDragStateRef.current) {
+      setEditorStatus("Shape moved.");
+    }
+    editorDragStateRef.current = null;
+  };
+
+  const handleEditorCanvasPointerEnd = (
+    event: ReactPointerEvent<SVGSVGElement>,
+  ) => {
+    const drag = editorDragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    if (editorSvgRef.current?.hasPointerCapture(event.pointerId)) {
+      editorSvgRef.current.releasePointerCapture(event.pointerId);
+    }
+    endEditorDrag();
   };
 
   const setTrackDraftKind = (kind: TrackPieceKind) => {
@@ -4480,6 +5047,13 @@ export function HelloMarble() {
                 }}
               >
                 Options
+              </button>
+              <button
+                type="button"
+                className="menuActionButton"
+                onClick={() => setMenuScreen("editor")}
+              >
+                Editor
               </button>
             </div>
           </div>
@@ -4968,6 +5542,482 @@ export function HelloMarble() {
               {trackLabStatus ? <p className="raceHint">{trackLabStatus}</p> : null}
             </div>
           </div>
+        </div>
+      ) : null}
+      {showEditorMenu ? (
+        <div className="raceOverlay menuOverlay">
+          <div className="raceOverlayCard menuCard editorCard">
+            <div className="menuHeaderRow">
+              <button
+                type="button"
+                className="lobbyBackButton optionsBackButton"
+                onClick={handleEditorBack}
+              >
+                {"< Back"}
+              </button>
+              <p className="raceOverlayTitle optionsTitle">Editor</p>
+            </div>
+            <div className="editorPanel">
+              <div className="editorToolbar">
+                <label className="optionsField" htmlFor="editorTemplateSelect">
+                  <span className="optionsFieldLabel">Template Piece</span>
+                  <select
+                    id="editorTemplateSelect"
+                    className="menuSelect"
+                    value={editorLayout.template}
+                    onChange={(event) =>
+                      setEditorTemplate(event.target.value as EditorTemplateKind)
+                    }
+                  >
+                    <option value="straight">Straight</option>
+                    <option value="arc90_left">Arc 90 Left</option>
+                    <option value="arc90_right">Arc 90 Right</option>
+                    <option value="s_curve">S-Curve</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton editorToolbarButton"
+                  onClick={openEditorAddShapeDialog}
+                >
+                  Add New Shape
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton editorToolbarButton"
+                  onClick={deleteSelectedEditorShape}
+                >
+                  Delete Selected
+                </button>
+              </div>
+              <p className="raceHint">
+                Top-down editor: drag shapes in X/Z space. Y remains fixed to track height.
+              </p>
+              <p className="raceHint">
+                Template: {editorTemplateLabel} · Track Width {editorLayout.trackWidth.toFixed(1)} ·
+                Length {editorTemplateLength.toFixed(1)}
+              </p>
+              <div className="editorWorkspace">
+                <div className="editorCanvasWrap">
+                  <svg
+                    ref={editorSvgRef}
+                    className="editorSvgCanvas"
+                    viewBox={`0 0 ${EDITOR_VIEWBOX_WIDTH} ${EDITOR_VIEWBOX_HEIGHT}`}
+                    role="img"
+                    aria-label="Track obstacle editor canvas"
+                    onPointerDown={handleEditorCanvasPointerDown}
+                    onPointerMove={handleEditorCanvasPointerMove}
+                    onPointerUp={handleEditorCanvasPointerEnd}
+                    onPointerCancel={handleEditorCanvasPointerEnd}
+                  >
+                    <rect
+                      x={0}
+                      y={0}
+                      width={EDITOR_VIEWBOX_WIDTH}
+                      height={EDITOR_VIEWBOX_HEIGHT}
+                      className="editorCanvasBackdrop"
+                    />
+                    {editorTrackPathData.fillPath ? (
+                      <path className="editorTrackSurface" d={editorTrackPathData.fillPath} />
+                    ) : null}
+                    {editorTrackPathData.centerlinePath ? (
+                      <path className="editorTrackCenterline" d={editorTrackPathData.centerlinePath} />
+                    ) : null}
+                    {editorRenderedObstacles.map((obstacle, index) => (
+                      <g
+                        key={obstacle.id}
+                        className={`editorObstacle ${
+                          obstacle.id === editorSelectedObstacleId ? "selected" : ""
+                        }`}
+                        transform={`translate(${obstacle.center.x.toFixed(2)} ${obstacle.center.y.toFixed(
+                          2,
+                        )}) rotate(${obstacle.headingDeg.toFixed(2)})`}
+                        onPointerDown={(event) => handleEditorObstaclePointerDown(obstacle.id, event)}
+                      >
+                        {obstacle.shape === "circle" ? (
+                          <circle
+                            cx={0}
+                            cy={0}
+                            r={(obstacle.widthPx * 0.5).toFixed(2)}
+                            className="editorObstacleShape circle"
+                          />
+                        ) : obstacle.shape === "triangle" ? (
+                          <polygon
+                            points={`${(obstacle.lengthPx * 0.5).toFixed(2)},0 ${(-obstacle.lengthPx * 0.5).toFixed(
+                              2,
+                            )},${(-obstacle.widthPx * 0.5).toFixed(2)} ${(-obstacle.lengthPx * 0.5).toFixed(
+                              2,
+                            )},${(obstacle.widthPx * 0.5).toFixed(2)}`}
+                            className="editorObstacleShape triangle"
+                          />
+                        ) : (
+                          <rect
+                            x={(-obstacle.lengthPx * 0.5).toFixed(2)}
+                            y={(-obstacle.widthPx * 0.5).toFixed(2)}
+                            width={obstacle.lengthPx.toFixed(2)}
+                            height={obstacle.widthPx.toFixed(2)}
+                            className="editorObstacleShape rectangle"
+                            rx={Math.max(2, obstacle.widthPx * 0.12)}
+                            ry={Math.max(2, obstacle.widthPx * 0.12)}
+                          />
+                        )}
+                        <text className="editorObstacleIndex" x={0} y={4}>
+                          {index + 1}
+                        </text>
+                      </g>
+                    ))}
+                  </svg>
+                </div>
+                <div className="editorInspector">
+                  <p className="tiltStatus">Selected Shape</p>
+                  {editorSelectedObstacle ? (
+                    <>
+                      <label className="optionsField" htmlFor="editorSelectedName">
+                        <span className="optionsFieldLabel">Name</span>
+                        <input
+                          id="editorSelectedName"
+                          className="optionsTextInput"
+                          value={editorSelectedObstacle.name}
+                          onChange={(event) =>
+                            updateSelectedEditorObstacle("name", event.target.value)
+                          }
+                          maxLength={48}
+                        />
+                      </label>
+                      <label className="optionsField" htmlFor="editorSelectedShape">
+                        <span className="optionsFieldLabel">Shape</span>
+                        <select
+                          id="editorSelectedShape"
+                          className="menuSelect"
+                          value={editorSelectedObstacle.shape}
+                          onChange={(event) =>
+                            updateSelectedEditorShapeKind(event.target.value as EditorShapeKind)
+                          }
+                        >
+                          <option value="rectangle">Rectangle</option>
+                          <option value="triangle">Triangle</option>
+                          <option value="circle">Circle</option>
+                        </select>
+                      </label>
+                      <div className="editorInspectorGrid">
+                        <label className="optionsField" htmlFor="editorSelectedX">
+                          <span className="optionsFieldLabel">X</span>
+                          <input
+                            id="editorSelectedX"
+                            className="optionsTextInput"
+                            type="number"
+                            step={0.1}
+                            value={editorSelectedObstacle.x.toFixed(2)}
+                            onChange={(event) =>
+                              updateSelectedEditorObstacle("x", Number(event.target.value))
+                            }
+                          />
+                        </label>
+                        <label className="optionsField" htmlFor="editorSelectedZ">
+                          <span className="optionsFieldLabel">Z</span>
+                          <input
+                            id="editorSelectedZ"
+                            className="optionsTextInput"
+                            type="number"
+                            step={0.1}
+                            min={0}
+                            max={editorTemplateLength}
+                            value={editorSelectedObstacle.z.toFixed(2)}
+                            onChange={(event) =>
+                              updateSelectedEditorObstacle("z", Number(event.target.value))
+                            }
+                          />
+                        </label>
+                        {editorSelectedObstacle.shape === "circle" ? (
+                          <label className="optionsField" htmlFor="editorSelectedDiameter">
+                            <span className="optionsFieldLabel">Diameter</span>
+                            <input
+                              id="editorSelectedDiameter"
+                              className="optionsTextInput"
+                              type="number"
+                              step={0.1}
+                              min={0.35}
+                              max={9}
+                              value={Math.max(
+                                editorSelectedObstacle.width,
+                                editorSelectedObstacle.length,
+                              ).toFixed(2)}
+                              onChange={(event) =>
+                                updateSelectedEditorObstacleDiameter(Number(event.target.value))
+                              }
+                            />
+                          </label>
+                        ) : (
+                          <>
+                            <label className="optionsField" htmlFor="editorSelectedWidth">
+                              <span className="optionsFieldLabel">Width</span>
+                              <input
+                                id="editorSelectedWidth"
+                                className="optionsTextInput"
+                                type="number"
+                                step={0.1}
+                                min={0.35}
+                                max={9}
+                                value={editorSelectedObstacle.width.toFixed(2)}
+                                onChange={(event) =>
+                                  updateSelectedEditorObstacle("width", Number(event.target.value))
+                                }
+                              />
+                            </label>
+                            <label className="optionsField" htmlFor="editorSelectedLength">
+                              <span className="optionsFieldLabel">Length</span>
+                              <input
+                                id="editorSelectedLength"
+                                className="optionsTextInput"
+                                type="number"
+                                step={0.1}
+                                min={0.35}
+                                max={14}
+                                value={editorSelectedObstacle.length.toFixed(2)}
+                                onChange={(event) =>
+                                  updateSelectedEditorObstacle("length", Number(event.target.value))
+                                }
+                              />
+                            </label>
+                          </>
+                        )}
+                        <label className="optionsField" htmlFor="editorSelectedDepth">
+                          <span className="optionsFieldLabel">Depth</span>
+                          <input
+                            id="editorSelectedDepth"
+                            className="optionsTextInput"
+                            type="number"
+                            step={0.1}
+                            min={0.2}
+                            max={8}
+                            value={editorSelectedObstacle.depth.toFixed(2)}
+                            onChange={(event) =>
+                              updateSelectedEditorObstacle("depth", Number(event.target.value))
+                            }
+                          />
+                        </label>
+                        <label className="optionsField" htmlFor="editorSelectedYaw">
+                          <span className="optionsFieldLabel">Yaw</span>
+                          <input
+                            id="editorSelectedYaw"
+                            className="optionsTextInput"
+                            type="number"
+                            step={1}
+                            min={-180}
+                            max={180}
+                            value={editorSelectedObstacle.yawDeg.toFixed(0)}
+                            onChange={(event) =>
+                              updateSelectedEditorObstacle("yawDeg", Number(event.target.value))
+                            }
+                          />
+                        </label>
+                      </div>
+                      {editorSelectedRenderedObstacle ? (
+                        <p className="raceHint">
+                          Screen center: x {editorSelectedRenderedObstacle.center.x.toFixed(1)}, y{" "}
+                          {editorSelectedRenderedObstacle.center.y.toFixed(1)}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="raceHint">Select a shape from canvas or list to edit it.</p>
+                  )}
+                </div>
+              </div>
+              <div className="editorShapeList">
+                {editorLayout.obstacles.length === 0 ? (
+                  <p className="raceHint">No shapes yet. Add your first shape above.</p>
+                ) : (
+                  editorLayout.obstacles.map((obstacle, index) => (
+                    <button
+                      key={obstacle.id}
+                      type="button"
+                      className={`trackLabPieceButton ${
+                        obstacle.id === editorSelectedObstacleId ? "selected" : ""
+                      }`}
+                      onClick={() => setEditorSelectedObstacleId(obstacle.id)}
+                    >
+                      {index + 1}. {obstacle.name} · {obstacle.shape}
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="optionsInlineButtons editorActionButtons">
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={exportEditorLayout}
+                >
+                  Export JSON
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={importEditorLayout}
+                >
+                  Import JSON
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  onClick={clearEditorShapes}
+                >
+                  Clear Shapes
+                </button>
+              </div>
+              <label className="optionsField" htmlFor="editorLayoutJson">
+                <span className="optionsFieldLabel">Layout JSON</span>
+                <textarea
+                  id="editorLayoutJson"
+                  className="optionsTextInput editorJsonTextArea"
+                  value={editorImportText}
+                  onChange={(event) => setEditorImportText(event.target.value)}
+                  placeholder='{"version":1,"template":"straight","trackWidth":9,"obstacles":[]}'
+                />
+              </label>
+              {editorImportError ? <p className="raceHint">{editorImportError}</p> : null}
+              {editorStatus ? <p className="raceHint">{editorStatus}</p> : null}
+            </div>
+          </div>
+          {editorAddShapeOpen ? (
+            <div className="editorModalScrim" onClick={() => setEditorAddShapeOpen(false)}>
+              <div
+                className="editorModalCard"
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                <p className="raceOverlayTitle editorModalTitle">Add New Shape</p>
+                <div className="editorInspectorGrid">
+                  <label className="optionsField" htmlFor="editorDraftName">
+                    <span className="optionsFieldLabel">Name</span>
+                    <input
+                      id="editorDraftName"
+                      className="optionsTextInput"
+                      value={editorShapeDraft.name}
+                      onChange={(event) => updateEditorShapeDraft("name", event.target.value)}
+                      maxLength={48}
+                    />
+                  </label>
+                  <label className="optionsField" htmlFor="editorDraftShape">
+                    <span className="optionsFieldLabel">Shape</span>
+                    <select
+                      id="editorDraftShape"
+                      className="menuSelect"
+                      value={editorShapeDraft.shape}
+                      onChange={(event) =>
+                        updateEditorShapeDraft("shape", event.target.value as EditorShapeKind)
+                      }
+                    >
+                      <option value="rectangle">Rectangle</option>
+                      <option value="triangle">Triangle</option>
+                      <option value="circle">Circle</option>
+                    </select>
+                  </label>
+                  <label className="optionsField" htmlFor="editorDraftX">
+                    <span className="optionsFieldLabel">X</span>
+                    <input
+                      id="editorDraftX"
+                      className="optionsTextInput"
+                      type="number"
+                      step={0.1}
+                      value={editorShapeDraft.x.toFixed(2)}
+                      onChange={(event) => updateEditorShapeDraft("x", Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="optionsField" htmlFor="editorDraftZ">
+                    <span className="optionsFieldLabel">Z</span>
+                    <input
+                      id="editorDraftZ"
+                      className="optionsTextInput"
+                      type="number"
+                      step={0.1}
+                      min={0}
+                      max={editorTemplateLength}
+                      value={editorShapeDraft.z.toFixed(2)}
+                      onChange={(event) => updateEditorShapeDraft("z", Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="optionsField" htmlFor="editorDraftWidth">
+                    <span className="optionsFieldLabel">Width</span>
+                    <input
+                      id="editorDraftWidth"
+                      className="optionsTextInput"
+                      type="number"
+                      step={0.1}
+                      min={0.35}
+                      max={9}
+                      value={editorShapeDraft.width.toFixed(2)}
+                      onChange={(event) =>
+                        updateEditorShapeDraft("width", Number(event.target.value))
+                      }
+                    />
+                  </label>
+                  <label className="optionsField" htmlFor="editorDraftLength">
+                    <span className="optionsFieldLabel">Length</span>
+                    <input
+                      id="editorDraftLength"
+                      className="optionsTextInput"
+                      type="number"
+                      step={0.1}
+                      min={0.35}
+                      max={14}
+                      value={editorShapeDraft.length.toFixed(2)}
+                      onChange={(event) =>
+                        updateEditorShapeDraft("length", Number(event.target.value))
+                      }
+                    />
+                  </label>
+                  <label className="optionsField" htmlFor="editorDraftDepth">
+                    <span className="optionsFieldLabel">Depth</span>
+                    <input
+                      id="editorDraftDepth"
+                      className="optionsTextInput"
+                      type="number"
+                      step={0.1}
+                      min={0.2}
+                      max={8}
+                      value={editorShapeDraft.depth.toFixed(2)}
+                      onChange={(event) =>
+                        updateEditorShapeDraft("depth", Number(event.target.value))
+                      }
+                    />
+                  </label>
+                  <label className="optionsField" htmlFor="editorDraftYaw">
+                    <span className="optionsFieldLabel">Yaw</span>
+                    <input
+                      id="editorDraftYaw"
+                      className="optionsTextInput"
+                      type="number"
+                      step={1}
+                      min={-180}
+                      max={180}
+                      value={editorShapeDraft.yawDeg.toFixed(0)}
+                      onChange={(event) =>
+                        updateEditorShapeDraft("yawDeg", Number(event.target.value))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="optionsInlineButtons editorModalActions">
+                  <button
+                    type="button"
+                    className="menuActionButton optionsMenuButton"
+                    onClick={createEditorShape}
+                  >
+                    Create Shape
+                  </button>
+                  <button
+                    type="button"
+                    className="menuActionButton optionsMenuButton"
+                    onClick={() => setEditorAddShapeOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {showRaceLobby ? (

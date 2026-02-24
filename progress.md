@@ -935,3 +935,42 @@ v0.8.6.1 full publish update (remove split/merge and restore stable test track):
   - `npm run lint` passed,
   - `npm run typecheck` passed,
   - `npm run build` passed.
+
+v0.8.7.0 full publish update (lightweight 2D Editor v1: menu + template + shape draw/drag):
+- Added a new `EDITOR` entry point to the main menu and a dedicated `editor` menu screen flow in `HelloMarble`.
+- Implemented a new lightweight 2D editor model module:
+  - `client/src/game/editor2d.ts`
+  - includes template geometry math, path sampling, world/view transforms, point projection, obstacle clamping, and layout sanitization.
+- Added Editor v1 layout/shape data model:
+  - templates: `straight`, `arc90_left`, `arc90_right`, `s_curve`
+  - shapes: `rectangle`, `triangle`, `circle`
+  - obstacle fields: name, x, z, width, length, depth, yaw.
+- Implemented editor screen UI + interactions in `HelloMarble.tsx`:
+  - template selection dropdown,
+  - `Add New Shape` modal with shape + dimensions + position inputs,
+  - top-down SVG track renderer for literal template visualization,
+  - shape list panel,
+  - selected-shape inspector with editable numeric fields,
+  - pointer drag to reposition obstacles in X/Z plane,
+  - delete selected + clear all actions,
+  - JSON export/import text area controls.
+- Added editor persistence:
+  - local storage key `get-tilted:v0.8.7.0:editor-layout`.
+- Added dedicated editor styling in a new stylesheet:
+  - `client/src/game/editor2d.css`
+  - includes desktop + mobile layout rules, modal styling, and obstacle visuals/highlights.
+- Version discipline updates:
+  - `client/src/buildInfo.ts` -> `APP_VERSION = 0.8.7.0`
+  - `android/twa-manifest.json` -> `appVersion = 0.8.7.0`, `appVersionCode = 80700`
+  - `android/app/build.gradle` -> `versionName = 0.8.7.0`, `versionCode = 80700`
+- Full Publish Test Mode verification:
+  - `npm run lint` passed,
+  - `npm run typecheck` passed,
+  - `npm run build` passed.
+- Smoke testing:
+  - started local client dev server,
+  - ran Playwright client smoke navigation into `EDITOR`,
+  - verified screenshot output at `output/editor-smoke/shot-0.png` (editor card rendered with template selector, canvas, and JSON panel),
+  - no Playwright error log generated for the smoke run.
+- Notes for next iteration:
+  - current v1 is editor-surface focused; runtime obstacle injection from editor layout into active race track is intentionally deferred to the next iteration.

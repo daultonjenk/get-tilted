@@ -1,0 +1,207 @@
+.editorCard {
+  width: min(980px, 96vw);
+}
+
+.editorPanel {
+  width: min(900px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.64rem;
+}
+
+.editorToolbar {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(2, minmax(150px, 1fr));
+  gap: 0.58rem;
+  align-items: end;
+}
+
+.editorToolbarButton {
+  min-height: 52px;
+  font-size: clamp(0.95rem, 2.6vw, 1.15rem);
+  border-radius: 0.9rem;
+}
+
+.menuActionButton.editorToolbarButton {
+  min-height: 52px;
+  font-size: clamp(1.02rem, 2.5vw, 1.24rem);
+  border-radius: 0.9rem;
+}
+
+.editorWorkspace {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(240px, 1fr);
+  gap: 0.65rem;
+  align-items: start;
+}
+
+.editorCanvasWrap {
+  width: 100%;
+  border: 2px solid rgb(225 243 255 / 88%);
+  border-radius: 0.8rem;
+  overflow: hidden;
+  background: rgb(7 31 52 / 90%);
+}
+
+.editorSvgCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.editorCanvasBackdrop {
+  fill: rgb(5 22 39 / 92%);
+}
+
+.editorTrackSurface {
+  fill: rgb(46 129 176 / 42%);
+  stroke: rgb(212 237 255 / 78%);
+  stroke-width: 2.2;
+}
+
+.editorTrackCenterline {
+  fill: none;
+  stroke: rgb(255 231 170 / 88%);
+  stroke-width: 2.1;
+  stroke-dasharray: 8 6;
+}
+
+.editorObstacle {
+  cursor: grab;
+}
+
+.editorObstacle:active {
+  cursor: grabbing;
+}
+
+.editorObstacleShape {
+  stroke: rgb(9 15 24 / 90%);
+  stroke-width: 1.8;
+}
+
+.editorObstacleShape.rectangle {
+  fill: rgb(217 87 87 / 92%);
+}
+
+.editorObstacleShape.triangle {
+  fill: rgb(255 160 74 / 92%);
+}
+
+.editorObstacleShape.circle {
+  fill: rgb(234 213 116 / 94%);
+}
+
+.editorObstacle.selected .editorObstacleShape {
+  stroke: rgb(235 255 184 / 96%);
+  stroke-width: 2.6;
+}
+
+.editorObstacleIndex {
+  fill: rgb(245 251 255 / 96%);
+  font-size: 12px;
+  font-weight: 900;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.editorInspector {
+  width: 100%;
+  border: 2px solid rgb(218 240 255 / 72%);
+  border-radius: 0.75rem;
+  background: rgb(7 43 71 / 72%);
+  padding: 0.58rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.56rem;
+}
+
+.editorInspectorGrid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.52rem;
+}
+
+.editorShapeList {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.editorActionButtons {
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.editorActionButtons .menuActionButton,
+.editorModalActions .menuActionButton {
+  min-height: 52px;
+  font-size: clamp(1rem, 2.4vw, 1.18rem);
+  border-radius: 0.9rem;
+}
+
+.editorJsonTextArea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.editorModalScrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(5 18 33 / 72%);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  pointer-events: auto;
+}
+
+.editorModalCard {
+  width: min(660px, 92vw);
+  border: 2px solid rgb(231 245 255 / 88%);
+  border-radius: 0.85rem;
+  background:
+    radial-gradient(circle at 18% 12%, rgb(67 172 224 / 24%), transparent 50%),
+    linear-gradient(160deg, rgb(8 35 58 / 97%), rgb(8 53 82 / 94%));
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.62rem;
+}
+
+.editorModalTitle {
+  margin: 0;
+}
+
+.editorModalActions {
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .editorWorkspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .editorToolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .editorInspectorGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .editorActionButtons,
+  .editorModalActions {
+    grid-template-columns: 1fr;
+  }
+}
