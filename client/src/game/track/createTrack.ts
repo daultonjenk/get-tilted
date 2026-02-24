@@ -2,14 +2,36 @@ import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import trackSurfaceUrl from "../../assets/textures/track/track-surface.png";
-import type { TrackBlueprint } from "./modularTrack";
+import {
+  ARC90_OBSTACLE_1_SETPIECE_GROUP_PREFIX,
+  type TrackBlueprint,
+} from "./modularTrack";
 
 export type CreateTrackOptions = {
   seed?: string;
   blueprint?: TrackBlueprint;
+  visualSettings?: {
+    objectTransparencyPercent?: number;
+    showObjectWireframes?: boolean;
+    wireframeUsesObjectTransparency?: boolean;
+  };
   blueprintObstacleSettings?: {
     safeStartStraightCount?: number;
     enableAutomaticObstacles?: boolean;
+    manualTestPieces?: Array<{
+      placementIndex: number;
+      testPieceIndex: number;
+      kind:
+        | "arc90-obstacle-1"
+        | "straight-obstacle-1"
+        | "straight-tight-triangles"
+        | "straight-wide-triangles";
+    }>;
+    manualTestTuning?: {
+      pieceObstacleScales?: number[][];
+      setPieceLengthScale?: number;
+      showObstacleDebugLabels?: boolean;
+    };
   };
 };
 
@@ -54,6 +76,14 @@ export type TrackBuildResult = {
   };
   trialStartZ: number;
   trialFinishZ: number;
+  trialStartGateLocal?: {
+    point: [number, number, number];
+    normal: [number, number, number];
+  };
+  trialFinishGateLocal?: {
+    point: [number, number, number];
+    normal: [number, number, number];
+  };
   physicsDebug: TrackPhysicsDebug;
   updateMovingObstacles: (
     fixedDt: number,
@@ -83,6 +113,10 @@ type PartSpec = {
   outline?: {
     color: number;
     scale?: number;
+    opacity?: number;
+    transparent?: boolean;
+    visible?: boolean;
+    hideBottomEdges?: boolean;
   };
 };
 
@@ -153,7 +187,6 @@ const STATIC_INTERSTITIAL_WALL_JUT_W = TRACK_W / 6;
 const STATIC_INTERSTITIAL_L = 0.62;
 const BLUEPRINT_RENDER_SAMPLE_STEP = 0.25;
 const BLUEPRINT_COLLIDER_SAMPLE_STEP = 1.2;
-const CENTER_GUIDE_HALF_WIDTH = 0.16;
 const BLUEPRINT_COLLIDER_MODE: BlueprintColliderMode = "primitive";
 const COLLIDER_SPAN_OVERLAP_Z = 0.22;
 const COLLIDER_LATERAL_PADDING_X = 0.04;
@@ -225,6 +258,128 @@ function createTrackSurfaceTexture(): THREE.Texture {
   return texture;
 }
 
+function createObstacleDebugLabelSprite(text: string): THREE.Sprite | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return null;
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.42)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.font = "700 78px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+  ctx.lineWidth = 8;
+  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(1.45, 0.72, 1);
+  sprite.renderOrder = 50;
+  // Labels are visual-only; keep them out of gameplay/assist raycasts.
+  sprite.raycast = () => {};
+  return sprite;
+}
+
+function resolveObstacleVisualSettings(
+  visualSettings?: CreateTrackOptions["visualSettings"],
+): {
+  obstacleOpacity: number;
+  showObjectWireframes: boolean;
+  wireframeOpacity: number;
+  wireframeTransparent: boolean;
+} {
+  const transparencyPercent = clamp(
+    typeof visualSettings?.objectTransparencyPercent === "number" &&
+      Number.isFinite(visualSettings.objectTransparencyPercent)
+      ? visualSettings.objectTransparencyPercent
+      : 32,
+    0,
+    85,
+  );
+  const obstacleOpacity = clamp(1 - transparencyPercent / 100, 0.05, 1);
+  const wireframeUsesObjectTransparency =
+    visualSettings?.wireframeUsesObjectTransparency ?? true;
+  const showObjectWireframes = visualSettings?.showObjectWireframes ?? true;
+  const wireframeOpacity = wireframeUsesObjectTransparency ? obstacleOpacity : 1;
+  return {
+    obstacleOpacity,
+    showObjectWireframes,
+    wireframeOpacity,
+    wireframeTransparent: wireframeUsesObjectTransparency && wireframeOpacity < 0.999,
+  };
+}
+
+function createWireframeEdgesGeometry(
+  geometry: THREE.BufferGeometry,
+  hideBottomEdges = false,
+): THREE.BufferGeometry {
+  const edgesGeometry = new THREE.EdgesGeometry(geometry);
+  if (!hideBottomEdges) {
+    return edgesGeometry;
+  }
+
+  const position = edgesGeometry.getAttribute("position");
+  if (!(position instanceof THREE.BufferAttribute) || position.count < 2) {
+    return edgesGeometry;
+  }
+
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < position.count; i += 1) {
+    const y = position.getY(i);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+    return edgesGeometry;
+  }
+  const epsilon = Math.max(1e-4, (maxY - minY) * 1e-4);
+
+  const filteredPositions: number[] = [];
+  for (let i = 0; i + 1 < position.count; i += 2) {
+    const yA = position.getY(i);
+    const yB = position.getY(i + 1);
+    const isBottomEdge = Math.abs(yA - minY) <= epsilon && Math.abs(yB - minY) <= epsilon;
+    if (isBottomEdge) {
+      continue;
+    }
+    filteredPositions.push(
+      position.getX(i),
+      yA,
+      position.getZ(i),
+      position.getX(i + 1),
+      yB,
+      position.getZ(i + 1),
+    );
+  }
+
+  if (filteredPositions.length === 0) {
+    edgesGeometry.dispose();
+    return new THREE.BufferGeometry();
+  }
+
+  const filtered = new THREE.BufferGeometry();
+  filtered.setAttribute("position", new THREE.Float32BufferAttribute(filteredPositions, 3));
+  edgesGeometry.dispose();
+  return filtered;
+}
+
 function applyFloorSegmentUv(geometry: THREE.BoxGeometry, size: THREE.Vector3): void {
   const position = geometry.getAttribute("position");
   const normal = geometry.getAttribute("normal");
@@ -283,11 +438,20 @@ function addVisualPart(group: THREE.Group, spec: PartSpec): THREE.Mesh {
   mesh.receiveShadow = true;
   group.add(mesh);
 
-  if (outline) {
-    const edges = new THREE.EdgesGeometry(mesh.geometry);
+  if (outline && outline.visible !== false) {
+    const edges = createWireframeEdgesGeometry(mesh.geometry, outline.hideBottomEdges ?? false);
+    const position = edges.getAttribute("position");
+    if (!(position instanceof THREE.BufferAttribute) || position.count === 0) {
+      edges.dispose();
+      return mesh;
+    }
     const edgeLines = new THREE.LineSegments(
       edges,
-      new THREE.LineBasicMaterial({ color: outline.color }),
+      new THREE.LineBasicMaterial({
+        color: outline.color,
+        transparent: outline.transparent ?? false,
+        opacity: outline.opacity ?? 1,
+      }),
     );
     const outlineScale = outline.scale ?? 1.001;
     edgeLines.scale.set(outlineScale, outlineScale, outlineScale);
@@ -819,6 +983,9 @@ function addBlueprintPieceSetObstacles(params: {
   placements: TrackBlueprint["placements"];
   seed: string;
   material: THREE.Material;
+  showObjectWireframes: boolean;
+  wireframeOpacity: number;
+  wireframeTransparent: boolean;
   safeStartStraightCount?: number;
 }): void {
   const { group, boardWallBody, placements, seed, material } = params;
@@ -891,12 +1058,24 @@ function addBlueprintPieceSetObstacles(params: {
     mesh.rotation.set(rotation.x, rotation.y, rotation.z);
     mesh.castShadow = false;
     mesh.receiveShadow = true;
-    const edgeLines = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry),
-      new THREE.LineBasicMaterial({ color: 0x3d0b0b }),
-    );
-    edgeLines.scale.set(1.002, 1.002, 1.002);
-    mesh.add(edgeLines);
+    if (params.showObjectWireframes) {
+      const edgesGeometry = createWireframeEdgesGeometry(geometry, true);
+      const position = edgesGeometry.getAttribute("position");
+      if (position instanceof THREE.BufferAttribute && position.count > 0) {
+        const edgeLines = new THREE.LineSegments(
+          edgesGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0x3d0b0b,
+            transparent: params.wireframeTransparent,
+            opacity: params.wireframeOpacity,
+          }),
+        );
+        edgeLines.scale.set(1.002, 1.002, 1.002);
+        mesh.add(edgeLines);
+      } else {
+        edgesGeometry.dispose();
+      }
+    }
     group.add(mesh);
 
     localQuat.set(quat.x, quat.y, quat.z, quat.w);
@@ -1005,6 +1184,766 @@ function addBlueprintPieceSetObstacles(params: {
     placeMiddleBlock(distances[6]!, TRACK_W * 0.24, 0.78);
     placeCenteredGate(distances[7]!, gateGap);
   }
+}
+
+function addBlueprintManualObstaclePieces(params: {
+  group: THREE.Group;
+  boardWallBody: CANNON.Body;
+  placements: TrackBlueprint["placements"];
+  material: THREE.Material;
+  showObjectWireframes: boolean;
+  wireframeOpacity: number;
+  wireframeTransparent: boolean;
+  manualTestPieces: NonNullable<CreateTrackOptions["blueprintObstacleSettings"]>["manualTestPieces"];
+  manualTestTuning?: NonNullable<CreateTrackOptions["blueprintObstacleSettings"]>["manualTestTuning"];
+}): void {
+  const { group, boardWallBody, placements, material, manualTestPieces, manualTestTuning } = params;
+  if (!manualTestPieces || manualTestPieces.length === 0) {
+    return;
+  }
+
+  const obstacleHeight = BLUEPRINT_SET_PIECE_OBSTACLE_HEIGHT;
+  const obstacleDepth = Math.max(RAIL_THICK * 1.25, 0.44);
+  const verticalOffset = obstacleHeight * 0.5 + 0.015;
+  const innerInset = RAIL_INSET + RAIL_THICK + 0.15;
+  const minGap = MARBLE_RADIUS * 2 * BLUEPRINT_SET_PIECE_MIN_CLEARANCE_MULTIPLIER;
+  const marbleDiameter = MARBLE_RADIUS * 2;
+  const lengthScale = clamp(manualTestTuning?.setPieceLengthScale ?? 1, 0.6, 1.8);
+  const pieceObstacleScales = Array.isArray(manualTestTuning?.pieceObstacleScales)
+    ? manualTestTuning.pieceObstacleScales
+    : [];
+  const showObstacleDebugLabels = manualTestTuning?.showObstacleDebugLabels === true;
+  const basis = new THREE.Matrix4();
+  const rotation = new THREE.Euler(0, 0, 0, "XYZ");
+  const localQuat = new CANNON.Quaternion();
+
+  const getObstacleScale = (pieceIndex: number, obstacleIndex: number): number => {
+    const pieceScales = pieceObstacleScales[pieceIndex];
+    const value = Array.isArray(pieceScales) ? pieceScales[obstacleIndex] : undefined;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return 1;
+    }
+    return clamp(value, 0.5, 1.8);
+  };
+
+  const addRectObstacleAtPose = (
+    pose: BlueprintSweepPose,
+    centerX: number,
+    width: number,
+    depth = obstacleDepth,
+    flushLeft = false,
+    flushRight = false,
+    labelText?: string,
+  ): void => {
+    if (width <= 0.2 || depth <= 0.2) {
+      return;
+    }
+    basis.makeBasis(pose.right, pose.up, pose.tangent);
+    const quat = new THREE.Quaternion().setFromRotationMatrix(basis);
+    rotation.setFromQuaternion(quat, "XYZ");
+    const center = pose.center
+      .clone()
+      .addScaledVector(pose.right, centerX)
+      .addScaledVector(pose.up, verticalOffset);
+
+    const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+    const leftEdge = centerX - width * 0.5;
+    const rightEdge = centerX + width * 0.5;
+    const touchingLeftWall = flushLeft || leftEdge <= -innerHalf + BLUEPRINT_OBSTACLE_WALL_TOUCH_EPSILON;
+    const touchingRightWall =
+      flushRight || rightEdge >= innerHalf - BLUEPRINT_OBSTACLE_WALL_TOUCH_EPSILON;
+    const cornerRadius = clamp(
+      Math.min(width, depth) * BLUEPRINT_OBSTACLE_CORNER_RADIUS_SCALE,
+      BLUEPRINT_OBSTACLE_CORNER_RADIUS_MIN,
+      BLUEPRINT_OBSTACLE_CORNER_RADIUS_MAX,
+    );
+    const geometry = createRoundedObstacleGeometry(width, obstacleHeight, depth, {
+      bottomLeft: touchingLeftWall ? 0 : cornerRadius,
+      topLeft: touchingLeftWall ? 0 : cornerRadius,
+      bottomRight: touchingRightWall ? 0 : cornerRadius,
+      topRight: touchingRightWall ? 0 : cornerRadius,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(center);
+    mesh.rotation.set(rotation.x, rotation.y, rotation.z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    if (params.showObjectWireframes) {
+      const edgesGeometry = createWireframeEdgesGeometry(geometry, true);
+      const position = edgesGeometry.getAttribute("position");
+      if (position instanceof THREE.BufferAttribute && position.count > 0) {
+        const edgeLines = new THREE.LineSegments(
+          edgesGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0x3d0b0b,
+            transparent: params.wireframeTransparent,
+            opacity: params.wireframeOpacity,
+          }),
+        );
+        edgeLines.scale.set(1.002, 1.002, 1.002);
+        mesh.add(edgeLines);
+      } else {
+        edgesGeometry.dispose();
+      }
+    }
+    if (labelText) {
+      const labelSprite = createObstacleDebugLabelSprite(labelText);
+      if (labelSprite) {
+        labelSprite.position.set(0, obstacleHeight * 0.8, 0);
+        mesh.add(labelSprite);
+      }
+    }
+    group.add(mesh);
+
+    localQuat.set(quat.x, quat.y, quat.z, quat.w);
+    boardWallBody.addShape(
+      geometryToTrimesh(geometry),
+      new CANNON.Vec3(center.x, center.y, center.z),
+      localQuat,
+    );
+  };
+
+  const addTriangleObstacleAtPose = (
+    pose: BlueprintSweepPose,
+    centerX: number,
+    baseWidth: number,
+    depth: number,
+    labelText?: string,
+  ): void => {
+    if (baseWidth <= 0.25 || depth <= 0.25) {
+      return;
+    }
+    basis.makeBasis(pose.right, pose.up, pose.tangent);
+    const quat = new THREE.Quaternion().setFromRotationMatrix(basis);
+    rotation.setFromQuaternion(quat, "XYZ");
+    const center = pose.center
+      .clone()
+      .addScaledVector(pose.right, centerX)
+      .addScaledVector(pose.up, verticalOffset);
+
+    const halfW = baseWidth * 0.5;
+    const halfD = depth * 0.5;
+    const shape = new THREE.Shape();
+    // Tip points toward player spawn (backward along tangent).
+    shape.moveTo(0, -halfD);
+    shape.lineTo(halfW, halfD);
+    shape.lineTo(-halfW, halfD);
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: obstacleHeight,
+      bevelEnabled: false,
+      curveSegments: BLUEPRINT_OBSTACLE_CORNER_CURVE_SEGMENTS,
+    });
+    geometry.rotateX(Math.PI / 2);
+    geometry.translate(0, obstacleHeight * 0.5, 0);
+    geometry.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(center);
+    mesh.rotation.set(rotation.x, rotation.y, rotation.z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    if (params.showObjectWireframes) {
+      const edgesGeometry = createWireframeEdgesGeometry(geometry, true);
+      const position = edgesGeometry.getAttribute("position");
+      if (position instanceof THREE.BufferAttribute && position.count > 0) {
+        const edgeLines = new THREE.LineSegments(
+          edgesGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0x3d0b0b,
+            transparent: params.wireframeTransparent,
+            opacity: params.wireframeOpacity,
+          }),
+        );
+        edgeLines.scale.set(1.002, 1.002, 1.002);
+        mesh.add(edgeLines);
+      } else {
+        edgesGeometry.dispose();
+      }
+    }
+    if (labelText) {
+      const labelSprite = createObstacleDebugLabelSprite(labelText);
+      if (labelSprite) {
+        labelSprite.position.set(0, obstacleHeight * 0.82, 0);
+        mesh.add(labelSprite);
+      }
+    }
+    group.add(mesh);
+
+    localQuat.set(quat.x, quat.y, quat.z, quat.w);
+    boardWallBody.addShape(
+      geometryToTrimesh(geometry),
+      new CANNON.Vec3(center.x, center.y, center.z),
+      localQuat,
+    );
+  };
+
+  const addCircleObstacleAtPose = (
+    pose: BlueprintSweepPose,
+    centerX: number,
+    radius: number,
+    radialSegments: number,
+    labelText?: string,
+  ): void => {
+    if (radius <= 0.2) {
+      return;
+    }
+    basis.makeBasis(pose.right, pose.up, pose.tangent);
+    const quat = new THREE.Quaternion().setFromRotationMatrix(basis);
+    rotation.setFromQuaternion(quat, "XYZ");
+    const center = pose.center
+      .clone()
+      .addScaledVector(pose.right, centerX)
+      .addScaledVector(pose.up, verticalOffset);
+
+    const geometry = new THREE.CylinderGeometry(
+      radius,
+      radius,
+      obstacleHeight,
+      Math.max(8, Math.floor(radialSegments)),
+      1,
+      false,
+    );
+    geometry.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(center);
+    mesh.rotation.set(rotation.x, rotation.y, rotation.z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    if (params.showObjectWireframes) {
+      const edgesGeometry = createWireframeEdgesGeometry(geometry, true);
+      const position = edgesGeometry.getAttribute("position");
+      if (position instanceof THREE.BufferAttribute && position.count > 0) {
+        const edgeLines = new THREE.LineSegments(
+          edgesGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0x3d0b0b,
+            transparent: params.wireframeTransparent,
+            opacity: params.wireframeOpacity,
+          }),
+        );
+        edgeLines.scale.set(1.002, 1.002, 1.002);
+        mesh.add(edgeLines);
+      } else {
+        edgesGeometry.dispose();
+      }
+    }
+    if (labelText) {
+      const labelSprite = createObstacleDebugLabelSprite(labelText);
+      if (labelSprite) {
+        labelSprite.position.set(0, obstacleHeight * 0.82, 0);
+        mesh.add(labelSprite);
+      }
+    }
+    group.add(mesh);
+
+    localQuat.set(quat.x, quat.y, quat.z, quat.w);
+    boardWallBody.addShape(
+      geometryToTrimesh(geometry),
+      new CANNON.Vec3(center.x, center.y, center.z),
+      localQuat,
+    );
+  };
+
+  const addWallTriangleObstacleAtPose = (
+    pose: BlueprintSweepPose,
+    side: -1 | 1,
+    protrusion: number,
+    length: number,
+    tipBias: number,
+    labelText?: string,
+  ): void => {
+    if (protrusion <= 0.25 || length <= 0.25) {
+      return;
+    }
+    const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+    const maxProtrusion = Math.max(0.8, innerHalf * 2 - minGap - 0.35);
+    const clampedProtrusion = clamp(protrusion, 0.7, maxProtrusion);
+    const clampedLength = clamp(length, 0.8, 8);
+    const halfLength = clampedLength * 0.5;
+    const tipTangent = clamp(tipBias, -0.9, 0.9) * halfLength;
+    const wallX = side < 0 ? -innerHalf : innerHalf;
+    const tipX = side < 0 ? wallX + clampedProtrusion : wallX - clampedProtrusion;
+
+    basis.makeBasis(pose.right, pose.up, pose.tangent);
+    const quat = new THREE.Quaternion().setFromRotationMatrix(basis);
+    rotation.setFromQuaternion(quat, "XYZ");
+    const center = pose.center.clone().addScaledVector(pose.up, verticalOffset);
+
+    const shape = new THREE.Shape();
+    shape.moveTo(wallX, -halfLength);
+    shape.lineTo(wallX, halfLength);
+    shape.lineTo(tipX, tipTangent);
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: obstacleHeight,
+      bevelEnabled: false,
+      curveSegments: BLUEPRINT_OBSTACLE_CORNER_CURVE_SEGMENTS,
+    });
+    geometry.rotateX(Math.PI / 2);
+    geometry.translate(0, obstacleHeight * 0.5, 0);
+    geometry.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(center);
+    mesh.rotation.set(rotation.x, rotation.y, rotation.z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    if (params.showObjectWireframes) {
+      const edgesGeometry = createWireframeEdgesGeometry(geometry, true);
+      const position = edgesGeometry.getAttribute("position");
+      if (position instanceof THREE.BufferAttribute && position.count > 0) {
+        const edgeLines = new THREE.LineSegments(
+          edgesGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0x3d0b0b,
+            transparent: params.wireframeTransparent,
+            opacity: params.wireframeOpacity,
+          }),
+        );
+        edgeLines.scale.set(1.002, 1.002, 1.002);
+        mesh.add(edgeLines);
+      } else {
+        edgesGeometry.dispose();
+      }
+    }
+    if (labelText) {
+      const labelSprite = createObstacleDebugLabelSprite(labelText);
+      if (labelSprite) {
+        labelSprite.position.set(0, obstacleHeight * 0.82, 0);
+        mesh.add(labelSprite);
+      }
+    }
+    group.add(mesh);
+
+    localQuat.set(quat.x, quat.y, quat.z, quat.w);
+    boardWallBody.addShape(
+      geometryToTrimesh(geometry),
+      new CANNON.Vec3(center.x, center.y, center.z),
+      localQuat,
+    );
+  };
+
+  const placeWallJut = (
+    pose: BlueprintSweepPose,
+    side: -1 | 1,
+    protrusion: number,
+    labelText?: string,
+  ): void => {
+    const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+    const maxProtrusion = Math.max(0.8, innerHalf * 2 - minGap - 0.45);
+    const width = clamp(protrusion, 0.75, maxProtrusion);
+    if (side < 0) {
+      const minX = -innerHalf;
+      addRectObstacleAtPose(
+        pose,
+        minX + width * 0.5,
+        width,
+        obstacleDepth,
+        true,
+        false,
+        labelText,
+      );
+      return;
+    }
+    const maxX = innerHalf;
+    addRectObstacleAtPose(
+      pose,
+      maxX - width * 0.5,
+      width,
+      obstacleDepth,
+      false,
+      true,
+      labelText,
+    );
+  };
+
+  const placeSymmetricGate = (
+    pose: BlueprintSweepPose,
+    desiredOpeningWidth: number,
+    leftObstacleScale = 1,
+    rightObstacleScale = leftObstacleScale,
+    leftLabelText?: string,
+    rightLabelText?: string,
+  ): void => {
+    const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+    const safeOpening = clamp(
+      desiredOpeningWidth,
+      minGap,
+      Math.max(minGap, innerHalf * 2 - 1.5),
+    );
+    const baseProtrusion = Math.max(0.75, innerHalf - safeOpening * 0.5);
+    placeWallJut(
+      pose,
+      -1,
+      baseProtrusion * clamp(leftObstacleScale, 0.5, 1.8),
+      leftLabelText,
+    );
+    placeWallJut(
+      pose,
+      1,
+      baseProtrusion * clamp(rightObstacleScale, 0.5, 1.8),
+      rightLabelText,
+    );
+  };
+
+  const placeMiddleBlock = (
+    pose: BlueprintSweepPose,
+    width: number,
+    offset = 0,
+    labelText?: string,
+  ): void => {
+    const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+    const maxWidth = Math.max(0.8, innerHalf * 2 - minGap * 2);
+    const clampedWidth = clamp(width, 0.75, maxWidth);
+    const half = clampedWidth * 0.5;
+    const minCenter = -innerHalf + minGap + half;
+    const maxCenter = innerHalf - minGap - half;
+    if (maxCenter < minCenter) {
+      return;
+    }
+    addRectObstacleAtPose(
+      pose,
+      clamp(offset, minCenter, maxCenter),
+      clampedWidth,
+      obstacleDepth,
+      false,
+      false,
+      labelText,
+    );
+  };
+
+  const getManualSetPieceAuthoredLength = (
+    kind:
+      | "arc90-obstacle-1"
+      | "straight-obstacle-1"
+      | "straight-tight-triangles"
+      | "straight-wide-triangles",
+  ): number => {
+    if (kind === "arc90-obstacle-1") {
+      return 14;
+    }
+    if (kind === "straight-obstacle-1") {
+      return 28;
+    }
+    if (kind === "straight-tight-triangles") {
+      return 34;
+    }
+    return 52;
+  };
+
+  const getManualSetPiecePlacementKind = (
+    kind:
+      | "arc90-obstacle-1"
+      | "straight-obstacle-1"
+      | "straight-tight-triangles"
+      | "straight-wide-triangles",
+  ): "straight" | "arc90" => {
+    if (kind === "arc90-obstacle-1") {
+      return "arc90";
+    }
+    return "straight";
+  };
+
+  const sortedSpecs = [...manualTestPieces].sort((a, b) => a.placementIndex - b.placementIndex);
+  for (const [sortedIndex, spec] of sortedSpecs.entries()) {
+    const placement = placements[spec.placementIndex];
+    if (!placement || placement.kind !== getManualSetPiecePlacementKind(spec.kind)) {
+      continue;
+    }
+    const testPieceIndex =
+      typeof spec.testPieceIndex === "number" && Number.isFinite(spec.testPieceIndex)
+        ? Math.max(0, Math.floor(spec.testPieceIndex))
+        : sortedIndex;
+    let placedObstacleCount = 0;
+    const nextObstacleLabel = (): string | undefined => {
+      if (!showObstacleDebugLabels) {
+        return undefined;
+      }
+      placedObstacleCount += 1;
+      return `${testPieceIndex + 1}-${placedObstacleCount}`;
+    };
+    const pieceSamples = buildBlueprintSweepSamples([placement], BLUEPRINT_RENDER_SAMPLE_STEP);
+    const pieceFrames = buildBlueprintSweepFrames(pieceSamples);
+    if (pieceSamples.length < 3 || pieceFrames.length !== pieceSamples.length) {
+      continue;
+    }
+    const lookup = buildBlueprintSweepDistanceLookup(pieceSamples);
+    if (lookup.totalLength < BLUEPRINT_SET_PIECE_MIN_LENGTH) {
+      continue;
+    }
+    const authoredLength = getManualSetPieceAuthoredLength(spec.kind);
+    const scaledAuthoredLength = authoredLength * lengthScale;
+    const effectiveLength = Math.min(lookup.totalLength, scaledAuthoredLength);
+    const centeredOffset = (lookup.totalLength - effectiveLength) * 0.5;
+    const edgePadding = clamp(effectiveLength * 0.19, 1.4, 2.6);
+    const startDistance = centeredOffset + edgePadding;
+    const endDistance = centeredOffset + effectiveLength - edgePadding;
+    const span = endDistance - startDistance;
+    if (span < 5.5) {
+      continue;
+    }
+    const withPose = (distance: number, handler: (pose: BlueprintSweepPose) => void): void => {
+      const pose = sampleBlueprintSweepPoseAtDistance(pieceSamples, pieceFrames, lookup, distance);
+      if (pose) {
+        handler(pose);
+      }
+    };
+
+    if (spec.kind === "arc90-obstacle-1") {
+      const innerWallSide: -1 | 1 = placement.turnDeg >= 0 ? -1 : 1;
+      const outerWallSide: -1 | 1 = innerWallSide === -1 ? 1 : -1;
+      const spanPlacements: TrackBlueprint["placements"] = [];
+      const incomingPlacement = placements[spec.placementIndex - 1];
+      const outgoingPlacement = placements[spec.placementIndex + 1];
+      if (incomingPlacement) {
+        spanPlacements.push(incomingPlacement);
+      }
+      spanPlacements.push(placement);
+      if (outgoingPlacement) {
+        spanPlacements.push(outgoingPlacement);
+      }
+
+      const spanSamples = buildBlueprintSweepSamples(spanPlacements, BLUEPRINT_RENDER_SAMPLE_STEP);
+      const spanFrames = buildBlueprintSweepFrames(spanSamples);
+      const spanLookup =
+        spanSamples.length >= 3 && spanFrames.length === spanSamples.length
+          ? buildBlueprintSweepDistanceLookup(spanSamples)
+          : null;
+      const spanSupportsSampling =
+        spanLookup != null && spanLookup.totalLength >= BLUEPRINT_SET_PIECE_MIN_LENGTH;
+      const sampleAcrossArcSpan = (
+        ratio: number,
+        fallbackDistance: number,
+        handler: (pose: BlueprintSweepPose) => void,
+      ): void => {
+        if (spanSupportsSampling && spanLookup) {
+          const edgePad = clamp(spanLookup.totalLength * 0.08, 1, 2.4);
+          const minDistance = edgePad;
+          const maxDistance = Math.max(minDistance, spanLookup.totalLength - edgePad);
+          const t = clamp(ratio, 0, 1);
+          const distance = minDistance + (maxDistance - minDistance) * t;
+          const pose = sampleBlueprintSweepPoseAtDistance(
+            spanSamples,
+            spanFrames,
+            spanLookup,
+            distance,
+          );
+          if (pose) {
+            handler(pose);
+            return;
+          }
+        }
+        withPose(fallbackDistance, handler);
+      };
+
+      const bar1Distance = startDistance + span * 0.18;
+      const bar2Distance = startDistance + span * 0.4;
+      const circleDistance = startDistance + span * 0.56;
+      const triangleOuterDistance = startDistance + span * 0.78;
+      const triangleMirrorDistance = startDistance + span * 0.9;
+
+      sampleAcrossArcSpan(0.14, bar1Distance, (pose) => {
+        placeWallJut(
+          pose,
+          innerWallSide,
+          TRACK_W * 0.33 * getObstacleScale(testPieceIndex, 0),
+          nextObstacleLabel(),
+        );
+      });
+
+      sampleAcrossArcSpan(0.3, bar2Distance, (pose) => {
+        placeWallJut(
+          pose,
+          outerWallSide,
+          TRACK_W * 0.33 * getObstacleScale(testPieceIndex, 1),
+          nextObstacleLabel(),
+        );
+      });
+
+      const placeStaggeredTriangle = (pose: BlueprintSweepPose, side: -1 | 1): void => {
+        const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+        const scale = getObstacleScale(testPieceIndex, 2);
+        const maxProtrusion = Math.max(1.05, innerHalf * 2 - minGap - 0.35);
+        const protrusion = clamp(TRACK_W * 0.58 * scale, 1.15, maxProtrusion);
+        addWallTriangleObstacleAtPose(
+          pose,
+          side,
+          protrusion,
+          4.7 * scale,
+          0,
+          nextObstacleLabel(),
+        );
+      };
+
+      const placeExitCircle = (pose: BlueprintSweepPose): void => {
+        const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+        const scale = getObstacleScale(testPieceIndex, 3);
+        const radius = clamp(innerHalf * 0.72 * scale, marbleDiameter * 0.8, innerHalf * 0.84);
+        addCircleObstacleAtPose(pose, 0, radius, 24, nextObstacleLabel());
+      };
+      sampleAcrossArcSpan(0.53, circleDistance, (pose) => {
+        placeExitCircle(pose);
+      });
+      sampleAcrossArcSpan(0.76, triangleOuterDistance, (pose) => {
+        // First triangle on the inner wall near the second straight section.
+        placeStaggeredTriangle(pose, innerWallSide);
+      });
+      sampleAcrossArcSpan(0.9, triangleMirrorDistance, (pose) => {
+        // Mirrored follow-up triangle on the opposite wall, staggered to create a pass-through lane.
+        placeStaggeredTriangle(pose, outerWallSide);
+      });
+      continue;
+    }
+
+    if (spec.kind === "straight-obstacle-1") {
+      const gateOpeningWidth = marbleDiameter * 1.5;
+      const triangleWallGap = marbleDiameter * 1.5;
+      const lowerPairDistance = startDistance + span * 0.08;
+      const triangleDistance = startDistance + span * 0.38;
+      const upperPairDistance = startDistance + span * 0.68;
+      const topBarDistance = startDistance + span * 0.92;
+
+      withPose(lowerPairDistance, (pose) => {
+        placeSymmetricGate(
+          pose,
+          gateOpeningWidth,
+          getObstacleScale(testPieceIndex, 0),
+          getObstacleScale(testPieceIndex, 1),
+          nextObstacleLabel(),
+          nextObstacleLabel(),
+        );
+      });
+
+      withPose(triangleDistance, (pose) => {
+        const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+        const scale = getObstacleScale(testPieceIndex, 2);
+        const maxBaseWidth = Math.max(0.9, innerHalf * 2 - triangleWallGap * 2) * scale;
+        addTriangleObstacleAtPose(pose, 0, maxBaseWidth, 3.2 * scale, nextObstacleLabel());
+      });
+
+      withPose(upperPairDistance, (pose) => {
+        placeSymmetricGate(
+          pose,
+          gateOpeningWidth,
+          getObstacleScale(testPieceIndex, 3),
+          getObstacleScale(testPieceIndex, 4),
+          nextObstacleLabel(),
+          nextObstacleLabel(),
+        );
+      });
+
+      withPose(topBarDistance, (pose) => {
+        placeMiddleBlock(
+          pose,
+          TRACK_W * 0.34 * getObstacleScale(testPieceIndex, 5),
+          0,
+          nextObstacleLabel(),
+        );
+      });
+      continue;
+    }
+
+    if (spec.kind === "straight-tight-triangles") {
+      const obstacleCount = 7;
+      const zigzagStart = startDistance + span * 0.07;
+      const zigzagEnd = startDistance + span * 0.93;
+      const zigzagStep = (zigzagEnd - zigzagStart) / (obstacleCount - 1);
+      const oppositeWallClearance = marbleDiameter * 2;
+      const triangleLength = 6.3;
+
+      for (let i = 0; i < obstacleCount; i += 1) {
+        const distance = zigzagStart + zigzagStep * i;
+        const side: -1 | 1 = i % 2 === 0 ? -1 : 1;
+        withPose(distance, (pose) => {
+          const scale = getObstacleScale(testPieceIndex, i);
+          const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+          const traversableWidth = innerHalf * 2;
+          const protrusion = clamp(
+            (traversableWidth - oppositeWallClearance) * scale,
+            0.75,
+            Math.max(0.85, innerHalf * 2 - minGap - 0.35),
+          );
+          addWallTriangleObstacleAtPose(
+            pose,
+            side,
+            protrusion,
+            triangleLength * scale,
+            0,
+            nextObstacleLabel(),
+          );
+        });
+      }
+      continue;
+    }
+
+    if (spec.kind === "straight-wide-triangles") {
+      const obstacleCount = 7;
+      const zigzagStart = startDistance + span * 0.05;
+      const zigzagEnd = startDistance + span * 0.95;
+      const zigzagStep = (zigzagEnd - zigzagStart) / (obstacleCount - 1);
+      const oppositeWallClearance = marbleDiameter * 2;
+      const triangleLength = 6.3;
+
+      for (let i = 0; i < obstacleCount; i += 1) {
+        const distance = zigzagStart + zigzagStep * i;
+        const side: -1 | 1 = i % 2 === 0 ? -1 : 1;
+        withPose(distance, (pose) => {
+          const scale = getObstacleScale(testPieceIndex, i);
+          const innerHalf = Math.max(1.4, pose.width * 0.5 - innerInset);
+          const traversableWidth = innerHalf * 2;
+          const protrusion = clamp(
+            (traversableWidth - oppositeWallClearance) * scale,
+            0.75,
+            Math.max(0.85, innerHalf * 2 - minGap - 0.35),
+          );
+          addWallTriangleObstacleAtPose(
+            pose,
+            side,
+            protrusion,
+            triangleLength * scale,
+            0,
+            nextObstacleLabel(),
+          );
+        });
+      }
+    }
+  }
+}
+
+function collectAuthoredSetPieceObstacleSpecs(
+  placements: TrackBlueprint["placements"],
+): Array<{
+  placementIndex: number;
+  testPieceIndex: number;
+  kind: "arc90-obstacle-1";
+}> {
+  let testPieceIndex = 0;
+  const specs: Array<{
+    placementIndex: number;
+    testPieceIndex: number;
+    kind: "arc90-obstacle-1";
+  }> = [];
+  for (let index = 0; index < placements.length; index += 1) {
+    const placement = placements[index];
+    if (!placement || placement.kind !== "arc90") {
+      continue;
+    }
+    if (
+      !placement.groupId ||
+      !placement.groupId.startsWith(ARC90_OBSTACLE_1_SETPIECE_GROUP_PREFIX)
+    ) {
+      continue;
+    }
+    specs.push({
+      placementIndex: index,
+      testPieceIndex,
+      kind: "arc90-obstacle-1",
+    });
+    testPieceIndex += 1;
+  }
+  return specs;
 }
 
 function toSweepWorldPoint(
@@ -1383,6 +2322,7 @@ function addBlueprintPrimitiveColliders(
 function createTrackFromBlueprint(
   blueprint: TrackBlueprint,
   obstacleSettings?: CreateTrackOptions["blueprintObstacleSettings"],
+  visualSettings?: CreateTrackOptions["visualSettings"],
 ): TrackBuildResult {
   const group = new THREE.Group();
   group.name = "track";
@@ -1414,22 +2354,15 @@ function createTrackFromBlueprint(
     color: 0xf2e7cd,
     side: THREE.DoubleSide,
   });
-  const guideMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffe08a,
-    emissive: 0x39290b,
-    emissiveIntensity: 0.45,
-    roughness: 0.42,
-    metalness: 0.04,
-    side: THREE.DoubleSide,
-  });
   const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
   const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
+  const obstacleVisualSettings = resolveObstacleVisualSettings(visualSettings);
   const setPieceObstacleMaterial = new THREE.MeshStandardMaterial({
     color: 0xd54747,
     roughness: 0.42,
     metalness: 0.04,
     transparent: true,
-    opacity: 0.88,
+    opacity: obstacleVisualSettings.obstacleOpacity,
   });
 
   const startTopBackPoint = new THREE.Vector3(0, FLOOR_THICK / 2, -START_LENGTH / 2);
@@ -1510,21 +2443,11 @@ function createTrackFromBlueprint(
     };
   });
 
-  const centerGuideGeometry = buildSweptRectGeometry(samples, frames, () => ({
-    minX: -CENTER_GUIDE_HALF_WIDTH,
-    maxX: CENTER_GUIDE_HALF_WIDTH,
-    minY: 0.01,
-    maxY: 0.04,
-  }));
-
   const renderGeometries: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }> = [];
   if (floorGeometry) renderGeometries.push({ geometry: floorGeometry, material: floorMaterial });
   if (leftRailGeometry) renderGeometries.push({ geometry: leftRailGeometry, material: railMaterial });
   if (rightRailGeometry) renderGeometries.push({ geometry: rightRailGeometry, material: railMaterial });
   if (roofGeometry) renderGeometries.push({ geometry: roofGeometry, material: roofMaterial });
-  if (centerGuideGeometry) {
-    renderGeometries.push({ geometry: centerGuideGeometry, material: guideMaterial });
-  }
 
   for (const entry of renderGeometries) {
     const mesh = new THREE.Mesh(entry.geometry, entry.material);
@@ -1658,7 +2581,26 @@ function createTrackFromBlueprint(
       placements: sourcePlacements,
       seed: blueprint.seed,
       material: setPieceObstacleMaterial,
+      showObjectWireframes: obstacleVisualSettings.showObjectWireframes,
+      wireframeOpacity: obstacleVisualSettings.wireframeOpacity,
+      wireframeTransparent: obstacleVisualSettings.wireframeTransparent,
       safeStartStraightCount: obstacleSettings?.safeStartStraightCount,
+    });
+  }
+  const authoredSetPieceManualSpecs = collectAuthoredSetPieceObstacleSpecs(sourcePlacements);
+  const requestedManualSpecs = obstacleSettings?.manualTestPieces ?? [];
+  const manualObstacleSpecs = [...authoredSetPieceManualSpecs, ...requestedManualSpecs];
+  if (manualObstacleSpecs.length > 0) {
+    addBlueprintManualObstaclePieces({
+      group,
+      boardWallBody,
+      placements: sourcePlacements,
+      material: setPieceObstacleMaterial,
+      showObjectWireframes: obstacleVisualSettings.showObjectWireframes,
+      wireframeOpacity: obstacleVisualSettings.wireframeOpacity,
+      wireframeTransparent: obstacleVisualSettings.wireframeTransparent,
+      manualTestPieces: manualObstacleSpecs,
+      manualTestTuning: obstacleSettings?.manualTestTuning,
     });
   }
 
@@ -1702,6 +2644,12 @@ function createTrackFromBlueprint(
     .add(new THREE.Vector3(0, MARBLE_RADIUS + 0.6, 0));
   const trialStartZ = spawn.z + 2;
   const trialFinishZ = finishStart.z + Math.max(FINISH_LENGTH * 0.6, 4);
+  const trialStartGatePoint = spawnCenter.clone().addScaledVector(spawnForward, 2);
+  const trialStartGateNormal = spawnForward.clone().normalize();
+  const trialFinishGatePoint = finishStart
+    .clone()
+    .addScaledVector(finishDirection, Math.max(FINISH_LENGTH * 0.6, 4));
+  const trialFinishGateNormal = finishDirection.clone().normalize();
 
   const finishYaw = Math.atan2(finishDirection.x, finishDirection.z);
 
@@ -1758,6 +2706,14 @@ function createTrackFromBlueprint(
     offCourseBoundsLocal,
     trialStartZ,
     trialFinishZ,
+    trialStartGateLocal: {
+      point: toTuple(trialStartGatePoint),
+      normal: toTuple(trialStartGateNormal),
+    },
+    trialFinishGateLocal: {
+      point: toTuple(trialFinishGatePoint),
+      normal: toTuple(trialFinishGateNormal),
+    },
     physicsDebug: {
       colliderPieceCount,
       primitiveShapeCount: countBodyShapes([boardBody, boardWallBody]),
@@ -1773,7 +2729,11 @@ function createTrackFromBlueprint(
 
 export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   if (opts?.blueprint) {
-    return createTrackFromBlueprint(opts.blueprint, opts.blueprintObstacleSettings);
+    return createTrackFromBlueprint(
+      opts.blueprint,
+      opts.blueprintObstacleSettings,
+      opts.visualSettings,
+    );
   }
 
   const obstacleSeed = opts?.seed ?? DEFAULT_OBSTACLE_SEED;
@@ -1800,10 +2760,11 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   });
   const startMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0x66bb6a });
   const finishMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xef5350 });
+  const obstacleVisualSettings = resolveObstacleVisualSettings(opts?.visualSettings);
   const obstacleMaterial = new THREE.MeshStandardMaterial({
     color: 0xff0000,
     transparent: true,
-    opacity: 0.75,
+    opacity: obstacleVisualSettings.obstacleOpacity,
     roughness: 0.4,
     metalness: 0.02,
   });
@@ -1935,7 +2896,14 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       position: localPos,
       rotation: new THREE.Euler(0, 0, 0, "XYZ"),
       material: obstacleMaterial,
-      outline: { color: 0x330000, scale: 1.002 },
+      outline: {
+        color: 0x330000,
+        scale: 1.002,
+        opacity: obstacleVisualSettings.wireframeOpacity,
+        transparent: obstacleVisualSettings.wireframeTransparent,
+        visible: obstacleVisualSettings.showObjectWireframes,
+        hideBottomEdges: true,
+      },
     });
 
     const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
@@ -1971,7 +2939,14 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       position: localPos,
       rotation: new THREE.Euler(0, 0, 0, "XYZ"),
       material: obstacleMaterial,
-      outline: { color: 0x330000, scale: 1.002 },
+      outline: {
+        color: 0x330000,
+        scale: 1.002,
+        opacity: obstacleVisualSettings.wireframeOpacity,
+        transparent: obstacleVisualSettings.wireframeTransparent,
+        visible: obstacleVisualSettings.showObjectWireframes,
+        hideBottomEdges: true,
+      },
     });
 
     const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
@@ -2231,12 +3206,24 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     wallMesh.position.set(0, y, params.z);
     wallMesh.castShadow = false;
     wallMesh.receiveShadow = true;
-    const edgeLines = new THREE.LineSegments(
-      new THREE.EdgesGeometry(wallGeometry),
-      new THREE.LineBasicMaterial({ color: 0x330000 }),
-    );
-    edgeLines.scale.set(1.002, 1.002, 1.002);
-    wallMesh.add(edgeLines);
+    if (obstacleVisualSettings.showObjectWireframes) {
+      const edgesGeometry = createWireframeEdgesGeometry(wallGeometry, true);
+      const position = edgesGeometry.getAttribute("position");
+      if (position instanceof THREE.BufferAttribute && position.count > 0) {
+        const edgeLines = new THREE.LineSegments(
+          edgesGeometry,
+          new THREE.LineBasicMaterial({
+            color: 0x330000,
+            transparent: obstacleVisualSettings.wireframeTransparent,
+            opacity: obstacleVisualSettings.wireframeOpacity,
+          }),
+        );
+        edgeLines.scale.set(1.002, 1.002, 1.002);
+        wallMesh.add(edgeLines);
+      } else {
+        edgesGeometry.dispose();
+      }
+    }
     group.add(wallMesh);
 
     const wallBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });

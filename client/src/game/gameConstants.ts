@@ -58,7 +58,7 @@ export const DEFAULT_TUNING: TuningState = {
   tiltStrength: 1.9,
   gyroSensitivity: 1,
   maxSpeed: 20,
-  maxTiltDeg: 16,
+  maxTiltDeg: 13.5,
   maxBoardAngVel: 7.5,
   tiltFilterTau: 0.2,
   linearDamping: 0.12,
@@ -84,6 +84,9 @@ export const DEFAULT_TUNING: TuningState = {
   cameraZoom: 0.7,
   cameraFov: 65,
   cameraHeightBias: 0,
+  objectTransparencyPercent: 32,
+  showObjectWireframes: true,
+  wireframeUsesObjectTransparency: true,
   shadowMapSize: 1024,
 };
 

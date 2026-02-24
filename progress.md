@@ -974,3 +974,18 @@ v0.8.7.0 full publish update (lightweight 2D Editor v1: menu + template + shape 
   - no Playwright error log generated for the smoke run.
 - Notes for next iteration:
   - current v1 is editor-surface focused; runtime obstacle injection from editor layout into active race track is intentionally deferred to the next iteration.
+
+v0.8.7.1 full publish update (user-requested commit of all pending workspace changes):
+- User requested committing and pushing all current local changes, including pre-existing edits not authored in this turn.
+- Included all pending tracked modifications and all untracked output artifacts currently present in the workspace.
+- Applied required version discipline bump and synchronized version triplet:
+  - `client/src/buildInfo.ts` -> `APP_VERSION = 0.8.7.1`
+  - `android/twa-manifest.json` -> `appVersion = 0.8.7.1`, `appVersionCode = 80701`
+  - `android/app/build.gradle` -> `versionName = 0.8.7.1`, `versionCode = 80701`
+- Full Publish Test Mode verification:
+  - `npm run lint` passed,
+  - `npm run typecheck` passed,
+  - `npm run build` passed.
+- Smoke validation:
+  - launched dev stack and captured Playwright smoke screenshot,
+  - verified main menu render at `output/full-commit-smoke/shot-0.png` with `Version 0.8.7.1` visible.

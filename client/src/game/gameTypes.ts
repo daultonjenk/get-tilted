@@ -43,6 +43,9 @@ export type TuningState = {
   cameraZoom: number;
   cameraFov: number;
   cameraHeightBias: number;
+  objectTransparencyPercent: number;
+  showObjectWireframes: boolean;
+  wireframeUsesObjectTransparency: boolean;
   shadowMapSize: 512 | 1024;
 };
 

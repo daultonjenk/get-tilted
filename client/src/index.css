@@ -1169,6 +1169,21 @@ textarea {
   cursor: pointer;
 }
 
+.testTrackPieceTuningGroup {
+  border: 1px solid rgb(155 206 255 / 45%);
+  border-radius: 0.35rem;
+  background: rgb(15 44 77 / 62%);
+  padding: 0.25rem 0.45rem 0.45rem;
+}
+
+.testTrackPieceTuningGroup summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #eaf4ff;
+  padding: 0.2rem 0;
+}
+
 .importBox {
   width: 100%;
   min-height: 120px;

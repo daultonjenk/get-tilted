@@ -168,6 +168,15 @@ export function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.cameraHeightBias === "number") {
     base.cameraHeightBias = clamp(value.cameraHeightBias, -6, 8);
   }
+  if (typeof value.objectTransparencyPercent === "number") {
+    base.objectTransparencyPercent = clamp(value.objectTransparencyPercent, 0, 85);
+  }
+  if (typeof value.showObjectWireframes === "boolean") {
+    base.showObjectWireframes = value.showObjectWireframes;
+  }
+  if (typeof value.wireframeUsesObjectTransparency === "boolean") {
+    base.wireframeUsesObjectTransparency = value.wireframeUsesObjectTransparency;
+  }
   if (value.shadowMapSize === 512 || value.shadowMapSize === 1024) {
     base.shadowMapSize = value.shadowMapSize;
   }

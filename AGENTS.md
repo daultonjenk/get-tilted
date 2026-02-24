@@ -39,20 +39,58 @@ This file defines how Codex (and any assistant agent) should execute work on **G
 
 ---
 
-## 2) Expected response format for Codex work
+## 2) Execution modes (required)
+
+Codex must follow one of these two modes for every task:
+
+### A) Full Publish Test Mode (default)
+- This is the standard production-ready workflow used previously.
+- Run full verification:
+  - `npm run lint`
+  - `npm run typecheck`
+  - `npm run build`
+- Complete normal quality checks and smoke testing.
+- Commit and push in the same iteration (unless the user explicitly says not to push).
+
+### B) Local Iteration Mode
+- Optimize for rapid local iteration and fast turnaround.
+- Do **not** run full verification by default:
+  - skip `npm run lint`
+  - skip `npm run typecheck`
+  - skip `npm run build`
+- Minimize non-essential quality checks and process overhead.
+- Do **not** commit or push in this mode unless the user explicitly asks.
+- Keep `progress.md` updated on every task (small or large) with detailed notes.
+
+Mode selection:
+- If the user explicitly names a mode, follow it exactly.
+- If the user says “no commit/push” or asks for quick local iteration, use **Local Iteration Mode**.
+- Otherwise use **Full Publish Test Mode**.
+
+---
+
+## 3) Expected response format for Codex work
 
 When implementing a milestone, respond with:
 - **Steps:** numbered, single optimal path (no alternatives unless asked)
 - **Commands:** exact commands to run
 - **Diff summary:** files created/changed
-- **Verification:** lint/typecheck/build + smoke steps
-- **Commit plan:** one commit per milestone minimum
-- **Push plan:** push each milestone commit to the active remote branch in the same iteration (unless the user explicitly says not to push)
-- After completion: **brief commit/push changelog** (required)
+- **Verification:** mode-appropriate verification steps
+  - Full Publish Test Mode: lint/typecheck/build + smoke steps
+  - Local Iteration Mode: no verification by default; run checks only if explicitly requested
+- **Commit plan:** mode-appropriate commit behavior
+  - Full Publish Test Mode: one commit per milestone minimum
+  - Local Iteration Mode: no commit unless explicitly requested
+- **Push plan:** mode-appropriate push behavior
+  - Full Publish Test Mode: push milestone commit(s) in the same iteration (unless user says otherwise)
+  - Local Iteration Mode: no push unless explicitly requested
+- After completion:
+  - Full Publish Test Mode: **brief commit/push changelog** (required)
+  - Local Iteration Mode: brief local change summary (no commit/push changelog required unless a commit/push occurred)
 
 ---
 
-## 3) Repo structure (authoritative)
+## 4) Repo structure (authoritative)
 
 ```
 get-tilted/
@@ -88,7 +126,7 @@ get-tilted/
 
 ---
 
-## 4) Version order (locked)
+## 5) Version order (locked)
 
 Work in this order unless the user explicitly changes it:
 - v0.2 Track + Respawn
@@ -104,7 +142,7 @@ Do not start a later version until the current version’s acceptance checklist 
 
 ---
 
-## 5) Transport/protocol rules
+## 6) Transport/protocol rules
 
 1. **No Socket.IO for production**
    - Raw WebSockets only.
@@ -124,7 +162,7 @@ Do not start a later version until the current version’s acceptance checklist 
 
 ---
 
-## 6) Mobile motion control requirements (v0.3+)
+## 7) Mobile motion control requirements (v0.3+)
 
 - UI must include **Enable Tilt Controls** button.
 - If `DeviceMotionEvent.requestPermission` exists, call only within a click/tap handler.
@@ -133,26 +171,36 @@ Do not start a later version until the current version’s acceptance checklist 
 
 ---
 
-## 7) Definition of done per milestone
+## 8) Definition of done per milestone
 
 A milestone is complete only if:
 - App runs without runtime errors.
-- `npm run lint`, `npm run typecheck`, `npm run build` all pass.
-- Manual smoke tests pass (desktop + mobile assumptions respected).
-- One commit is created and pushed to the active remote branch in the same iteration (unless user says otherwise).
-- A brief commit/push changelog is provided.
+- Full Publish Test Mode:
+  - `npm run lint`, `npm run typecheck`, `npm run build` all pass.
+  - Manual smoke tests pass (desktop + mobile assumptions respected).
+  - One commit is created and pushed to the active remote branch in the same iteration (unless user says otherwise).
+  - A brief commit/push changelog is provided.
+- Local Iteration Mode:
+  - Requested change is implemented for fast local testing.
+  - Skip full lint/typecheck/build unless explicitly requested.
+  - Skip manual smoke/runtime checks unless explicitly requested.
+  - No commit/push unless explicitly requested.
+  - `progress.md` is updated for every local-iteration task with detailed change notes.
 
 ---
 
-## 8) Build version discipline (required)
+## 9) Build version discipline (mode-aware, required)
 
 Purpose: ensure the visible top-left in-game/menu version always identifies the exact build and avoids cache confusion.
 
 Rules:
-- Every implemented change by Codex that affects behavior, UI, config, assets, networking, physics, or build output must bump the displayed build version.
-- This includes small bugfixes, hotfixes, and minor patches; no implementation change is exempt from version bumping.
-- Every commit must have a unique build version string. No reuse.
-- When Codex finishes implementing a plan/milestone, the final state must include a new version bump (even if changes were small).
+- Full Publish Test Mode:
+  - Every implemented change that affects behavior, UI, config, assets, networking, physics, or build output must bump the displayed build version.
+  - Every commit must have a unique build version string. No reuse.
+- Local Iteration Mode:
+  - For quick follow-up changes on the same issue/theme (for example repeated set-piece tuning/polish), version bump is not required.
+  - Version bump is required when local work makes a significant scope jump into a materially different feature area (for example track tilt/physics, then graphics, then GUI), or otherwise represents a significant change.
+- `progress.md` must be updated on every task in both modes, including small/local iterations.
 - The version shown in the top-left menu/screen is authoritative for build identity and must match the value committed in source.
 - Required format: `major_release.major_feature.minor_feature.bugfix`
 - Segment meaning:
@@ -169,25 +217,28 @@ Allowed version formats (examples):
 
 Implementation expectation:
 - Keep the version in a single source of truth (currently `client/src/buildInfo.ts`).
-- Any change task should include this version update in the same commit.
-- Codex responses must explicitly mention the version bump in the diff summary/changelog.
+- Full Publish Test Mode: include version update in the same commit as the change.
+- Local Iteration Mode: version updates may be deferred while iterating on the same issue; still log each change in `progress.md`.
+- Codex responses must explicitly mention whether a version bump was applied or intentionally deferred.
 - Commit messages must use this format by default: `type(v#.#.#.#): short description`
 - Example: `chore(v0.7.2): bump app version and enforce bugfix version discipline`
 - The version token in the commit message must exactly match `APP_VERSION` in `client/src/buildInfo.ts` for that same commit.
 - This exact-match rule applies to all commits (including docs-only, tiny fixes, and minor patches) unless the exceptional-case rule below is used.
 - If a commit message introduces a new `v#.#.#.#` token, `client/src/buildInfo.ts` must be updated to that exact version in that commit.
-- When `APP_VERSION` is changed, Android wrapper versions must be kept in sync in the same commit:
+- Full Publish Test Mode (and any publish-ready commit): when `APP_VERSION` is changed, Android wrapper versions must be kept in sync in the same commit:
   - `android/twa-manifest.json` → `appVersion` and `appVersionCode`
   - `android/app/build.gradle` → `versionName` and `versionCode`
+- Local Iteration Mode: when `APP_VERSION` is changed, Android wrapper versions must also be updated in the same change.
+- There must never be multiple active working version numbers across `client/src/buildInfo.ts`, `android/twa-manifest.json`, and `android/app/build.gradle`.
 - Before preparing any Play upload, verify these three files match exactly:
   - `client/src/buildInfo.ts`
   - `android/twa-manifest.json`
   - `android/app/build.gradle`
 - Only in truly exceptional cases (for example, emergency revert/cherry-pick constraints) may a different commit message format be used.
-- Ensure to update progress.md with all changes made in this version, with the version number at the beginning of your description of changes.
+- Ensure `progress.md` is updated with all changes (including local iteration changes); include version context when a version bump is made.
 ---
 
-## 9) Android AAB redeploy rule (required)
+## 10) Android AAB redeploy rule (required)
 
 Use this checklist to decide if a new Android `.aab` must be uploaded to Play:
 
