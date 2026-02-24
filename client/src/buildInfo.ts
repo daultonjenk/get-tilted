@@ -1,2 +1,2 @@
 export const BUILD_ID = import.meta.env.VITE_BUILD_ID ?? "local-dev";
-export const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.8.6.0";
+export const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.8.6.1";

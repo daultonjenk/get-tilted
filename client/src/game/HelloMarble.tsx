@@ -160,14 +160,10 @@ const CONTACT_SHADOW_BASE_SCALE = 0.52;
 const CONTACT_SHADOW_SCALE_RANGE = 0.26;
 const TEST_TRACK_MANUAL_SEQUENCE = [
   { kind: "blank" },
-  { kind: "split-y" },
-  { kind: "blank" },
-  { kind: "merge-y" },
+  { kind: "arc90-obstacle-1" },
   { kind: "finish" },
 ] as const;
 const TEST_TRACK_LAYOUT_PIECE_LENGTHS = {
-  "split-y": 12,
-  "merge-y": 12,
   "arc90-obstacle-1": 14,
 } as const;
 const TEST_TRACK_SET_PIECE_LENGTHS = {
@@ -205,7 +201,7 @@ const TEST_TRACK_TUNABLE_PIECES: TestTrackTunablePieceSpec[] = TEST_TRACK_MANUAL
   },
 ).map((entry, index) => ({ ...entry, trackIndex: index + 1 }));
 const TEST_TRACK_TRANSITION_STRAIGHT_LENGTH = 13;
-const TEST_TRACK_DEBUG_STORAGE_KEY = "get-tilted:v0.8.6.0:test-track-debug-settings";
+const TEST_TRACK_DEBUG_STORAGE_KEY = "get-tilted:v0.8.6.1:test-track-debug-settings";
 const TEST_TRACK_OBSTACLE_SCALE_MIN = 0.5;
 const TEST_TRACK_OBSTACLE_SCALE_MAX = 1.8;
 const TEST_TRACK_LENGTH_SCALE_MIN = 0.6;
@@ -439,31 +435,22 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
   const forcedMainPieces = isTestTrack
     ? Array.from({ length: pieceCount }, (_, index) => {
         const spec = TEST_TRACK_MANUAL_SEQUENCE[index];
-        const piece = createDefaultCustomPiece(
-          spec?.kind === "split-y"
-            ? "splitY"
-            : spec?.kind === "merge-y"
-              ? "mergeY"
-              : "straight",
-        );
+        const isArcObstaclePiece = spec?.kind === "arc90-obstacle-1";
+        const piece = createDefaultCustomPiece(isArcObstaclePiece ? "arc90" : "straight");
         piece.id =
-          spec?.kind === "split-y"
-            ? `test-track-split-y-${index + 1}`
-            : spec?.kind === "merge-y"
-              ? `test-track-merge-y-${index + 1}`
-              : `test-track-straight-${index + 1}`;
-        piece.label =
-          spec?.kind === "split-y"
-            ? "Split Y"
-            : spec?.kind === "merge-y"
-              ? "Merge Y"
-              : "Straight";
+          isArcObstaclePiece
+            ? `test-track-arc90-obstacle-${index + 1}`
+            : `test-track-straight-${index + 1}`;
+        piece.label = isArcObstaclePiece ? "Arc 90 Obstacle 1" : "Straight";
         piece.length =
           spec && spec.kind in TEST_TRACK_LAYOUT_PIECE_LENGTHS
             ? TEST_TRACK_LAYOUT_PIECE_LENGTHS[
                 spec.kind as keyof typeof TEST_TRACK_LAYOUT_PIECE_LENGTHS
               ] * testTrackDebugSettings.setPieceLengthScale
             : TEST_TRACK_TRANSITION_STRAIGHT_LENGTH;
+        piece.turnDeg = isArcObstaclePiece ? 90 : 0;
+        piece.bankDeg = isArcObstaclePiece ? 8 : 0;
+        piece.turnDirection = "left";
         piece.weight = 1;
         return piece;
       })
@@ -480,7 +467,7 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
     customPieces: sanitizeTrackPieceLibrary(config.customPieces),
     includeCustomPieces: config.catalogMode === "builtin_plus_custom",
     trackWidth: isTestTrack ? testTrackDebugSettings.trackWidth : 9,
-    enableBranchPieces: isTestTrack,
+    enableBranchPieces: false,
     maxHeadingDriftDeg: 18,
     enforceBendPairs: true,
     generationPolicy,

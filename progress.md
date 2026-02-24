@@ -914,3 +914,24 @@ v0.8.6.0 full publish update (trim piece catalog + split/merge branch test track
   - `npm run lint` passed,
   - `npm run typecheck` passed,
   - `npm run build` passed.
+
+v0.8.6.1 full publish update (remove split/merge and restore stable test track):
+- Removed non-functional branch pieces from built-in runtime catalog:
+  - `Split Y`
+  - `Merge Y`
+- Kept branch-generation infrastructure code in place but removed these pieces from active selection/catalog so they are no longer used in generated tracks.
+- Reverted Test Track authored sequence back to the stable arc set-piece flow:
+  - `blank -> arc90-obstacle-1 -> finish`
+- Reverted Test Track forced-piece mapping from split/merge routing back to arc-obstacle routing:
+  - middle piece is now forced `arc90` for `arc90-obstacle-1`, with turn/bank settings restored.
+- Disabled branch generation for Test Track builds (`enableBranchPieces: false`).
+- Bumped app/build identity to `0.8.6.1` and synchronized Android wrapper versions in the same change:
+  - `client/src/buildInfo.ts` -> `APP_VERSION = 0.8.6.1`
+  - `android/twa-manifest.json` -> `appVersion = 0.8.6.1`, `appVersionCode = 80601`
+  - `android/app/build.gradle` -> `versionName = 0.8.6.1`, `versionCode = 80601`
+- Rotated Test Track debug storage namespace to match new version:
+  - `get-tilted:v0.8.6.1:test-track-debug-settings`
+- Full Publish Test Mode verification:
+  - `npm run lint` passed,
+  - `npm run typecheck` passed,
+  - `npm run build` passed.
