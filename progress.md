@@ -566,3 +566,351 @@ Verification:
 - `npm run lint` passes.
 - `npm run typecheck` passes.
 - `npm run build` passes.
+
+v0.8.5.5 update:
+- Refined Test Track composition to deterministic manual-piece sequencing:
+  - Test Track now builds exactly: one blank straight spawn piece, followed by the newest manual test piece(s), followed by one blank straight finish piece.
+  - No extra generated pieces are included in Test Track.
+- Added the first manual obstacle test piece (`triangle_chicane_v1`) using the provided sketch direction:
+  - lower wall-jut pair,
+  - large centered solid triangle obstacle (tip toward spawn),
+  - upper wall-jut pair,
+  - top centered blocker.
+- Added manual test-piece obstacle plumbing in blueprint track creation:
+  - per-placement manual obstacle piece list support (`manualTestPieces`),
+  - manual obstacle rendering + matching collider generation (including solid triangle prism collider).
+- Kept automatic obstacle generation disabled by default globally (manual-only obstacle iteration mode).
+- Bumped version to `0.8.5.5` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80505`)
+  - `android/app/build.gradle` (`versionCode` `80505`)
+
+v0.8.5.6 update:
+- Tuned `triangle_chicane_v1` obstacle pacing to reduce density and increase per-row travel distance:
+  - obstacle rows are now spread much farther apart across the test piece,
+  - row spacing is paired with a longer test-piece straight segment for clearer run-up speed.
+- Tightened the two wall-jut gate openings to target about `1.5x` marble diameter.
+- Increased the center triangle footprint and elongated it forward:
+  - triangle base now expands based on lane width while preserving about `1.5x` marble-diameter side clearance to walls,
+  - triangle depth increased to make it substantially longer and more obtrusive.
+- Narrowed the final top blocker slightly to avoid over-constraining late-piece navigation while preserving challenge.
+- Updated Test Track forced piece templates so manual obstacle test pieces run on elongated straight segments:
+  - spawn and finish pieces stay short/blank,
+  - the middle test piece(s) now use longer straight geometry for obstacle spacing tests.
+- Bumped version to `0.8.5.6` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80506`)
+  - `android/app/build.gradle` (`versionCode` `80506`)
+
+v0.8.5.7 update:
+- Registered the approved triangle straight obstacle piece under the manual obstacle piece name `straight-obstacle-1`.
+  - Test Track manual-piece list now references `straight-obstacle-1`.
+  - Manual obstacle placement dispatch now keys off `straight-obstacle-1`.
+- Removed the rendered center guide line from blueprint tracks to prevent obstacle clipping and visual overlap.
+  - deleted center-guide geometry generation and guide material wiring.
+- Bumped version to `0.8.5.7` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80507`)
+  - `android/app/build.gradle` (`versionCode` `80507`)
+
+v0.8.5.8 update:
+- Added a new manually-authored obstacle piece shape from the latest sketch as `straight-obstacle-2`.
+  - Implemented alternating wall-attached triangle wedges along a straight piece to create a left-right slalom channel.
+  - Kept the prior approved `straight-obstacle-1` piece unchanged and still available.
+- Fixed Test Track piece count behavior so it can render exact short test layouts:
+  - when starter sequence is disabled (Test Track mode), blueprint generation now honors small piece counts instead of clamping to the normal minimum,
+  - this prevents extra random pieces (including bends) from being appended.
+- Test Track now targets the new piece for this iteration:
+  - layout is exactly: straight spawn, `straight-obstacle-2`, straight finish.
+- Bumped version to `0.8.5.8` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80508`)
+  - `android/app/build.gradle` (`versionCode` `80508`)
+
+v0.8.5.9 update:
+- Reworked `straight-obstacle-2` to match the updated zig-zag sketch with stricter symmetry:
+  - exact alternating side order: left, right, left, right,
+  - equal row spacing across the piece,
+  - equal triangle length/shape for all four obstacles,
+  - centered triangle tips (removed per-obstacle tip skew) for consistent alignment.
+- Tuned the zig-zag channel gap against marble scale:
+  - tip-to-tip corridor target set from marble diameter so openings feel intentional and repeatable,
+  - triangles are longer and more visually obtrusive than the previous `straight-obstacle-2` draft.
+- Bumped version to `0.8.5.9` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80509`)
+  - `android/app/build.gradle` (`versionCode` `80509`)
+
+v0.8.5.10 update:
+- Tuned `straight-obstacle-2` to increase triangle reach and tighten the zig-zag lane:
+  - triangle tip reach now targets roughly 75% of traversable track width,
+  - implemented via ~2 marble-diameter clearance from each tip to the opposite wall,
+  - slightly tighter, more consistent spacing across the sequence.
+- Extended `straight-obstacle-2` pattern length by adding 3 more triangles:
+  - obstacle count increased from 4 to 7,
+  - kept strict left-right alternation and symmetric alignment.
+- Increased Test Track manual-piece straight length to keep the expanded 7-triangle pattern readable and less cramped while still tighter than before.
+- Bumped version to `0.8.5.10` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80510`)
+  - `android/app/build.gradle` (`versionCode` `80510`)
+
+v0.8.5.11 update:
+- Saved the current dense zig-zag triangle set piece as `straight-tight-triangles`.
+  - Preserves the tighter 7-triangle alternating pattern and current clearances.
+- Added a second variant `straight-wide-triangles` with about 2x spacing between triangles:
+  - uses 4 alternating wall triangles over the same span,
+  - keeps the same triangle size/reach profile for apples-to-apples feel comparison.
+- Updated Test Track to load the new wider-spaced variant for immediate testing:
+  - layout remains exactly: straight spawn, `straight-wide-triangles`, straight finish.
+- Bumped version to `0.8.5.11` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80511`)
+  - `android/app/build.gradle` (`versionCode` `80511`)
+
+v0.8.5.12 update:
+- Extended `straight-wide-triangles` by adding 3 more triangles:
+  - obstacle count increased from 4 to 7,
+  - preserved alternating left-right symmetry and the same triangle size/reach profile.
+- Increased the manual test-piece straight length so the expanded wide-triangle pattern remains readable and not overly compressed.
+- Bumped version to `0.8.5.12` and synced Android wrapper versions:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json` (`appVersionCode` `80512`)
+  - `android/app/build.gradle` (`versionCode` `80512`)
+
+v0.8.5.12 process update (mode policy refinement):
+- Added explicit dual-mode workflow definitions to agent instruction docs (`AGENTS.md`, `CLAUDE.md`):
+  - `Full Publish Test Mode` (default): full checks + commit/push workflow unchanged.
+  - `Local Iteration Mode`: rapid-change workflow with lint/typecheck/build skipped by default and no commit/push unless requested.
+- Refined Local Iteration versioning rules:
+  - version bump is optional for same-issue/same-theme polishing,
+  - version bump is required when work shifts into materially different feature areas or is otherwise a significant scope change.
+- Refined Android sync policy:
+  - required in Full Publish/publish-ready commits when app version changes,
+  - may be deferred during Local Iteration unless explicitly requested.
+- Locked in `progress.md` as always-required in both modes for detailed change logging.
+
+v0.8.5.12 process update (mode policy refinement 2):
+- Refined Local Iteration Mode to be even faster:
+  - skip lint/typecheck/build by default,
+  - skip manual smoke/runtime checks by default,
+  - run checks only when explicitly requested.
+- Locked version sync policy across modes:
+  - whenever `APP_VERSION` changes, Android wrapper versions must be updated in the same change,
+  - no multiple active working version numbers are allowed across `client/src/buildInfo.ts`, `android/twa-manifest.json`, and `android/app/build.gradle`.
+- Kept Full Publish Test Mode behavior unchanged from prior workflow.
+
+v0.8.5.12 local iteration update (test track sequencing):
+- Confirmed Test Track was configured to use `straight-wide-triangles` as its single manual obstacle piece.
+- Updated Test Track to an explicit fixed sequence to remove ambiguity and include all requested set pieces in one run:
+  - `StraightBlank` -> `StraightWideTriangles` -> `StraightBlank` -> `StraightTightTriangles` -> `StraightBlank` -> `StraightObstacle1` -> `StraightFinish`
+- Implemented sequence-driven manual obstacle placement indices so obstacle pieces are placed at exact intended slots (1, 3, and 5 in the user-facing sequence).
+- Kept all pieces as straight geometry and retained automatic obstacle generation disabled in test mode.
+
+v0.8.5.12 local iteration update (track length diagnosis/fix):
+- Diagnosed compressed Test Track obstacle pieces:
+  - `StraightObstacle1` was unintentionally using short transition length while wide/tight pieces used the long test length,
+  - forced test-piece lengths were being clamped to `28` by `sanitizeTrackPieceTemplate`, so configured long lengths (for example `52`) were not fully applied.
+- Fixed Test Track length assignment so `StraightObstacle1` also uses the long manual set-piece length.
+- Added mode-aware forced-piece length override in blueprint generation:
+  - when starter sequence is disabled (Test Track mode), forced main pieces can use longer lengths (up to `120`) instead of the default `28` cap.
+  - non-test/default sanitization behavior remains unchanged.
+
+v0.8.5.12 local iteration update (fixed set-piece length policy):
+- Converted Test Track obstacle-piece length handling from a single shared value to fixed authored lengths per set piece:
+  - `straight-obstacle-1` => `28`
+  - `straight-tight-triangles` => `34`
+  - `straight-wide-triangles` => `52`
+- Ensured `StraightObstacle1` now uses its authored long-form set-piece length in Test Track (it was previously inheriting transition length in one path).
+- Added manual set-piece authored-length enforcement in obstacle placement:
+  - obstacle layouts now use authored piece length windows and centered offsets,
+  - avoids pattern stretch/compression when piece lengths differ,
+  - skips placement if a piece is shorter than its authored length to avoid distorted/unfair geometry.
+
+v0.8.5.12 local iteration update (Track Tester debug tuning menu):
+- Added a new Test Track tuning section to the debug drawer (Tuning tab) when in `testTrack` mode.
+- Added persistent Track Tester controls for rapid on-PC iteration:
+  - `Track Width`
+  - `Set Piece Length Scale`
+  - per-obstacle sliders `Obstacle 1 Scale` through `Obstacle 8 Scale`
+- Added explicit action buttons:
+  - `Apply Test Track Tuning` (rebuilds/restarts Test Track with new values)
+  - `Reset Piece Tuning` (restores defaults)
+- Wired Test Track tuning into generation/runtime:
+  - track width now feeds blueprint generation in test mode,
+  - set-piece length scale now scales authored test set-piece lengths,
+  - per-obstacle scale array now affects manual obstacle geometry for `straight-obstacle-1`, `straight-tight-triangles`, and `straight-wide-triangles`.
+- Added new local storage persistence for test tuning profile:
+  - key: `get-tilted:v0.8.5.12:test-track-debug-settings`.
+- Updated debug drawer visibility behavior for iteration ergonomics:
+  - the debug drawer now always shows in `testTrack` mode even if the global debug-menu toggle is disabled, so Track Tester tuning controls are immediately accessible.
+
+v0.8.5.12 local iteration update (piece-scoped tester controls + obstacle labels):
+- Reworked Test Track obstacle tuning from one global slider bank to piece-scoped controls:
+  - added derived tunable piece metadata for the current test sequence (`TRACK 1/2/3`) based on non-blank/non-finish test pieces,
+  - added per-piece obstacle scale arrays with persistence and sanitization (including legacy migration from the previous flat `obstacleScales` format).
+- Updated Test Track tuning UI to use collapsible submenus:
+  - each `TRACK N` section is collapsible and contains obstacle scale sliders for that piece only.
+- Expanded `straight-obstacle-1` tuning slots to true per-obstacle control (6 slots):
+  - lower gate left/right, center triangle, upper gate left/right, top bar.
+- Added optional obstacle ID overlay support in manual test-piece generation:
+  - obstacles can render white labels in `track-obstacle` format (for example `1-1`, `3-2`) when enabled by Test Track tuning config.
+- Enabled these obstacle ID overlays for Test Track generation (builder/test iteration flow only).
+- Added sprite texture disposal in track cleanup to avoid leaking label textures during repeated rebuilds.
+
+v0.8.5.12 local iteration fix (Test Track freeze on countdown):
+- Fixed runtime freeze/hang when entering Test Track after adding obstacle ID label sprites.
+- Root cause:
+  - contact-shadow assistance raycasting traverses the full track hierarchy,
+  - visual label sprites were included and `THREE.Sprite` raycasting requires a camera, triggering a runtime exception and stopping the frame loop.
+- Fix:
+  - marked obstacle label sprites as visual-only by overriding sprite raycast handling (`sprite.raycast = () => {}`), keeping labels out of gameplay raycasts.
+- Verified with automated browser run:
+  - no `pageerror` after entering Test Track,
+  - no Sprite/matrixWorld raycast exceptions,
+  - countdown continues and gameplay proceeds.
+
+v0.8.5.12 local iteration fix (obstacle scale disappearance + broadcast visibility):
+- Fixed a boundary-case disappearance when scaling certain centered obstacles in Test Track:
+  - center-placement logic previously skipped placement when `maxCenter === minCenter`,
+  - now only skips when `maxCenter < minCenter`, allowing exact-center placement at tight bounds.
+- Increased broadcast camera base height by ~18% to improve down-track visibility at high board tilt:
+  - broadcast base Y changed from `12` to `14.2`,
+  - preserves existing zoom/height-bias controls while reducing obstacle occlusion of the marble.
+- Sanity-checked with automated Test Track interaction:
+  - set `TRACK 3 -> Obstacle 6 Scale` to max and applied tuning,
+  - no runtime errors or hangs observed.
+
+v0.8.5.12 local iteration update (camera visibility + global obstacle transparency controls):
+- Increased broadcast camera base height again for high-tilt visibility:
+  - base Y raised from `14.2` to `15.6` (roughly +10% from prior setting).
+- Updated default max tilt tuning to `13.5` degrees for clearer obstacle/marble visibility while preserving challenge.
+- Added new global tuning controls:
+  - `Object Transparency (%)` slider (0-85),
+  - `Wireframes Match Transparency` toggle (on/off).
+- Wired these controls into track generation for both blueprint and legacy obstacle paths:
+  - obstacle mesh opacity now derives from global object transparency,
+  - obstacle edge/wireframe line opacity follows the same transparency when toggle is enabled, or remains fully opaque when disabled.
+- Increased default obstacle transparency by setting default object transparency to `32%` (roughly ~20%+ more transparent than recent opaque obstacle defaults).
+- Added live application path for solo/test tracks:
+  - changing transparency controls rebuilds the active solo/test track with updated visual settings.
+- Verification:
+  - client typecheck/build pass,
+  - automated browser run toggling transparency and wireframe option in Test Track showed no runtime errors.
+
+v0.8.5.12 local iteration update (wireframe flicker cleanup + global wireframe toggle):
+- Removed bottom-contact obstacle wireframe edges to eliminate floor-contact flicker:
+  - added filtered edge-generation that strips line segments lying on obstacle bottom planes,
+  - applied this filtering across blueprint/manual obstacle meshes and legacy obstacle walls/blocks.
+- Added global object wireframe visibility control:
+  - new tuning toggle: `Show Wireframes` (on/off),
+  - when off, obstacle wireframe overlays are fully hidden.
+- Kept existing transparency behavior and expanded controls:
+  - `Wireframes Match Transparency` continues to control whether wireframes follow object transparency when wireframes are visible.
+- Added tuning/state plumbing for the new wireframe visibility flag and live rebuild application in solo/test modes.
+- Verification:
+  - client typecheck/build pass,
+  - automated Test Track UI interaction toggling wireframe controls showed no runtime errors.
+
+v0.8.5.12 local iteration update (arc90 obstacle test piece + test track route):
+- Updated Test Track manual sequence to only:
+  - `Straight Spawn` (blank),
+  - `arc90-obstacle-1`,
+  - `Straight Finish`.
+- Added new manual test-piece kind `arc90-obstacle-1` with authored length and per-obstacle tuning slots.
+- Implemented `arc90-obstacle-1` placement in manual obstacle generation for `arc90` pieces:
+  - two alternating wall-jutting bars on the entry section,
+  - one inner-wall triangle near the turn corner,
+  - one circular blocker on the exit section.
+- Extended manual obstacle generator typing and placement matching so test-piece kinds can target either `straight` or `arc90` placements.
+
+v0.8.5.12 local iteration fix (arc test-piece obstacles + finish trigger on curved layouts):
+- Fixed manual obstacle placement skipping when `Set Piece Length Scale` exceeded authored length:
+  - manual obstacle generation now clamps to available piece sweep length instead of skipping the piece entirely.
+- Fixed race start/finish detection for non-Z-aligned tracks (including `Straight -> Arc90 -> Straight`):
+  - added trial gate-plane metadata to blueprint track builds,
+  - updated runtime crossing checks to use signed distance across start/finish gate planes,
+  - retained Z-threshold fallback for legacy/non-blueprint track builds.
+
+v0.8.5.12 local iteration update (arc90-obstacle-1 layout aligned to sketch intent):
+- Reworked obstacle anchoring for `arc90-obstacle-1` to match the drawn pattern semantics:
+  - first two bar obstacles now anchor on the incoming straight segment (pre-turn),
+  - corner triangle now anchors near the start of the outgoing straight (post-turn edge/corner region),
+  - circular blocker now anchors in the outgoing straight lane center.
+- Increased the corner triangle footprint and increased center-circle occupancy target to roughly 70% of lane width (before per-obstacle scale tuning).
+- Corrected inner/outer wall side mapping for signed arc turn direction in this manual arc template.
+
+v0.8.5.12 local iteration update (arc90-obstacle-1 continuous 3-piece placement pass):
+- Updated `arc90-obstacle-1` obstacle placement to sample one continuous sweep across the full `incoming straight + arc90 + outgoing straight` span instead of treating each segment independently.
+- Increased spacing between the first two pre-turn bars and kept them in the pre-turn region.
+- Repositioned the triangle to the turn-exit region and adjusted orientation controls so the tip projects correctly from the inner wall.
+- Kept the circle centered on the outgoing straight with large lane occupancy and tuned distance ratios to reduce crowding near the triangle.
+
+v0.8.5.12 local iteration update (arc90-obstacle-1 pattern adjustment per sketch):
+- Moved the circular blocker from the outgoing straight into the middle of the turn arc so the player must route around it while cornering.
+- Replaced the single post-turn triangle with a staggered mirrored pair on the second straight:
+  - first triangle on the outside wall,
+  - second triangle mirrored on the opposite wall, offset down-track to create a pass-through channel.
+- Preserved the first two pre-turn wall-jut bars and widened their spacing.
+
+v0.8.5.12 local iteration tweak (triangle stagger mirror direction):
+- Flipped the post-turn triangle wall order in `arc90-obstacle-1` so the diagonal pass-through slant is mirrored (`\` orientation instead of `/` in top-down view).
+
+v0.8.5.12 local iteration update (distinct shufflable `arc90-obstacle-1` set-piece):
+- Added authored set-piece templates to the runtime piece catalog:
+  - `Arc 90 Obstacle 1 (Left Set)`
+  - `Arc 90 Obstacle 1 (Right Set)`
+- Implemented composite expansion in blueprint generation:
+  - when either set-piece is selected, it expands into a grouped `straight + arc90 + straight` placement trio as one logical selection.
+- Tagged composite trio placements with a dedicated set-piece group prefix so obstacle synthesis can target them deterministically.
+- Disabled hard-arc auto pair compensation for this authored set-piece so its 3-piece layout stays intact.
+- Added authored set-piece obstacle detection in track construction:
+  - normal generated tracks now auto-apply `arc90-obstacle-1` obstacle geometry for grouped set-piece arcs even when Test Track manual specs are not supplied.
+
+v0.8.5.12 local iteration update (singleplayer camera-friendly 10-piece generation policy):
+- Added a new blueprint generation policy mode: `singleplayer_camera_friendly_10`.
+- Policy behavior:
+  - enforces a 10 logical-piece track,
+  - enforces fixed start and finish straights,
+  - enforces middle-slot 70/30 obstacle mix (6 obstacle + 2 non-obstacle across 8 middle slots),
+  - enforces immediate turn-correction sequencing: any turn must be followed by the next logical piece with equal/opposite turn angle.
+- Implemented deterministic policy sequence construction using seeded weighted candidate ordering and constrained recursion, so the same seed yields the same valid layout.
+- Wired the policy to Singleplayer default generation path only; Test Track and Multiplayer generation behavior remain unchanged.
+- Added runtime config plumbing for generation policy propagation from `HelloMarble` into `buildTrackBlueprint`.
+
+v0.8.5.12 local iteration tweak (solo seed refresh + straighter camera-friendly mixes):
+- Added Singleplayer race seed refresh behavior:
+  - entering `Singleplayer` now generates and applies a fresh random solo seed before countdown,
+  - restarting a solo race now also generates and applies a fresh random solo seed before countdown.
+- Added a dedicated helper in `HelloMarble` to rebuild solo tracks with randomized seed and re-apply the solo generation policy.
+- Reduced curve-heavy sequences in `singleplayer_camera_friendly_10` generation:
+  - non-obstacle picks now prefer straight pieces over non-obstacle turn pieces,
+  - added turn-streak guardrails to avoid long consecutive turn runs beyond corrective pairs,
+  - kept the hard immediate opposite-turn correction rule intact.
+
+v0.8.6.0 full publish update (trim piece catalog + split/merge branch test track):
+- Removed these built-in track pieces from the runtime catalog in `modularTrack.ts`:
+  - `S-Curve Left`
+  - `S-Curve Right`
+  - `Ramp`
+  - `Bridge`
+  - `Tunnel`
+- Updated Test Track authored sequence to explicitly exercise branch behavior:
+  - `blank -> split-y -> blank -> merge-y -> finish`
+- Updated Test Track forced-piece construction in `HelloMarble.tsx`:
+  - maps `split-y` to forced `splitY` piece,
+  - maps `merge-y` to forced `mergeY` piece,
+  - keeps transition/finish entries as straights,
+  - keeps set-piece length scaling applied to authored test-track layout lengths.
+- Enabled branch piece generation for Test Track builds only:
+  - `enableBranchPieces: isTestTrack`
+- Bumped app/build identity to `0.8.6.0` and synchronized Android wrapper versions in the same change:
+  - `client/src/buildInfo.ts` -> `APP_VERSION = 0.8.6.0`
+  - `android/twa-manifest.json` -> `appVersion = 0.8.6.0`, `appVersionCode = 80600`
+  - `android/app/build.gradle` -> `versionName = 0.8.6.0`, `versionCode = 80600`
+- Reset Test Track debug storage namespace to the new version key:
+  - `get-tilted:v0.8.6.0:test-track-debug-settings`
+- Full Publish Test Mode verification:
+  - `npm run lint` passed,
+  - `npm run typecheck` passed,
+  - `npm run build` passed.

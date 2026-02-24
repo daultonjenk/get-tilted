@@ -126,6 +126,7 @@ import {
   sanitizeTrackPieceLibrary,
   sanitizeTrackPieceTemplate,
   sanitizeTrackSeed,
+  type TrackGenerationPolicy,
   type TrackPieceKind,
   type TrackPieceTemplate,
 } from "./track/modularTrack";
@@ -157,10 +158,65 @@ const CONTACT_SHADOW_SURFACE_OFFSET = 0.02;
 const CONTACT_SHADOW_MAX_OPACITY = 0.22;
 const CONTACT_SHADOW_BASE_SCALE = 0.52;
 const CONTACT_SHADOW_SCALE_RANGE = 0.26;
+const TEST_TRACK_MANUAL_SEQUENCE = [
+  { kind: "blank" },
+  { kind: "split-y" },
+  { kind: "blank" },
+  { kind: "merge-y" },
+  { kind: "finish" },
+] as const;
+const TEST_TRACK_LAYOUT_PIECE_LENGTHS = {
+  "split-y": 12,
+  "merge-y": 12,
+  "arc90-obstacle-1": 14,
+} as const;
+const TEST_TRACK_SET_PIECE_LENGTHS = {
+  "arc90-obstacle-1": 14,
+} as const;
+type TestTrackManualPieceKind = keyof typeof TEST_TRACK_SET_PIECE_LENGTHS;
+const TEST_TRACK_PIECE_LABELS: Record<TestTrackManualPieceKind, string> = {
+  "arc90-obstacle-1": "Arc 90 Obstacle 1",
+};
+const TEST_TRACK_OBSTACLE_SLOT_COUNT_BY_KIND: Record<TestTrackManualPieceKind, number> = {
+  "arc90-obstacle-1": 4,
+};
+type TestTrackTunablePieceSpec = {
+  placementIndex: number;
+  trackIndex: number;
+  kind: TestTrackManualPieceKind;
+  label: string;
+  obstacleSlotCount: number;
+};
+const TEST_TRACK_TUNABLE_PIECES: TestTrackTunablePieceSpec[] = TEST_TRACK_MANUAL_SEQUENCE.flatMap(
+  (spec, placementIndex) => {
+    if (!(spec.kind in TEST_TRACK_SET_PIECE_LENGTHS)) {
+      return [];
+    }
+    const kind = spec.kind as TestTrackManualPieceKind;
+    return [
+      {
+        placementIndex,
+        trackIndex: 0,
+        kind,
+        label: TEST_TRACK_PIECE_LABELS[kind],
+        obstacleSlotCount: TEST_TRACK_OBSTACLE_SLOT_COUNT_BY_KIND[kind],
+      },
+    ];
+  },
+).map((entry, index) => ({ ...entry, trackIndex: index + 1 }));
+const TEST_TRACK_TRANSITION_STRAIGHT_LENGTH = 13;
+const TEST_TRACK_DEBUG_STORAGE_KEY = "get-tilted:v0.8.6.0:test-track-debug-settings";
+const TEST_TRACK_OBSTACLE_SCALE_MIN = 0.5;
+const TEST_TRACK_OBSTACLE_SCALE_MAX = 1.8;
+const TEST_TRACK_LENGTH_SCALE_MIN = 0.6;
+const TEST_TRACK_LENGTH_SCALE_MAX = 1.8;
+const TEST_TRACK_WIDTH_MIN = 7;
+const TEST_TRACK_WIDTH_MAX = 12;
 type MenuScreen = "main" | "options" | "trackLab";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
 type TrackLayoutPreset = "default" | "testTrack";
+const SOLO_TRACK_GENERATION_POLICY: TrackGenerationPolicy = "singleplayer_camera_friendly_10";
 
 type RuntimeTrackConfig = {
   seed: string;
@@ -168,6 +224,21 @@ type RuntimeTrackConfig = {
   catalogMode: TrackCatalogMode;
   customPieces: TrackPieceTemplate[];
   layoutPreset: TrackLayoutPreset;
+  generationPolicy?: TrackGenerationPolicy;
+  testTrackDebugSettings?: TestTrackDebugSettings;
+  trackVisualSettings?: TrackVisualSettings;
+};
+
+type TestTrackDebugSettings = {
+  trackWidth: number;
+  setPieceLengthScale: number;
+  pieceObstacleScales: number[][];
+};
+
+type TrackVisualSettings = {
+  objectTransparencyPercent: number;
+  showObjectWireframes: boolean;
+  wireframeUsesObjectTransparency: boolean;
 };
 
 type RuntimeContainmentSample = {
@@ -224,6 +295,124 @@ function readStoredTrackLibrary(): TrackPieceTemplate[] {
   }
 }
 
+function createDefaultTestTrackDebugSettings(): TestTrackDebugSettings {
+  return {
+    trackWidth: 9,
+    setPieceLengthScale: 1,
+    pieceObstacleScales: TEST_TRACK_TUNABLE_PIECES.map((piece) =>
+      Array.from({ length: piece.obstacleSlotCount }, () => 1),
+    ),
+  };
+}
+
+function sanitizeTestTrackDebugSettings(input: unknown): TestTrackDebugSettings {
+  const defaults = createDefaultTestTrackDebugSettings();
+  if (!input || typeof input !== "object") {
+    return defaults;
+  }
+  const value = input as Partial<TestTrackDebugSettings> & {
+    obstacleScales?: unknown;
+  };
+  const trackWidth = clamp(
+    typeof value.trackWidth === "number" && Number.isFinite(value.trackWidth)
+      ? value.trackWidth
+      : defaults.trackWidth,
+    TEST_TRACK_WIDTH_MIN,
+    TEST_TRACK_WIDTH_MAX,
+  );
+  const setPieceLengthScale = clamp(
+    typeof value.setPieceLengthScale === "number" && Number.isFinite(value.setPieceLengthScale)
+      ? value.setPieceLengthScale
+      : defaults.setPieceLengthScale,
+    TEST_TRACK_LENGTH_SCALE_MIN,
+    TEST_TRACK_LENGTH_SCALE_MAX,
+  );
+  const rawPieceObstacleScales = Array.isArray(value.pieceObstacleScales)
+    ? value.pieceObstacleScales
+    : [];
+  const legacyObstacleScales = Array.isArray(value.obstacleScales) ? value.obstacleScales : [];
+  const pieceObstacleScales = TEST_TRACK_TUNABLE_PIECES.map((piece, pieceIndex) => {
+    const rawPiece = rawPieceObstacleScales[pieceIndex];
+    return Array.from({ length: piece.obstacleSlotCount }, (_, obstacleIndex) => {
+      const candidate = Array.isArray(rawPiece)
+        ? rawPiece[obstacleIndex]
+        : legacyObstacleScales[obstacleIndex];
+      if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+        return 1;
+      }
+      return clamp(candidate, TEST_TRACK_OBSTACLE_SCALE_MIN, TEST_TRACK_OBSTACLE_SCALE_MAX);
+    });
+  });
+  return {
+    trackWidth,
+    setPieceLengthScale,
+    pieceObstacleScales,
+  };
+}
+
+function readStoredTestTrackDebugSettings(): TestTrackDebugSettings {
+  if (typeof window === "undefined") {
+    return createDefaultTestTrackDebugSettings();
+  }
+  const raw = window.localStorage.getItem(TEST_TRACK_DEBUG_STORAGE_KEY);
+  if (!raw) {
+    return createDefaultTestTrackDebugSettings();
+  }
+  try {
+    return sanitizeTestTrackDebugSettings(JSON.parse(raw));
+  } catch {
+    return createDefaultTestTrackDebugSettings();
+  }
+}
+
+function createDefaultTrackVisualSettings(): TrackVisualSettings {
+  return {
+    objectTransparencyPercent: DEFAULT_TUNING.objectTransparencyPercent,
+    showObjectWireframes: DEFAULT_TUNING.showObjectWireframes,
+    wireframeUsesObjectTransparency: DEFAULT_TUNING.wireframeUsesObjectTransparency,
+  };
+}
+
+function sanitizeTrackVisualSettings(input: unknown): TrackVisualSettings {
+  const defaults = createDefaultTrackVisualSettings();
+  if (!input || typeof input !== "object") {
+    return defaults;
+  }
+  const value = input as Partial<TrackVisualSettings>;
+  return {
+    objectTransparencyPercent: clamp(
+      typeof value.objectTransparencyPercent === "number" &&
+        Number.isFinite(value.objectTransparencyPercent)
+        ? value.objectTransparencyPercent
+        : defaults.objectTransparencyPercent,
+      0,
+      85,
+    ),
+    showObjectWireframes:
+      typeof value.showObjectWireframes === "boolean"
+        ? value.showObjectWireframes
+        : defaults.showObjectWireframes,
+    wireframeUsesObjectTransparency:
+      typeof value.wireframeUsesObjectTransparency === "boolean"
+        ? value.wireframeUsesObjectTransparency
+        : defaults.wireframeUsesObjectTransparency,
+  };
+}
+
+function toTrackVisualSettingsFromTuning(tuning: TuningState): TrackVisualSettings {
+  return sanitizeTrackVisualSettings({
+    objectTransparencyPercent: tuning.objectTransparencyPercent,
+    showObjectWireframes: tuning.showObjectWireframes,
+    wireframeUsesObjectTransparency: tuning.wireframeUsesObjectTransparency,
+  });
+}
+
+function sanitizeTrackGenerationPolicy(input: unknown): TrackGenerationPolicy {
+  return input === "singleplayer_camera_friendly_10"
+    ? "singleplayer_camera_friendly_10"
+    : "default";
+}
+
 function sanitizeTrackSeedInput(value: string): string {
   return value.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
 }
@@ -237,21 +426,86 @@ function toTrackDraft(piece: TrackPieceTemplate): TrackPieceDraft {
 function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOptions {
   const seed = sanitizeTrackSeed(config.seed);
   const isTestTrack = config.layoutPreset === "testTrack";
-  const pieceCount = isTestTrack ? 2 : sanitizeTrackPieceCount(config.pieceCount);
+  const generationPolicy = isTestTrack
+    ? "default"
+    : sanitizeTrackGenerationPolicy(config.generationPolicy);
+  const testTrackDebugSettings = isTestTrack
+    ? sanitizeTestTrackDebugSettings(config.testTrackDebugSettings)
+    : createDefaultTestTrackDebugSettings();
+  const trackVisualSettings = sanitizeTrackVisualSettings(config.trackVisualSettings);
+  const pieceCount = isTestTrack
+    ? TEST_TRACK_MANUAL_SEQUENCE.length
+    : sanitizeTrackPieceCount(config.pieceCount);
+  const forcedMainPieces = isTestTrack
+    ? Array.from({ length: pieceCount }, (_, index) => {
+        const spec = TEST_TRACK_MANUAL_SEQUENCE[index];
+        const piece = createDefaultCustomPiece(
+          spec?.kind === "split-y"
+            ? "splitY"
+            : spec?.kind === "merge-y"
+              ? "mergeY"
+              : "straight",
+        );
+        piece.id =
+          spec?.kind === "split-y"
+            ? `test-track-split-y-${index + 1}`
+            : spec?.kind === "merge-y"
+              ? `test-track-merge-y-${index + 1}`
+              : `test-track-straight-${index + 1}`;
+        piece.label =
+          spec?.kind === "split-y"
+            ? "Split Y"
+            : spec?.kind === "merge-y"
+              ? "Merge Y"
+              : "Straight";
+        piece.length =
+          spec && spec.kind in TEST_TRACK_LAYOUT_PIECE_LENGTHS
+            ? TEST_TRACK_LAYOUT_PIECE_LENGTHS[
+                spec.kind as keyof typeof TEST_TRACK_LAYOUT_PIECE_LENGTHS
+              ] * testTrackDebugSettings.setPieceLengthScale
+            : TEST_TRACK_TRANSITION_STRAIGHT_LENGTH;
+        piece.weight = 1;
+        return piece;
+      })
+    : undefined;
+  const manualTestPieces = isTestTrack
+    ? TEST_TRACK_TUNABLE_PIECES.map((piece) => ({
+        placementIndex: piece.placementIndex,
+        testPieceIndex: piece.trackIndex - 1,
+        kind: piece.kind,
+      }))
+    : undefined;
   const blueprint = buildTrackBlueprint({
     config: { seed, pieceCount },
     customPieces: sanitizeTrackPieceLibrary(config.customPieces),
     includeCustomPieces: config.catalogMode === "builtin_plus_custom",
-    trackWidth: 9,
-    enableBranchPieces: false,
+    trackWidth: isTestTrack ? testTrackDebugSettings.trackWidth : 9,
+    enableBranchPieces: isTestTrack,
     maxHeadingDriftDeg: 18,
     enforceBendPairs: true,
-    forcedMainPieceKinds: isTestTrack ? ["straight", "straight"] : undefined,
+    generationPolicy,
+    forcedMainPieces,
     disableStarterSequence: isTestTrack,
   });
   return {
     seed,
     blueprint,
+    visualSettings: {
+      objectTransparencyPercent: trackVisualSettings.objectTransparencyPercent,
+      showObjectWireframes: trackVisualSettings.showObjectWireframes,
+      wireframeUsesObjectTransparency: trackVisualSettings.wireframeUsesObjectTransparency,
+    },
+    blueprintObstacleSettings: isTestTrack
+      ? {
+          enableAutomaticObstacles: false,
+          manualTestPieces,
+          manualTestTuning: {
+            pieceObstacleScales: testTrackDebugSettings.pieceObstacleScales,
+            setPieceLengthScale: testTrackDebugSettings.setPieceLengthScale,
+            showObstacleDebugLabels: true,
+          },
+        }
+      : undefined,
   };
 }
 
@@ -261,13 +515,25 @@ function buildTrackConfig(
   catalogMode: TrackCatalogMode,
   customPieces: TrackPieceTemplate[],
   layoutPreset: TrackLayoutPreset = "default",
+  testTrackDebugSettings?: TestTrackDebugSettings,
+  trackVisualSettings?: TrackVisualSettings,
+  generationPolicy: TrackGenerationPolicy = "default",
 ): RuntimeTrackConfig {
+  const sanitizedGenerationPolicy = sanitizeTrackGenerationPolicy(generationPolicy);
   return {
     seed: sanitizeTrackSeed(seed),
-    pieceCount: sanitizeTrackPieceCount(pieceCount),
+    pieceCount:
+      sanitizedGenerationPolicy === "singleplayer_camera_friendly_10"
+        ? 10
+        : sanitizeTrackPieceCount(pieceCount),
     catalogMode,
     customPieces: sanitizeTrackPieceLibrary(customPieces),
     layoutPreset,
+    generationPolicy: sanitizedGenerationPolicy,
+    testTrackDebugSettings: testTrackDebugSettings
+      ? sanitizeTestTrackDebugSettings(testTrackDebugSettings)
+      : undefined,
+    trackVisualSettings: sanitizeTrackVisualSettings(trackVisualSettings),
   };
 }
 
@@ -382,6 +648,12 @@ export function HelloMarble() {
     toTrackDraft(createDefaultCustomPiece("straight")),
   );
   const [trackLabStatus, setTrackLabStatus] = useState("");
+  const [testTrackDebugSettings, setTestTrackDebugSettings] = useState<TestTrackDebugSettings>(() =>
+    readStoredTestTrackDebugSettings(),
+  );
+  const [testTrackPiecePanelsOpen, setTestTrackPiecePanelsOpen] = useState<boolean[]>(() =>
+    TEST_TRACK_TUNABLE_PIECES.map((_, index) => index === 0),
+  );
   const [multiplayerTrackSeed, setMultiplayerTrackSeed] = useState(DEFAULT_TRACK_SEED);
 
   const tiltStatusRef = useRef(tiltStatus);
@@ -411,6 +683,7 @@ export function HelloMarble() {
   const trackLabSeedRef = useRef(trackLabSeed);
   const trackLabPieceCountRef = useRef(trackLabPieceCount);
   const trackLabCustomPiecesRef = useRef(trackLabCustomPieces);
+  const testTrackDebugSettingsRef = useRef(testTrackDebugSettings);
   const multiplayerTrackSeedRef = useRef(multiplayerTrackSeed);
 
   useEffect(() => {
@@ -551,6 +824,43 @@ export function HelloMarble() {
   }, [tuning]);
 
   useEffect(() => {
+    const visualSettings = toTrackVisualSettingsFromTuning(tuningRef.current);
+    if (gameMode === "testTrack") {
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          trackLabSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin",
+          [],
+          "testTrack",
+          testTrackDebugSettingsRef.current,
+          visualSettings,
+        ),
+      );
+      return;
+    }
+    if (gameMode === "solo") {
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          trackLabSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin_plus_custom",
+          trackLabCustomPiecesRef.current,
+          "default",
+          undefined,
+          visualSettings,
+          SOLO_TRACK_GENERATION_POLICY,
+        ),
+      );
+    }
+  }, [
+    gameMode,
+    tuning.objectTransparencyPercent,
+    tuning.showObjectWireframes,
+    tuning.wireframeUsesObjectTransparency,
+  ]);
+
+  useEffect(() => {
     racePhaseRef.current = racePhase;
   }, [racePhase]);
 
@@ -638,6 +948,15 @@ export function HelloMarble() {
       JSON.stringify(sanitizeTrackPieceLibrary(trackLabCustomPieces)),
     );
   }, [trackLabCustomPieces]);
+
+  useEffect(() => {
+    testTrackDebugSettingsRef.current = sanitizeTestTrackDebugSettings(testTrackDebugSettings);
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      TEST_TRACK_DEBUG_STORAGE_KEY,
+      JSON.stringify(testTrackDebugSettingsRef.current),
+    );
+  }, [testTrackDebugSettings]);
 
   useEffect(() => {
     multiplayerTrackSeedRef.current = sanitizeTrackSeed(multiplayerTrackSeed);
@@ -732,6 +1051,9 @@ export function HelloMarble() {
       trackLabPieceCountRef.current,
       "builtin_plus_custom",
       trackLabCustomPiecesRef.current,
+      "default",
+      undefined,
+      toTrackVisualSettingsFromTuning(tuningRef.current),
     );
     let track = createTrack(createTrackOptionsFromConfig(initialTrackConfig));
     scene.add(track.group);
@@ -986,7 +1308,34 @@ export function HelloMarble() {
     let currentPitch = 0;
     let currentRoll = 0;
     let trialStartAt: number | null = null;
-    let prevMarbleZ = marbleBody.position.z;
+    const readGateMetric = (
+      gate:
+        | {
+            point: [number, number, number];
+            normal: [number, number, number];
+          }
+        | undefined,
+      fallbackZ: number,
+      position: CANNON.Vec3,
+    ): number => {
+      if (!gate) {
+        return position.z - fallbackZ;
+      }
+      const dx = position.x - gate.point[0];
+      const dy = position.y - gate.point[1];
+      const dz = position.z - gate.point[2];
+      return dx * gate.normal[0] + dy * gate.normal[1] + dz * gate.normal[2];
+    };
+    let prevTrialStartMetric = readGateMetric(
+      track.trialStartGateLocal,
+      track.trialStartZ,
+      marbleBody.position,
+    );
+    let prevTrialFinishMetric = readGateMetric(
+      track.trialFinishGateLocal,
+      track.trialFinishZ,
+      marbleBody.position,
+    );
     let totalDroppedStale = 0;
     let totalDroppedOutOfOrderSeq = 0;
     let totalDroppedStaleTimestamp = 0;
@@ -1129,6 +1478,15 @@ export function HelloMarble() {
               } else {
                 nested.material.dispose();
               }
+            } else if (nested instanceof THREE.Sprite) {
+              if (
+                nested.material.map &&
+                !disposedTrackTextures.has(nested.material.map)
+              ) {
+                disposedTrackTextures.add(nested.material.map);
+                nested.material.map.dispose();
+              }
+              nested.material.dispose();
             }
           }
           child.geometry.dispose();
@@ -1778,6 +2136,9 @@ export function HelloMarble() {
                 trackLabPieceCountRef.current,
                 "builtin",
                 [],
+                "default",
+                undefined,
+                toTrackVisualSettingsFromTuning(tuningRef.current),
               ),
             );
             resetGhostSnapshots();
@@ -1813,6 +2174,9 @@ export function HelloMarble() {
               trackLabPieceCountRef.current,
               "builtin",
               [],
+              "default",
+              undefined,
+              toTrackVisualSettingsFromTuning(tuningRef.current),
             );
             setMultiplayerTrackSeed(seededConfig.seed);
             applyTrackConfigRef.current(seededConfig);
@@ -2103,7 +2467,16 @@ export function HelloMarble() {
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
       trialStartAt = null;
-      prevMarbleZ = marbleBody.position.z;
+      prevTrialStartMetric = readGateMetric(
+        track.trialStartGateLocal,
+        track.trialStartZ,
+        marbleBody.position,
+      );
+      prevTrialFinishMetric = readGateMetric(
+        track.trialFinishGateLocal,
+        track.trialFinishZ,
+        marbleBody.position,
+      );
       offCourseSinceMs = null;
       squeezeBlockedFrames = 0;
       curvedContainmentNearestIndex = 0;
@@ -2799,15 +3172,25 @@ export function HelloMarble() {
         respawnMarble(true);
       }
 
-      const marbleZ = marbleBody.position.z;
-      if (trialStartAt == null && prevMarbleZ <= track.trialStartZ && marbleZ > track.trialStartZ) {
+      const startMetric = readGateMetric(
+        track.trialStartGateLocal,
+        track.trialStartZ,
+        marbleBody.position,
+      );
+      if (trialStartAt == null && prevTrialStartMetric <= 0 && startMetric > 0) {
         trialStartAt = nowMs;
         setTrialState("running");
         setTrialCurrentMs(0);
-      } else if (
+      }
+      const finishMetric = readGateMetric(
+        track.trialFinishGateLocal,
+        track.trialFinishZ,
+        marbleBody.position,
+      );
+      if (
         trialStartAt != null &&
-        prevMarbleZ <= track.trialFinishZ &&
-        marbleZ > track.trialFinishZ
+        prevTrialFinishMetric <= 0 &&
+        finishMetric > 0
       ) {
         const elapsed = nowMs - trialStartAt;
         trialStartAt = null;
@@ -2825,7 +3208,8 @@ export function HelloMarble() {
         setTrialLastMs(elapsed);
         setTrialBestMs((prevBest) => (prevBest == null ? elapsed : Math.min(prevBest, elapsed)));
       }
-      prevMarbleZ = marbleZ;
+      prevTrialStartMetric = startMetric;
+      prevTrialFinishMetric = finishMetric;
 
       localRenderCurrBoardPos.set(
         boardBody.position.x,
@@ -3198,13 +3582,14 @@ export function HelloMarble() {
           break;
         }
         case "broadcast": {
+          const broadcastCameraBaseHeight = 15.6;
           cameraTarget.set(
             marbleMesh.position.x,
-            12 + heightBias,
+            broadcastCameraBaseHeight + heightBias,
             marbleMesh.position.z - 12 * zoomDistanceScale,
           );
           camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 12 + heightBias;
+          camera.position.y = broadcastCameraBaseHeight + heightBias;
           lookTarget.set(
             marbleMesh.position.x,
             LOOK_HEIGHT + heightBias * 0.15,
@@ -3586,6 +3971,77 @@ export function HelloMarble() {
     });
   };
 
+  const updateTestTrackSetting = <K extends keyof TestTrackDebugSettings>(
+    key: K,
+    value: TestTrackDebugSettings[K],
+  ) => {
+    setTestTrackDebugSettings((prev) =>
+      sanitizeTestTrackDebugSettings({
+        ...prev,
+        [key]: value,
+      }),
+    );
+  };
+
+  const updateTestTrackObstacleScale = (
+    pieceIndex: number,
+    obstacleIndex: number,
+    value: number,
+  ) => {
+    setTestTrackDebugSettings((prev) => {
+      const nextPieceScales = prev.pieceObstacleScales.map((pieceScales) => [...pieceScales]);
+      while (nextPieceScales.length < TEST_TRACK_TUNABLE_PIECES.length) {
+        nextPieceScales.push([]);
+      }
+      const targetPieceScales = [...(nextPieceScales[pieceIndex] ?? [])];
+      const targetCount = TEST_TRACK_TUNABLE_PIECES[pieceIndex]?.obstacleSlotCount ?? 0;
+      while (targetPieceScales.length < targetCount) {
+        targetPieceScales.push(1);
+      }
+      targetPieceScales[obstacleIndex] = value;
+      nextPieceScales[pieceIndex] = targetPieceScales;
+      return sanitizeTestTrackDebugSettings({
+        ...prev,
+        pieceObstacleScales: nextPieceScales,
+      });
+    });
+  };
+
+  const resetTestTrackDebugSettings = () => {
+    setTestTrackDebugSettings(createDefaultTestTrackDebugSettings());
+  };
+
+  const setTestTrackPiecePanelOpen = (pieceIndex: number, open: boolean) => {
+    setTestTrackPiecePanelsOpen((prev) => {
+      const next = [...prev];
+      while (next.length < TEST_TRACK_TUNABLE_PIECES.length) {
+        next.push(false);
+      }
+      next[pieceIndex] = open;
+      return next;
+    });
+  };
+
+  const applyTestTrackDebugSettings = () => {
+    const sanitized = sanitizeTestTrackDebugSettings(testTrackDebugSettingsRef.current);
+    setTestTrackDebugSettings(sanitized);
+    if (gameModeRef.current !== "testTrack") {
+      return;
+    }
+    applyTrackConfigRef.current(
+      buildTrackConfig(
+        trackLabSeedRef.current,
+        trackLabPieceCountRef.current,
+        "builtin",
+        [],
+        "testTrack",
+        sanitized,
+        toTrackVisualSettingsFromTuning(tuningRef.current),
+      ),
+    );
+    void startSoloRaceSequence();
+  };
+
   const cycleCameraPreset = () => {
     const currentIndex = CAMERA_PRESETS.indexOf(tuning.cameraPreset);
     const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % CAMERA_PRESETS.length : 0;
@@ -3694,6 +4150,9 @@ export function HelloMarble() {
       trackLabPieceCount,
       "builtin_plus_custom",
       trackLabCustomPieces,
+      "default",
+      undefined,
+      toTrackVisualSettingsFromTuning(tuningRef.current),
     );
     setTrackLabSeed(nextConfig.seed);
     setTrackLabPieceCount(nextConfig.pieceCount);
@@ -3805,6 +4264,24 @@ export function HelloMarble() {
     raceClientRef.current?.sendRaceStart(seed);
   };
 
+  const rebuildSoloTrackWithRandomSeed = (): void => {
+    const nextSeed = randomTrackSeed("solo");
+    trackLabSeedRef.current = nextSeed;
+    setTrackLabSeed(nextSeed);
+    const nextConfig = buildTrackConfig(
+      nextSeed,
+      trackLabPieceCountRef.current,
+      "builtin_plus_custom",
+      trackLabCustomPiecesRef.current,
+      "default",
+      undefined,
+      toTrackVisualSettingsFromTuning(tuningRef.current),
+      SOLO_TRACK_GENERATION_POLICY,
+    );
+    setTrackLabPieceCount(nextConfig.pieceCount);
+    applyTrackConfigRef.current(nextConfig);
+  };
+
   const startSoloRaceSequence = async () => {
     const sequenceId = soloStartSequenceRef.current + 1;
     soloStartSequenceRef.current = sequenceId;
@@ -3836,6 +4313,9 @@ export function HelloMarble() {
   };
 
   const restartSoloRace = () => {
+    if (gameModeRef.current === "solo") {
+      rebuildSoloTrackWithRandomSeed();
+    }
     void startSoloRaceSequence();
   };
 
@@ -3867,14 +4347,7 @@ export function HelloMarble() {
     countdownIndexRef.current = -1;
     countdownGoHandledRef.current = false;
     if (nextMode === "solo") {
-      applyTrackConfigRef.current(
-        buildTrackConfig(
-          trackLabSeedRef.current,
-          trackLabPieceCountRef.current,
-          "builtin_plus_custom",
-          trackLabCustomPiecesRef.current,
-        ),
-      );
+      rebuildSoloTrackWithRandomSeed();
       void startSoloRaceSequence();
       return;
     }
@@ -3886,6 +4359,8 @@ export function HelloMarble() {
           "builtin",
           [],
           "testTrack",
+          testTrackDebugSettings,
+          toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
       void startSoloRaceSequence();
@@ -3899,6 +4374,9 @@ export function HelloMarble() {
           trackLabPieceCountRef.current,
           "builtin",
           [],
+          "default",
+          undefined,
+          toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
       raceClientRef.current?.setPreferredName(playerNameRef.current || undefined);
@@ -3916,6 +4394,9 @@ export function HelloMarble() {
           trackLabPieceCountRef.current,
           "builtin_plus_custom",
           trackLabCustomPiecesRef.current,
+          "default",
+          undefined,
+          toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
       setOptionsSubmenu("root");
@@ -4716,7 +5197,7 @@ export function HelloMarble() {
         </button>
       ) : null}
       {(showMultiplayerNetworkUi || gameMode === "solo" || gameMode === "testTrack") &&
-      debugMenuEnabled ? (
+      (debugMenuEnabled || gameMode === "testTrack") ? (
         <DebugDrawer
           open={drawerOpen}
           onToggle={() => setDrawerOpen((open) => !open)}
@@ -4727,6 +5208,63 @@ export function HelloMarble() {
         {activeDebugTab === "tuning" ? (
           <div className="debugSection">
             <p className="tiltMessage">{statusMessage}</p>
+            {gameMode === "testTrack" ? (
+              <>
+                <p className="tiltStatus">Test Track Piece Tuning</p>
+                <DebugScalarControl
+                  label="Track Width"
+                  min={TEST_TRACK_WIDTH_MIN}
+                  max={TEST_TRACK_WIDTH_MAX}
+                  step={0.1}
+                  value={testTrackDebugSettings.trackWidth}
+                  onChange={(value) => updateTestTrackSetting("trackWidth", value)}
+                />
+                <DebugScalarControl
+                  label="Set Piece Length Scale"
+                  min={TEST_TRACK_LENGTH_SCALE_MIN}
+                  max={TEST_TRACK_LENGTH_SCALE_MAX}
+                  step={0.01}
+                  value={testTrackDebugSettings.setPieceLengthScale}
+                  onChange={(value) => updateTestTrackSetting("setPieceLengthScale", value)}
+                />
+                {TEST_TRACK_TUNABLE_PIECES.map((piece, pieceIndex) => {
+                  const pieceScales = testTrackDebugSettings.pieceObstacleScales[pieceIndex] ?? [];
+                  return (
+                    <details
+                      key={`test-track-piece-${piece.trackIndex}`}
+                      className="testTrackPieceTuningGroup"
+                      open={testTrackPiecePanelsOpen[pieceIndex] ?? false}
+                      onToggle={(event) =>
+                        setTestTrackPiecePanelOpen(pieceIndex, event.currentTarget.open)
+                      }
+                    >
+                      <summary>{`TRACK ${piece.trackIndex} · ${piece.label}`}</summary>
+                      {pieceScales.map((value, obstacleIndex) => (
+                        <DebugScalarControl
+                          key={`test-track-piece-${piece.trackIndex}-obstacle-${obstacleIndex + 1}`}
+                          label={`Obstacle ${obstacleIndex + 1} Scale`}
+                          min={TEST_TRACK_OBSTACLE_SCALE_MIN}
+                          max={TEST_TRACK_OBSTACLE_SCALE_MAX}
+                          step={0.01}
+                          value={value}
+                          onChange={(next) =>
+                            updateTestTrackObstacleScale(pieceIndex, obstacleIndex, next)
+                          }
+                        />
+                      ))}
+                    </details>
+                  );
+                })}
+                <div className="debugButtonRow">
+                  <button type="button" onClick={applyTestTrackDebugSettings}>
+                    Apply Test Track Tuning
+                  </button>
+                  <button type="button" onClick={resetTestTrackDebugSettings}>
+                    Reset Piece Tuning
+                  </button>
+                </div>
+              </>
+            ) : null}
             <DebugScalarControl
               label="Max Speed"
               min={4}
@@ -4767,6 +5305,32 @@ export function HelloMarble() {
               value={tuning.maxTiltDeg}
               onChange={(value) => updateTuning("maxTiltDeg", value)}
             />
+            <DebugScalarControl
+              label="Object Transparency (%)"
+              min={0}
+              max={85}
+              step={1}
+              value={tuning.objectTransparencyPercent}
+              onChange={(value) => updateTuning("objectTransparencyPercent", value)}
+            />
+            <label className="controlLabel controlLabelCheckbox">
+              <input
+                type="checkbox"
+                checked={tuning.showObjectWireframes}
+                onChange={(event) => updateTuning("showObjectWireframes", event.target.checked)}
+              />
+              Show Wireframes
+            </label>
+            <label className="controlLabel controlLabelCheckbox">
+              <input
+                type="checkbox"
+                checked={tuning.wireframeUsesObjectTransparency}
+                onChange={(event) =>
+                  updateTuning("wireframeUsesObjectTransparency", event.target.checked)
+                }
+              />
+              Wireframes Match Transparency
+            </label>
             <DebugScalarControl
               label="Max Board Angular Velocity"
               min={1}
