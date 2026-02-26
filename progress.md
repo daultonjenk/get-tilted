@@ -1019,3 +1019,265 @@ v0.8.7.2 full publish update (editor reference marble guide tool):
   - launched dev stack,
   - navigated to Editor with Playwright skill script and clicked `Add Ref Marble`,
   - visually confirmed reference marble marker appears and is selected in `output/editor-ref-smoke/shot-0.png`.
+
+v0.8.7.2 local iteration update (hole set-piece prototype):
+- Mode: Local Iteration Mode (rapid testing, no commit/push).
+- Implemented a new standard test-track set piece focused on hole behavior:
+  - `client/src/game/HelloMarble.tsx`
+    - Replaced test-track manual sequence middle piece with `straight-center-hole-respawn`.
+    - Updated test-track piece metadata/labels to `Straight Hole Respawn` with zero obstacle tuning slots.
+    - Kept test-track forced piece wiring aligned so the piece is authored as a straight segment and forwarded via manual test piece specs.
+  - `client/src/game/track/createTrack.ts`
+    - Added new manual set-piece kind: `straight-center-hole-respawn`.
+    - Added floor cutout support for blueprint tracks via manual floor cutout collection + floor slice builders.
+    - Carved center floor void in both render geometry and physics colliders (primitive path and trimesh fallback path) by splitting floor into left/right strips only inside the cutout zone.
+    - Cutout sizing set to ~2x marble diameter (`TEST_TRACK_CENTER_HOLE_DIAMETER = MARBLE_RADIUS * 4`) with side-width clamping safety.
+- Verification performed (targeted for local iteration):
+  - Ran `npm run -w client typecheck` (pass).
+  - Ran develop-web-game Playwright script against live local Vite server and inspected generated screenshot:
+    - `output/web-game/shot-0.png` shows the new center hole on the test track.
+  - Note: the game does not currently expose deterministic `window.advanceTime`, so the scripted action burst cannot reliably step gameplay to conclusively assert fall/respawn in automation; manual in-browser drive-through is still recommended for final behavior confirmation.
+- Build/version discipline for this local pass:
+  - Version bump intentionally deferred (same issue/theme rapid iteration; no significant cross-feature scope jump).
+  - No Android wrapper version sync required because `APP_VERSION` was not changed.
+- Follow-up TODO:
+  - Manually play Test Track and confirm marble drop-through and respawn feel around the hole center; if needed, tune hole diameter or cutout longitudinal span for reliability.
+
+v0.8.7.2 local iteration follow-up (fix H-shaped hole seams):
+- Addressed visual artifact where the center hole looked like an "H" due to full-width seam gaps at hole entry/exit.
+- Root cause: floor was split into separate swept meshes (full + left strip + right strip) with no overlap band, so transition samples produced thin cross-track slits.
+- Implemented overlap-blend transitions in `client/src/game/track/createTrack.ts`:
+  - Added render/collider edge blend constants:
+    - `TEST_TRACK_CENTER_HOLE_EDGE_BLEND_RENDER`
+    - `TEST_TRACK_CENTER_HOLE_EDGE_BLEND_COLLIDER`
+  - Updated floor-cutout resolver to classify a smaller `hole core` (actual opening) while keeping full floor overlapped near hole edges.
+  - Applied same core logic to primitive collider path so collision hole stays aligned with visuals.
+  - Updated floor-slice builders to accept explicit edge blend values for render vs collider sampling density.
+- Result: test-track hole now renders as a clean center cutout (no full-width connector slits).
+- Verification:
+  - `npm run -w client typecheck` passed.
+  - Playwright screenshot after entering Test Track confirms visual fix: `output/web-game/shot-0.png`.
+- Notes:
+  - This was a Local Iteration follow-up on same feature theme; version bump intentionally deferred.
+  - Manual gameplay pass is still recommended to reconfirm drop-through + respawn feel after transition blending.
+
+v0.8.7.2 local iteration follow-up (hole collision pass-through fix):
+- Issue: after seam-visual fix, center hole looked correct but marble no longer fell through.
+- Root cause: collider-side hole core became too narrow from aggressive edge blending (`holeCoreHalfLength` almost collapsed), so center floor collision remained effectively continuous.
+- Fixes in `client/src/game/track/createTrack.ts`:
+  - Reduced collider edge blend to preserve a real hole core:
+    - `TEST_TRACK_CENTER_HOLE_EDGE_BLEND_COLLIDER = BLUEPRINT_COLLIDER_SAMPLE_STEP * 0.1`.
+  - Updated primitive collider cutout detection to remove any span overlapping the hole core (not only spans whose center lies strictly inside it):
+    - changed condition to `activeCutout.longitudinalDistance - spanHalfLength <= holeCoreHalfLength`.
+- Verification:
+  - `npm run -w client typecheck` passed.
+  - Automated screenshot checks still show clean center-hole visuals.
+  - Headless keyboard-drive automation could not conclusively validate movement/fall in this environment (marble remained at spawn in captures), so manual in-browser run remains required to confirm drop-through/respawn behavior end-to-end.
+- Version discipline:
+  - Local iteration continuation on same issue/theme; version bump intentionally deferred.
+
+v0.8.7.2 local iteration follow-up (visual/collider hole alignment):
+- Issue: marble could fall, but fell slightly before the visible hole start (collider hole leading the render hole).
+- Root cause: primitive floor collider approximates the channel with long span boxes; cutout removal at span granularity can begin earlier than rendered cutout boundaries.
+- Alignment fix in `client/src/game/track/createTrack.ts`:
+  - For manual floor cutouts (`straight-center-hole-respawn`), switched primitive mode floor collision to an exact trimesh built from the same `floorGeometries` used for rendering.
+  - Kept primitive wall colliders unchanged for performance; only floor collision path is upgraded for hole alignment precision.
+  - Added `includeFloor` option to `addBlueprintPrimitiveColliders(...)` so floor boxes are skipped when exact floor trimesh is active.
+- Result: hole collision boundaries are now derived from the same geometry as the visible hole, aligning visual and physical cutout extents.
+- Verification:
+  - `npm run -w client typecheck` passed.
+  - Test-track screenshot remains visually correct (`output/web-game/shot-0.png`).
+  - Manual drive-through is recommended to confirm subjective feel in-browser on your machine.
+- Version discipline:
+  - Local iteration continuation on same issue/theme; version bump intentionally deferred.
+
+v0.8.7.2 local iteration follow-up (side-by-side decagon + circle holes):
+- Implemented side-by-side comparison holes in the `straight-center-hole-respawn` test set piece:
+  - left hole: decagon
+  - right hole: circle
+  - both centered longitudinally in the same straight set piece with lateral offsets to avoid overlap/clipping.
+- Track floor hole model refactor in `client/src/game/track/createTrack.ts`:
+  - replaced single center cutout model with generalized floor-hole descriptors (`BlueprintManualFloorHole`) supporting shape kind (`circle` | `decagon`) and radius.
+  - added hole interval evaluation pipeline:
+    - regular polygon sampling helper for decagon cross-sections,
+    - circle/decagon longitudinal slice span resolver,
+    - interval merge/complement builder per sweep sample,
+    - multi-slice floor geometry generation for arbitrary disjoint hole spans.
+  - manual test piece hole collector now emits two holes (left decagon, right circle) for `straight-center-hole-respawn`.
+- Collision alignment preservation:
+  - kept exact floor trimesh-from-render-geometry path in primitive collider mode when manual holes are active, so visual/collider boundaries remain matched.
+  - simplified primitive floor-box path for no-hole cases; wall primitives unchanged.
+- UI label update:
+  - `client/src/game/HelloMarble.tsx`: test-piece label changed to `Decagon + Circle Holes` for clarity in the tuning panel.
+- Verification:
+  - `npm run -w client typecheck` passed.
+  - Playwright screenshot confirms both holes render side-by-side without overlap: `output/web-game/shot-0.png`.
+- Notes:
+  - Manual in-browser feel pass is recommended to compare how marble interaction differs between decagon vs circle edges during real rolling input.
+- Version discipline:
+  - Local iteration continuation on same issue/theme; version bump intentionally deferred.
+
+v0.8.7.2 local iteration follow-up (hole shape/seam correction attempt):
+- Investigated user report: side-by-side holes looked oblong and appeared wall-connected via seam lines.
+- Applied targeted floor-hole rendering/collision adjustments in `client/src/game/track/createTrack.ts`:
+  - removed manual hole longitudinal shrink (`TEST_TRACK_HOLE_EDGE_BLEND_RENDER/COLLIDER` set to `0`) so hole footprint is not artificially squashed.
+  - extended `buildSweptRectGeometry(...)` with `capEnds` option and disabled end caps for hole-slice floor generation to avoid cap-induced connector artifacts.
+  - added a dedicated manual-hole patch path (`buildFloorHolePatchGeometries`) that builds a rectangular extruded floor patch with explicit decagon/circle shape holes, plus outside swept floor coverage.
+  - added robust fallback behavior when merged floor geometry is unavailable:
+    - render from individual floor slices,
+    - collider adds each floor slice trimesh when merged trimesh is not available.
+- Important fix during iteration:
+  - temporary full-floor disappearance was caused by merged floor geometry incompatibility; fallback render/collider path restored visible floor immediately.
+- Verification:
+  - `npm run -w client typecheck` passed.
+  - Playwright screenshot after entering Test Track (`output/web-game/shot-0.png`) confirms floor is present and both holes render in the expected side-by-side location.
+- Notes:
+  - This is still local-iteration tuning; manual in-browser feel/visual pass is recommended for final acceptance of hole silhouette quality at gameplay camera distance.
+- Version discipline:
+  - Local iteration continuation on same issue/theme; version bump intentionally deferred.
+
+v0.8.7.2 local iteration follow-up (explicit hole-patch geometry + fallback stability):
+- Reworked manual hole floor generation to avoid interval-slice artifacts:
+  - Added `buildFloorHolePatchGeometries(...)` that builds a dedicated rectangular floor patch with explicit shape holes (left decagon + right circle) using `THREE.Shape` + `ExtrudeGeometry`.
+  - Outside the patch window, floor is still generated by the swept floor path with no end-caps in the excluded patch zone.
+- Added `buildSweptRectGeometry(..., { capEnds })` option and used cap suppression in hole-related floor paths to avoid cap-driven connector slits.
+- Set hole edge blend to `0` for both render/collider hole sampling constants to prevent shape shrink/squash bias.
+- Added robust render/collider fallback when merged floor geometry is unavailable:
+  - render from individual floor slices when merge fails,
+  - collider adds per-slice trimesh shapes if merged trimesh is missing.
+- Verification:
+  - `npm run -w client typecheck` passed.
+  - Test-track screenshot generated (`output/web-game/shot-0.png`) with floor restored and side-by-side holes rendered.
+- Version discipline:
+  - Local iteration continuation on same issue/theme; version bump intentionally deferred.
+
+v0.8.7.2 local iteration follow-up (remove hole seam connectors with single floor patch):
+- Reworked manual-hole floor generation in `client/src/game/track/createTrack.ts` to eliminate seam lines that visually looked like hole-to-wall connectors:
+  - Replaced the split `outside floor + local hole patch` composition with one continuous extruded floor patch whenever manual floor holes are active.
+  - The patch now spans projected track bounds (from sweep samples) and embeds both hole cutouts directly, so there is no cross-track seam near the holes.
+  - Patch basis now derives primarily from averaged manual-hole `tangent/right` vectors to keep cutout orientation aligned with the authored set-piece frame.
+  - Increased patch curve resolution (`curveSegments: 32`) for smoother circle silhouette while keeping the decagon explicit.
+- Collision alignment impact:
+  - Primitive-mode exact floor collider path continues to use the same hole floor geometry, so visual/collider cutouts stay aligned.
+- Verification (Local Iteration, develop-web-game loop):
+  - `npm run -w client typecheck` passed.
+  - Captured fresh Test Track screenshot after entering game: `output/web-game/shot-0.png`.
+  - No fresh `errors-0.json` generated in this run (no new captured console errors in the scripted pass).
+- Version discipline:
+  - Version bump intentionally deferred (same local-iteration issue/theme).
+
+v0.8.8.0 local iteration milestone (stacked Test Track drop lane):
+- Implemented a two-level Test Track progression in `client/src/game/track/createTrack.ts` for the `straight-center-hole-respawn` manual set piece:
+  - Replaced side-by-side decagon/circle manual floor holes with a single centered circular hole (same 2x marble diameter target sizing).
+  - Added a dedicated second lower lane generated beneath the hole on the same board kinematic bodies (floor on `boardBody`, walls on `boardWallBody`) so both levels tilt in perfect sync.
+  - Added top-lane forward blocker wall after the hole so progression is forced through the drop.
+  - Added lower-lane side rails and a lower-lane entry cap wall so the dropped lane is bounded and playable.
+  - Extended computed track bounds/lowest-floor handling to include lower-level geometry, which moves `respawnY` below the second level so falling through the top hole no longer triggers immediate reset.
+  - Shifted finish marker/gate vertically to align with lower-level completion flow when stacked-drop mode is active.
+- Added `addOrientedPart(...)` helper for robust basis-aligned box visuals + collider shapes (reused for stacked-lane and blocker additions).
+- Updated Test Track presentation in `client/src/game/HelloMarble.tsx`:
+  - Test sequence now starts directly on the drop set piece (`straight-center-hole-respawn`, then `finish`) for focused stacked-lane testing.
+  - Tuning drawer label updated to `Two-Level Circular Drop`.
+- Version discipline (required for this significant local scope jump):
+  - Bumped app version to `0.8.8.0` in:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion`, `appVersionCode=80800`)
+    - `android/app/build.gradle` (`versionName`, `versionCode=80800`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+  - Playwright Test Track screenshot refreshed (`output/web-game/shot-0.png`), showing new top circular hole + blocker and updated label/version.
+  - No fresh `errors-0.json` produced during automated screenshot runs.
+- Notes:
+  - Automated headless input in this environment did not conclusively demonstrate live drop-to-lower-lane traversal; manual in-browser roll-through is still needed to confirm final feel and finish crossing behavior end-to-end.
+
+v0.8.9.0 local iteration milestone (deeper level-2 drop + broadcast-only camera):
+- Raised stacked Test Track lower-lane separation in `client/src/game/track/createTrack.ts`:
+  - `TEST_TRACK_SECOND_LEVEL_DROP_Y` increased from `4.2` to `14` so the second track sits much farther below the top deck.
+- Locked camera model to broadcast-only across runtime/types/constants:
+  - `client/src/game/gameTypes.ts`: `CameraPresetId` narrowed to only `"broadcast"`.
+  - `client/src/game/gameConstants.ts`: `CAMERA_PRESETS` reduced to `["broadcast"]`.
+  - `client/src/game/gameUtils.ts`: simplified `getCameraLabel(...)` to broadcast-only behavior.
+- Updated runtime camera motion in `client/src/game/HelloMarble.tsx`:
+  - Removed multi-preset camera switch logic and kept only broadcast framing path.
+  - Broadcast camera now follows marble Y (`camera.position.y` and look target Y are marble-relative), so lower-lane play remains visible after the deeper drop.
+- Removed camera preset switching UI while keeping camera tuning controls:
+  - Removed options submenu preset dropdown.
+  - Removed debug camera-tab preset dropdown.
+  - Removed mobile in-race camera-cycle button.
+  - Kept zoom/FOV/height sliders and camera reset behavior.
+- Version discipline update (significant local scope jump):
+  - Bumped app version to `0.8.9.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.9.0`, `appVersionCode=80900`)
+    - `android/app/build.gradle` (`versionName=0.8.9.0`, `versionCode=80900`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+  - Refreshed Test Track screenshot: `output/web-game/shot-0.png` (shows Version `0.8.9.0` and visibly deeper lower lane).
+  - No fresh `output/web-game/errors-0.json` generated in screenshot run.
+- Notes:
+  - Automated headless screenshot flow confirms build/UI/geometry wiring; a manual play pass is still recommended to validate that level-1 is fully out-of-frame during lower-lane rolling in your preferred broadcast tuning.
+
+v0.8.9.0 local iteration follow-up (verification refresh for deeper level-2 separation):
+- Revalidated the current `Two-Level Circular Drop` state after implementing deeper level separation and broadcast-only camera behavior.
+- Verification refresh (Local Iteration):
+  - `npm run -w client typecheck` passed.
+  - Ran `develop-web-game` Playwright client against local Vite dev server and captured updated screenshot artifact `output/web-game/shot-0.png` (Version `0.8.9.0`, deeper lower lane visible beneath top deck).
+- Additional test note:
+  - Attempted a longer automated input burst to capture post-drop framing; this environment’s headless timing made long frame bursts unreliable, so that run was aborted after timeout and did not produce a usable screenshot.
+  - Manual in-browser roll-through remains recommended to confirm preferred camera framing while actively traveling on the lower lane.
+- Version discipline:
+  - No further version bump in this follow-up; retained `0.8.9.0`.
+
+v0.8.9.0 local iteration follow-up (deeper level-2 drop + level-aware tilt pivot stability):
+- Increased stacked Test Track lower-lane separation another 50% in `client/src/game/track/createTrack.ts`:
+  - `TEST_TRACK_SECOND_LEVEL_DROP_Y` changed from `14` to `21`.
+- Added track-provided tilt pivot layer metadata for the two-level drop setup:
+  - Extended `TrackBuildResult` with optional `tiltPivotLayersLocalY` (`upperY`, `lowerY`, `switchDownY`, `switchUpY`).
+  - Populated this metadata in the `straight-center-hole-respawn` stacked-drop branch.
+  - Added hysteresis thresholds derived from drop distance (`switchDown=40%`, `switchUp=28%`) to prevent layer-chatter near transitions.
+- Updated runtime tilt controller in `client/src/game/HelloMarble.tsx` with minimal churn:
+  - Added `activeTiltPivotLayer` runtime state (`upper`/`lower`).
+  - Added local-Y hysteresis layer switching each control update (auto detection, threshold switching).
+  - Replaced fixed pivot Y (`0`) with layer-aware pivot Y from `track.tiltPivotLayersLocalY`.
+  - Reset layer to `upper` on respawn and re-seeded `pivotSmoothed` to the top-layer pivot to avoid post-respawn pivot carry-over.
+- Goal of fix:
+  - Preserve existing tilt feel while preventing violent flick/throw behavior when marble is on lower lane.
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Version discipline:
+  - Version bump intentionally deferred; retained `0.8.9.0` as same local-iteration issue/theme follow-up.
+
+v0.8.10.0 full publish milestone (temporary Flat Plane mode):
+- Added a new temporary main-menu mode in `client/src/game/HelloMarble.tsx`:
+  - Added `Flat Plane` button to the main menu grid.
+  - Wired mode selection through existing `switchGameMode(...)` flow using `switchGameMode("flatPlane")`.
+  - Reused the existing solo countdown/start sequence for minimal churn and consistent control-lock behavior.
+- Extended mode/layout typing for the new test mode:
+  - `client/src/game/gameTypes.ts`: `GameMode` now includes `"flatPlane"`.
+  - `client/src/game/HelloMarble.tsx`: `TrackLayoutPreset` now includes `"flatPlane"`.
+- Added dedicated flat-plane track preset routing:
+  - `client/src/game/HelloMarble.tsx`: `createTrackOptionsFromConfig(...)` now returns `{ preset: "flatPlane" }` when layout preset is flat-plane.
+  - `client/src/game/track/createTrack.ts`: `CreateTrackOptions` now accepts `preset?: "default" | "flatPlane"`.
+- Implemented massive empty flat test surface in `client/src/game/track/createTrack.ts`:
+  - Added `createFlatPlaneTrack()` and routed `createTrack(...)` to it when `opts.preset === "flatPlane"`.
+  - Surface size set to `6000 x 6000` world units.
+  - No obstacles, no walls, no rail clamping (containment samples mark `railLeft=false` / `railRight=false`).
+  - Spawn moved near the back edge to maximize forward straight-line run distance.
+  - Off-course bounds expanded to plane extents so respawn only occurs after leaving the giant surface.
+- Solo-like runtime behavior updated for the new mode in `client/src/game/HelloMarble.tsx`:
+  - Included `flatPlane` in freeze/unfreeze solo guards and countdown GO unfreeze logic.
+  - Included `flatPlane` in solo-result eligibility logic.
+  - Included `flatPlane` in debug drawer visibility gating where solo/test track already participate.
+- Version discipline (required for Full Publish mode):
+  - Bumped to `0.8.10.0` in:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.10.0`, `appVersionCode=81000`)
+    - `android/app/build.gradle` (`versionName=0.8.10.0`, `versionCode=81000`)
+- Verification (Full Publish mode):
+  - `npm run lint` passed.
+  - `npm run typecheck` passed.
+  - `npm run build` passed.
+  - Playwright smoke (develop-web-game client) on local Vite dev server passed:
+    - Menu screenshot confirms new `Flat Plane` button: `output/web-game-flat-menu/shot-0.png`.
+    - In-mode screenshot confirms giant obstacle-free plane load: `output/web-game-flat-plane/shot-0.png`.
+    - No `errors-*.json` generated in either smoke output folder.

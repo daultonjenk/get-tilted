@@ -3,13 +3,6 @@ import type { MessagePayloadMap } from "@get-tilted/shared-protocol";
 import type { RingBuffer } from "./RingBuffer";
 
 export type CameraPresetId =
-  | "chaseCentered"
-  | "chaseRight"
-  | "chaseLeft"
-  | "isoStandard"
-  | "isoFlatter"
-  | "topdownPure"
-  | "topdownForward"
   | "broadcast";
 
 export type TuningState = {
@@ -51,7 +44,7 @@ export type TuningState = {
 
 export type TrialState = "idle" | "running" | "finished";
 export type RacePhase = "waiting" | "countdown" | "racing";
-export type GameMode = "unselected" | "solo" | "testTrack" | "multiplayer";
+export type GameMode = "unselected" | "solo" | "testTrack" | "flatPlane" | "multiplayer";
 
 export type GhostSnapshot = {
   seq: number | undefined;

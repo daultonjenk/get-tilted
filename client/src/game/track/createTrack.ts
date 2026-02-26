@@ -7,8 +7,16 @@ import {
   type TrackBlueprint,
 } from "./modularTrack";
 
+type ManualSetPieceKind =
+  | "arc90-obstacle-1"
+  | "straight-obstacle-1"
+  | "straight-tight-triangles"
+  | "straight-wide-triangles"
+  | "straight-center-hole-respawn";
+
 export type CreateTrackOptions = {
   seed?: string;
+  preset?: "default" | "flatPlane";
   blueprint?: TrackBlueprint;
   visualSettings?: {
     objectTransparencyPercent?: number;
@@ -21,11 +29,7 @@ export type CreateTrackOptions = {
     manualTestPieces?: Array<{
       placementIndex: number;
       testPieceIndex: number;
-      kind:
-        | "arc90-obstacle-1"
-        | "straight-obstacle-1"
-        | "straight-tight-triangles"
-        | "straight-wide-triangles";
+      kind: ManualSetPieceKind;
     }>;
     manualTestTuning?: {
       pieceObstacleScales?: number[][];
@@ -68,6 +72,12 @@ export type TrackBuildResult = {
   containmentPathLocal: TrackContainmentSample[];
   spawn: CANNON.Vec3;
   respawnY: number;
+  tiltPivotLayersLocalY?: {
+    upperY: number;
+    lowerY: number;
+    switchDownY: number;
+    switchUpY: number;
+  };
   offCourseBoundsLocal: {
     minX: number;
     maxX: number;
@@ -120,6 +130,17 @@ type PartSpec = {
   };
 };
 
+type OrientedPartSpec = {
+  size: THREE.Vector3;
+  position: THREE.Vector3;
+  right: THREE.Vector3;
+  up: THREE.Vector3;
+  forward: THREE.Vector3;
+  material: THREE.Material;
+  uvScale?: [number, number];
+  uvProjection?: "default" | "floorSegment";
+};
+
 type ObstacleActor = {
   visual: THREE.Object3D;
   body: CANNON.Body;
@@ -156,6 +177,9 @@ const MARKER_THICK = 0.12;
 const WALL_CLEARANCE = 0.2;
 const OFF_COURSE_MARGIN = 1.1;
 const OFF_COURSE_Z_MARGIN = 2.4;
+const FLAT_PLANE_SIZE = 6000;
+const FLAT_PLANE_HALF_EXTENT = FLAT_PLANE_SIZE / 2;
+const FLAT_PLANE_EDGE_PADDING = 40;
 
 const MOVING_OBSTACLE_HEIGHT_SCALE = 1.2;
 const MOVING_OBSTACLE_WIDTH_SCALE = 1.18;
@@ -203,6 +227,18 @@ const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MIN = 0.08;
 const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MAX = 0.32;
 const BLUEPRINT_OBSTACLE_CORNER_CURVE_SEGMENTS = 8;
 const BLUEPRINT_OBSTACLE_WALL_TOUCH_EPSILON = 0.03;
+const TEST_TRACK_CENTER_HOLE_DIAMETER = MARBLE_RADIUS * 4;
+const TEST_TRACK_CENTER_HOLE_RADIUS = TEST_TRACK_CENTER_HOLE_DIAMETER * 0.5;
+const TEST_TRACK_HOLE_WALL_MARGIN = 0.22;
+const TEST_TRACK_SECOND_LEVEL_DROP_Y = 21;
+const TEST_TRACK_SECOND_LEVEL_LANDING_BACK_PADDING = 0.9;
+const TEST_TRACK_SECOND_LEVEL_FORWARD_PADDING = 0.8;
+const TEST_TRACK_TOP_LEVEL_BLOCKER_EXTRA_OFFSET = 0.72;
+const TEST_TRACK_TILT_LAYER_SWITCH_DOWN_FRACTION = 0.4;
+const TEST_TRACK_TILT_LAYER_SWITCH_UP_FRACTION = 0.28;
+const TEST_TRACK_HOLE_EDGE_BLEND_RENDER = 0;
+const TEST_TRACK_HOLE_EDGE_BLEND_COLLIDER = 0;
+const TEST_TRACK_DECAGON_SIDES = 10;
 
 // Roughly 2x original authored length.
 const SEGMENTS: SegmentDef[] = [
@@ -475,6 +511,74 @@ function addPart(group: THREE.Group, boardBody: CANNON.Body, spec: PartSpec): vo
   addCompoundPart(boardBody, spec);
 }
 
+function addOrientedPart(group: THREE.Group, boardBody: CANNON.Body, spec: OrientedPartSpec): void {
+  const { size, position, right, up, forward, material, uvScale, uvProjection } = spec;
+  const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+  if (uvProjection === "floorSegment") {
+    applyFloorSegmentUv(geometry, size);
+  }
+  if (uvScale) {
+    const uv = geometry.getAttribute("uv");
+    for (let i = 0; i < uv.count; i += 1) {
+      uv.setXY(i, uv.getX(i) * uvScale[0], uv.getY(i) * uvScale[1]);
+    }
+    uv.needsUpdate = true;
+  }
+
+  const forwardAxis = forward.clone();
+  if (forwardAxis.lengthSq() <= 1e-8) {
+    forwardAxis.set(0, 0, 1);
+  } else {
+    forwardAxis.normalize();
+  }
+
+  const rightAxis = right.clone();
+  rightAxis.addScaledVector(forwardAxis, -rightAxis.dot(forwardAxis));
+  if (rightAxis.lengthSq() <= 1e-8) {
+    rightAxis.copy(up).cross(forwardAxis);
+  }
+  if (rightAxis.lengthSq() <= 1e-8) {
+    rightAxis.set(1, 0, 0);
+  }
+  rightAxis.normalize();
+
+  const upAxis = up.clone();
+  upAxis.addScaledVector(forwardAxis, -upAxis.dot(forwardAxis));
+  upAxis.addScaledVector(rightAxis, -upAxis.dot(rightAxis));
+  if (upAxis.lengthSq() <= 1e-8) {
+    upAxis.copy(forwardAxis).cross(rightAxis);
+  }
+  if (upAxis.lengthSq() <= 1e-8) {
+    upAxis.set(0, 1, 0);
+  }
+  upAxis.normalize();
+  if (upAxis.dot(up) < 0) {
+    upAxis.negate();
+  }
+
+  rightAxis.copy(upAxis).cross(forwardAxis);
+  if (rightAxis.lengthSq() <= 1e-8) {
+    rightAxis.set(1, 0, 0);
+  }
+  rightAxis.normalize();
+
+  const basis = new THREE.Matrix4().makeBasis(rightAxis, upAxis, forwardAxis);
+  const orientation = new THREE.Quaternion().setFromRotationMatrix(basis);
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.copy(position);
+  mesh.quaternion.copy(orientation);
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+
+  boardBody.addShape(
+    new CANNON.Box(new CANNON.Vec3(size.x * 0.5, size.y * 0.5, size.z * 0.5)),
+    new CANNON.Vec3(position.x, position.y, position.z),
+    new CANNON.Quaternion(orientation.x, orientation.y, orientation.z, orientation.w),
+  );
+}
+
 function geometryToTrimesh(
   geometry: THREE.BufferGeometry,
   options?: { doubleSided?: boolean; minAreaSq?: number },
@@ -578,6 +682,19 @@ type SweepRect = {
   maxX: number;
   minY: number;
   maxY: number;
+};
+
+type FloorInterval = {
+  minX: number;
+  maxX: number;
+};
+
+type BlueprintManualFloorHole = {
+  kind: "circle" | "decagon";
+  center: THREE.Vector3;
+  right: THREE.Vector3;
+  tangent: THREE.Vector3;
+  radius: number;
 };
 
 type BlueprintColliderMode = "primitive" | "trimesh";
@@ -1614,13 +1731,7 @@ function addBlueprintManualObstaclePieces(params: {
     );
   };
 
-  const getManualSetPieceAuthoredLength = (
-    kind:
-      | "arc90-obstacle-1"
-      | "straight-obstacle-1"
-      | "straight-tight-triangles"
-      | "straight-wide-triangles",
-  ): number => {
+  const getManualSetPieceAuthoredLength = (kind: ManualSetPieceKind): number => {
     if (kind === "arc90-obstacle-1") {
       return 14;
     }
@@ -1630,16 +1741,13 @@ function addBlueprintManualObstaclePieces(params: {
     if (kind === "straight-tight-triangles") {
       return 34;
     }
+    if (kind === "straight-center-hole-respawn") {
+      return 20;
+    }
     return 52;
   };
 
-  const getManualSetPiecePlacementKind = (
-    kind:
-      | "arc90-obstacle-1"
-      | "straight-obstacle-1"
-      | "straight-tight-triangles"
-      | "straight-wide-triangles",
-  ): "straight" | "arc90" => {
+  const getManualSetPiecePlacementKind = (kind: ManualSetPieceKind): "straight" | "arc90" => {
     if (kind === "arc90-obstacle-1") {
       return "arc90";
     }
@@ -1946,6 +2054,63 @@ function collectAuthoredSetPieceObstacleSpecs(
   return specs;
 }
 
+function collectManualFloorHoles(
+  placements: TrackBlueprint["placements"],
+  manualTestPieces: NonNullable<CreateTrackOptions["blueprintObstacleSettings"]>["manualTestPieces"],
+): BlueprintManualFloorHole[] {
+  if (!manualTestPieces || manualTestPieces.length === 0) {
+    return [];
+  }
+
+  const holes: BlueprintManualFloorHole[] = [];
+  const sortedSpecs = [...manualTestPieces].sort((a, b) => a.placementIndex - b.placementIndex);
+  for (const spec of sortedSpecs) {
+    if (spec.kind !== "straight-center-hole-respawn") {
+      continue;
+    }
+    const placement = placements[spec.placementIndex];
+    if (!placement || placement.kind !== "straight") {
+      continue;
+    }
+
+    const pieceSamples = buildBlueprintSweepSamples([placement], BLUEPRINT_RENDER_SAMPLE_STEP);
+    const pieceFrames = buildBlueprintSweepFrames(pieceSamples);
+    if (pieceSamples.length < 2 || pieceFrames.length !== pieceSamples.length) {
+      continue;
+    }
+    const lookup = buildBlueprintSweepDistanceLookup(pieceSamples);
+    if (lookup.totalLength < TEST_TRACK_CENTER_HOLE_DIAMETER) {
+      continue;
+    }
+    const pose = sampleBlueprintSweepPoseAtDistance(
+      pieceSamples,
+      pieceFrames,
+      lookup,
+      lookup.totalLength * 0.5,
+    );
+    if (!pose) {
+      continue;
+    }
+
+    const maxRadiusByWall = Math.max(MARBLE_RADIUS * 0.7, pose.width * 0.5 - TEST_TRACK_HOLE_WALL_MARGIN);
+    const radius = clamp(
+      TEST_TRACK_CENTER_HOLE_RADIUS,
+      MARBLE_RADIUS * 0.7,
+      maxRadiusByWall,
+    );
+    const right = pose.right.clone().normalize();
+    const tangent = pose.tangent.clone().normalize();
+    holes.push({
+      kind: "circle",
+      center: pose.center.clone(),
+      right: right.clone(),
+      tangent: tangent.clone(),
+      radius,
+    });
+  }
+  return holes;
+}
+
 function toSweepWorldPoint(
   sample: BlueprintSweepSample,
   frame: BlueprintSweepFrame,
@@ -1962,11 +2127,15 @@ function buildSweptRectGeometry(
   samples: BlueprintSweepSample[],
   frames: BlueprintSweepFrame[],
   resolveRect: (sample: BlueprintSweepSample) => SweepRect | null,
+  options?: {
+    capEnds?: boolean;
+  },
 ): THREE.BufferGeometry | null {
   if (samples.length < 2 || frames.length !== samples.length) {
     return null;
   }
 
+  const capEnds = options?.capEnds ?? true;
   const rects = samples.map((sample) => resolveRect(sample));
   const vertices: number[] = [];
   const indices: number[] = [];
@@ -2049,14 +2218,16 @@ function buildSweptRectGeometry(
     pushQuad(a2, a3, b3, b2);
     pushQuad(a3, a0, b0, b3);
 
-    const hasPrevSpan = i > 0 && rects[i - 1] != null;
-    if (!hasPrevSpan) {
-      pushCap(sampleA, frameA, rectA);
-    }
+    if (capEnds) {
+      const hasPrevSpan = i > 0 && rects[i - 1] != null;
+      if (!hasPrevSpan) {
+        pushCap(sampleA, frameA, rectA);
+      }
 
-    const hasNextSpan = i + 2 < samples.length && rects[i + 2] != null;
-    if (!hasNextSpan) {
-      pushCap(sampleB, frameB, rectB);
+      const hasNextSpan = i + 2 < samples.length && rects[i + 2] != null;
+      if (!hasNextSpan) {
+        pushCap(sampleB, frameB, rectB);
+      }
     }
   }
 
@@ -2069,6 +2240,327 @@ function buildSweptRectGeometry(
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function buildRegularPolygonVertices(
+  sides: number,
+  radius: number,
+  rotationRad = 0,
+): Array<{ x: number; y: number }> {
+  const safeSides = Math.max(3, Math.floor(sides));
+  const vertices: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < safeSides; i += 1) {
+    const angle = rotationRad + (Math.PI * 2 * i) / safeSides;
+    vertices.push({ x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
+  }
+  return vertices;
+}
+
+function getPolygonHorizontalSpan(
+  vertices: Array<{ x: number; y: number }>,
+  y: number,
+): FloorInterval | null {
+  const epsilon = 1e-6;
+  const intersections: number[] = [];
+  for (let i = 0; i < vertices.length; i += 1) {
+    const a = vertices[i]!;
+    const b = vertices[(i + 1) % vertices.length]!;
+    const yMin = Math.min(a.y, b.y);
+    const yMax = Math.max(a.y, b.y);
+    if (y < yMin - epsilon || y > yMax + epsilon) {
+      continue;
+    }
+    if (Math.abs(a.y - b.y) <= epsilon) {
+      if (Math.abs(y - a.y) <= epsilon) {
+        intersections.push(a.x, b.x);
+      }
+      continue;
+    }
+    const t = (y - a.y) / (b.y - a.y);
+    if (t < -epsilon || t > 1 + epsilon) {
+      continue;
+    }
+    intersections.push(a.x + (b.x - a.x) * t);
+  }
+  if (intersections.length < 2) {
+    return null;
+  }
+  intersections.sort((a, b) => a - b);
+  const deduped: number[] = [];
+  for (const intersection of intersections) {
+    const last = deduped[deduped.length - 1];
+    if (last == null || Math.abs(intersection - last) > epsilon) {
+      deduped.push(intersection);
+    }
+  }
+  if (deduped.length < 2) {
+    return null;
+  }
+  return {
+    minX: deduped[0]!,
+    maxX: deduped[deduped.length - 1]!,
+  };
+}
+
+function getHoleLocalIntervalAtLongitudinal(
+  hole: BlueprintManualFloorHole,
+  longitudinal: number,
+): FloorInterval | null {
+  const absLongitudinal = Math.abs(longitudinal);
+  if (absLongitudinal > hole.radius) {
+    return null;
+  }
+  if (hole.kind === "circle") {
+    const halfSpan = Math.sqrt(Math.max(0, hole.radius * hole.radius - longitudinal * longitudinal));
+    return { minX: -halfSpan, maxX: halfSpan };
+  }
+
+  const decagon = buildRegularPolygonVertices(
+    TEST_TRACK_DECAGON_SIDES,
+    hole.radius,
+    Math.PI / TEST_TRACK_DECAGON_SIDES,
+  );
+  return getPolygonHorizontalSpan(decagon, longitudinal);
+}
+
+function mergeIntervals(intervals: FloorInterval[]): FloorInterval[] {
+  if (intervals.length === 0) {
+    return [];
+  }
+  const sorted = [...intervals].sort((a, b) => a.minX - b.minX);
+  const merged: FloorInterval[] = [{ ...sorted[0]! }];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const next = sorted[i]!;
+    const tail = merged[merged.length - 1]!;
+    if (next.minX <= tail.maxX) {
+      tail.maxX = Math.max(tail.maxX, next.maxX);
+      continue;
+    }
+    merged.push({ ...next });
+  }
+  return merged;
+}
+
+function buildFloorIntervalsAtSample(
+  sample: BlueprintSweepSample,
+  frame: BlueprintSweepFrame,
+  floorHoles: BlueprintManualFloorHole[],
+  edgeBlend: number,
+): FloorInterval[] {
+  const halfTrackWidth = sample.width * 0.5;
+  if (floorHoles.length === 0) {
+    return [{ minX: -halfTrackWidth, maxX: halfTrackWidth }];
+  }
+
+  const removed: FloorInterval[] = [];
+  for (const hole of floorHoles) {
+    const dx = hole.center.x - sample.center.x;
+    const dy = hole.center.y - sample.center.y;
+    const dz = hole.center.z - sample.center.z;
+    const longitudinal = dx * hole.tangent.x + dy * hole.tangent.y + dz * hole.tangent.z;
+    const coreRadius = Math.max(0.05, hole.radius - Math.max(0, edgeBlend));
+    if (Math.abs(longitudinal) > coreRadius) {
+      continue;
+    }
+
+    const localSpan = getHoleLocalIntervalAtLongitudinal(hole, longitudinal);
+    if (!localSpan) {
+      continue;
+    }
+    const centerOffsetX = dx * frame.right.x + dy * frame.right.y + dz * frame.right.z;
+    const minX = clamp(centerOffsetX + localSpan.minX, -halfTrackWidth, halfTrackWidth);
+    const maxX = clamp(centerOffsetX + localSpan.maxX, -halfTrackWidth, halfTrackWidth);
+    if (maxX - minX <= 0.02) {
+      continue;
+    }
+    removed.push({ minX, maxX });
+  }
+
+  const mergedRemoved = mergeIntervals(removed);
+  if (mergedRemoved.length === 0) {
+    return [{ minX: -halfTrackWidth, maxX: halfTrackWidth }];
+  }
+
+  const kept: FloorInterval[] = [];
+  let cursor = -halfTrackWidth;
+  for (const span of mergedRemoved) {
+    if (span.minX > cursor + 0.01) {
+      kept.push({ minX: cursor, maxX: span.minX });
+    }
+    cursor = Math.max(cursor, span.maxX);
+  }
+  if (cursor < halfTrackWidth - 0.01) {
+    kept.push({ minX: cursor, maxX: halfTrackWidth });
+  }
+  return kept;
+}
+
+function buildFloorHolePatchGeometries(
+  samples: BlueprintSweepSample[],
+  frames: BlueprintSweepFrame[],
+  floorHoles: BlueprintManualFloorHole[],
+): THREE.BufferGeometry[] {
+  if (samples.length === 0 || frames.length !== samples.length || floorHoles.length === 0) {
+    return [];
+  }
+
+  const patchCenter = samples
+    .reduce((acc, sample) => acc.add(sample.center), new THREE.Vector3())
+    .multiplyScalar(1 / samples.length);
+
+  const patchTangent = floorHoles.reduce(
+    (acc, hole) => acc.add(hole.tangent),
+    new THREE.Vector3(),
+  );
+  if (patchTangent.lengthSq() <= 1e-8) {
+    patchTangent.copy(samples[samples.length - 1]!.center).sub(samples[0]!.center);
+  }
+  if (patchTangent.lengthSq() <= 1e-8) {
+    patchTangent.set(0, 0, 1);
+  }
+  patchTangent.normalize();
+
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const patchRight = floorHoles.reduce((acc, hole) => acc.add(hole.right), new THREE.Vector3());
+  patchRight.addScaledVector(patchTangent, -patchRight.dot(patchTangent));
+  if (patchRight.lengthSq() <= 1e-8) {
+    patchRight.copy(worldUp).cross(patchTangent);
+  }
+  if (patchRight.lengthSq() <= 1e-8) {
+    patchRight.set(1, 0, 0);
+  }
+  patchRight.normalize();
+
+  const patchUp = patchTangent.clone().cross(patchRight).normalize();
+  patchRight.copy(patchUp).cross(patchTangent).normalize();
+
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const sample of samples) {
+    const local = sample.center.clone().sub(patchCenter);
+    const centerX = local.dot(patchRight);
+    const centerY = local.dot(patchTangent);
+    const halfWidth = sample.width * 0.5;
+    minX = Math.min(minX, centerX - halfWidth);
+    maxX = Math.max(maxX, centerX + halfWidth);
+    minY = Math.min(minY, centerY);
+    maxY = Math.max(maxY, centerY);
+  }
+  const longitudinalMargin = Math.max(BLUEPRINT_RENDER_SAMPLE_STEP, 0.25);
+  minY -= longitudinalMargin;
+  maxY += longitudinalMargin;
+
+  for (const hole of floorHoles) {
+    const local = hole.center.clone().sub(patchCenter);
+    const centerX = local.dot(patchRight);
+    const centerY = local.dot(patchTangent);
+    minX = Math.min(minX, centerX - hole.radius - 0.04);
+    maxX = Math.max(maxX, centerX + hole.radius + 0.04);
+    minY = Math.min(minY, centerY - hole.radius - 0.04);
+    maxY = Math.max(maxY, centerY + hole.radius + 0.04);
+  }
+
+  if (
+    !Number.isFinite(minX) ||
+    !Number.isFinite(maxX) ||
+    !Number.isFinite(minY) ||
+    !Number.isFinite(maxY) ||
+    maxX - minX <= 0.05 ||
+    maxY - minY <= 0.05
+  ) {
+    return [];
+  }
+
+  const patchShape = new THREE.Shape();
+  patchShape.moveTo(minX, minY);
+  patchShape.lineTo(maxX, minY);
+  patchShape.lineTo(maxX, maxY);
+  patchShape.lineTo(minX, maxY);
+  patchShape.closePath();
+
+  for (const hole of floorHoles) {
+    const localToCenter = hole.center.clone().sub(patchCenter);
+    const localX = localToCenter.dot(patchRight);
+    const localY = localToCenter.dot(patchTangent);
+    const holePath = new THREE.Path();
+    if (hole.kind === "circle") {
+      holePath.absellipse(localX, localY, hole.radius, hole.radius, 0, Math.PI * 2, false, 0);
+    } else {
+      const points = buildRegularPolygonVertices(
+        TEST_TRACK_DECAGON_SIDES,
+        hole.radius,
+        Math.PI / TEST_TRACK_DECAGON_SIDES,
+      );
+      if (points.length > 0) {
+        holePath.moveTo(localX + points[0]!.x, localY + points[0]!.y);
+        for (let i = 1; i < points.length; i += 1) {
+          holePath.lineTo(localX + points[i]!.x, localY + points[i]!.y);
+        }
+        holePath.closePath();
+      }
+    }
+    patchShape.holes.push(holePath);
+  }
+
+  const patchGeometry = new THREE.ExtrudeGeometry(patchShape, {
+    depth: FLOOR_THICK,
+    bevelEnabled: false,
+    steps: 1,
+    curveSegments: 32,
+  });
+  const basis = new THREE.Matrix4();
+  basis.makeBasis(patchRight, patchTangent, patchUp.clone().negate());
+  basis.setPosition(patchCenter);
+  patchGeometry.applyMatrix4(basis);
+  patchGeometry.deleteAttribute("uv");
+  patchGeometry.computeVertexNormals();
+  return [patchGeometry];
+}
+
+function buildFloorSliceGeometries(
+  samples: BlueprintSweepSample[],
+  frames: BlueprintSweepFrame[],
+  floorHoles: BlueprintManualFloorHole[],
+  edgeBlend = TEST_TRACK_HOLE_EDGE_BLEND_RENDER,
+): THREE.BufferGeometry[] {
+  if (floorHoles.length > 0) {
+    return buildFloorHolePatchGeometries(samples, frames, floorHoles);
+  }
+  const floorGeometries: THREE.BufferGeometry[] = [];
+  const intervalsBySample = new Map<BlueprintSweepSample, FloorInterval[]>();
+  let maxSliceCount = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const sample = samples[i]!;
+    const frame = frames[i]!;
+    const intervals = buildFloorIntervalsAtSample(sample, frame, floorHoles, edgeBlend);
+    intervalsBySample.set(sample, intervals);
+    maxSliceCount = Math.max(maxSliceCount, intervals.length);
+  }
+  for (let sliceIndex = 0; sliceIndex < maxSliceCount; sliceIndex += 1) {
+    const geometry = buildSweptRectGeometry(
+      samples,
+      frames,
+      (sample) => {
+        const interval = intervalsBySample.get(sample)?.[sliceIndex];
+        if (!interval) {
+          return null;
+        }
+        return {
+          minX: interval.minX,
+          maxX: interval.maxX,
+          minY: -FLOOR_THICK,
+          maxY: 0,
+        };
+      },
+      { capEnds: false },
+    );
+    if (geometry) {
+      floorGeometries.push(geometry);
+    }
+  }
+  return floorGeometries;
 }
 
 function buildBlueprintSweepPath(
@@ -2167,11 +2659,15 @@ function addBlueprintPrimitiveColliders(
   boardWallBody: CANNON.Body,
   samples: BlueprintSweepSample[],
   frames: BlueprintSweepFrame[],
+  options?: {
+    includeFloor?: boolean;
+  },
 ): { colliderPieceCount: number; primitiveShapeCount: number } {
   if (samples.length < 2 || frames.length !== samples.length) {
     return { colliderPieceCount: 0, primitiveShapeCount: 0 };
   }
 
+  const includeFloor = options?.includeFloor ?? true;
   let colliderPieceCount = 0;
   let primitiveShapeCount = 0;
   const worldUp = new THREE.Vector3(0, 1, 0);
@@ -2259,15 +2755,15 @@ function addBlueprintPrimitiveColliders(
     const spanWidth = Math.max(2.8, (sampleA.width + sampleB.width) * 0.5);
     const spanHalfLength = spanLength * 0.5 + COLLIDER_SPAN_OVERLAP_Z;
 
-    floorHalfExtents.set(
-      spanWidth * 0.5 + COLLIDER_LATERAL_PADDING_X,
-      FLOOR_THICK * 0.5,
-      spanHalfLength,
-    );
-    floorCenter
-      .copy(spanCenter)
-      .addScaledVector(spanUp, -FLOOR_THICK * 0.5);
-    addSpanBox(floorCenter, floorHalfExtents);
+    if (includeFloor) {
+      floorCenter.copy(spanCenter).addScaledVector(spanUp, -FLOOR_THICK * 0.5);
+      floorHalfExtents.set(
+        spanWidth * 0.5 + COLLIDER_LATERAL_PADDING_X,
+        FLOOR_THICK * 0.5,
+        spanHalfLength,
+      );
+      addSpanBox(floorCenter, floorHalfExtents);
+    }
 
     const sideOffset = spanWidth / 2 - RAIL_INSET;
     const railCenterYOffset = -FLOOR_THICK + RAIL_FLOOR_OVERLAP + RAIL_H * 0.5;
@@ -2370,6 +2866,10 @@ function createTrackFromBlueprint(
     const mainLane = blueprint.placements.filter((placement) => placement.lane === "main");
     return mainLane.length > 0 ? mainLane : blueprint.placements;
   })();
+  const authoredSetPieceManualSpecs = collectAuthoredSetPieceObstacleSpecs(sourcePlacements);
+  const requestedManualSpecs = obstacleSettings?.manualTestPieces ?? [];
+  const manualObstacleSpecs = [...authoredSetPieceManualSpecs, ...requestedManualSpecs];
+  const manualFloorHoles = collectManualFloorHoles(sourcePlacements, manualObstacleSpecs);
   const renderPath = buildBlueprintSweepPath(
     sourcePlacements,
     BLUEPRINT_RENDER_SAMPLE_STEP,
@@ -2387,13 +2887,17 @@ function createTrackFromBlueprint(
   const colliderSamples = colliderPath.samples;
   const colliderFrames = buildBlueprintSweepFrames(colliderSamples);
 
-  const floorGeometry = buildSweptRectGeometry(samples, frames, (sample) => ({
-    minX: -sample.width / 2,
-    maxX: sample.width / 2,
-    minY: -FLOOR_THICK,
-    maxY: 0,
-  }));
-  if (floorGeometry) {
+  const floorSlices = buildFloorSliceGeometries(
+    samples,
+    frames,
+    manualFloorHoles,
+    TEST_TRACK_HOLE_EDGE_BLEND_RENDER,
+  );
+  const mergedFloorGeometry =
+    floorSlices.length > 0 ? mergeGeometries(floorSlices, false) : null;
+  const floorRenderGeometries =
+    mergedFloorGeometry != null ? [mergedFloorGeometry] : floorSlices;
+  for (const floorGeometry of floorRenderGeometries) {
     applyHeightVertexColors(floorGeometry, 0x7a8ea0, 0xe9f3f7);
   }
   const leftRailGeometry = buildSweptRectGeometry(samples, frames, (sample) => {
@@ -2444,7 +2948,9 @@ function createTrackFromBlueprint(
   });
 
   const renderGeometries: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }> = [];
-  if (floorGeometry) renderGeometries.push({ geometry: floorGeometry, material: floorMaterial });
+  for (const geometry of floorRenderGeometries) {
+    renderGeometries.push({ geometry, material: floorMaterial });
+  }
   if (leftRailGeometry) renderGeometries.push({ geometry: leftRailGeometry, material: railMaterial });
   if (rightRailGeometry) renderGeometries.push({ geometry: rightRailGeometry, material: railMaterial });
   if (roofGeometry) renderGeometries.push({ geometry: roofGeometry, material: roofMaterial });
@@ -2459,23 +2965,30 @@ function createTrackFromBlueprint(
   let colliderPieceCount = 0;
   let exoticTrimeshPieceCount = 0;
   if (BLUEPRINT_COLLIDER_MODE === "primitive") {
+    const useExactFloorCollider = manualFloorHoles.length > 0;
+    if (useExactFloorCollider) {
+      if (mergedFloorGeometry) {
+        boardBody.addShape(geometryToTrimesh(mergedFloorGeometry));
+      } else {
+        for (const geometry of floorSlices) {
+          boardBody.addShape(geometryToTrimesh(geometry));
+        }
+      }
+    }
     const primitiveStats = addBlueprintPrimitiveColliders(
       boardBody,
       boardWallBody,
       colliderSamples,
       colliderFrames,
+      { includeFloor: !useExactFloorCollider },
     );
     colliderPieceCount = primitiveStats.colliderPieceCount;
   } else {
-    const colliderFloorGeometry = buildSweptRectGeometry(
+    const colliderFloorGeometries = buildFloorSliceGeometries(
       colliderSamples,
       colliderFrames,
-      (sample) => ({
-        minX: -sample.width / 2,
-        maxX: sample.width / 2,
-        minY: -FLOOR_THICK,
-        maxY: 0,
-      }),
+      manualFloorHoles,
+      TEST_TRACK_HOLE_EDGE_BLEND_COLLIDER,
     );
     const colliderLeftRailGeometry = buildSweptRectGeometry(
       colliderSamples,
@@ -2536,12 +3049,16 @@ function createTrackFromBlueprint(
       },
     );
     // Floor → boardBody (friction: contactFriction)
-    if (colliderFloorGeometry) {
-      const mergedFloor = mergeGeometries([colliderFloorGeometry], false);
-      mergedFloor.computeVertexNormals();
-      boardBody.addShape(geometryToTrimesh(mergedFloor));
-      mergedFloor.dispose();
-      colliderFloorGeometry.dispose();
+    if (colliderFloorGeometries.length > 0) {
+      const mergedFloor = mergeGeometries(colliderFloorGeometries, false);
+      if (mergedFloor) {
+        mergedFloor.computeVertexNormals();
+        boardBody.addShape(geometryToTrimesh(mergedFloor));
+        mergedFloor.dispose();
+      }
+      for (const geometry of colliderFloorGeometries) {
+        geometry.dispose();
+      }
     }
     // Rails + roof → boardWallBody (friction: 0)
     const wallGeometries = [
@@ -2587,9 +3104,6 @@ function createTrackFromBlueprint(
       safeStartStraightCount: obstacleSettings?.safeStartStraightCount,
     });
   }
-  const authoredSetPieceManualSpecs = collectAuthoredSetPieceObstacleSpecs(sourcePlacements);
-  const requestedManualSpecs = obstacleSettings?.manualTestPieces ?? [];
-  const manualObstacleSpecs = [...authoredSetPieceManualSpecs, ...requestedManualSpecs];
   if (manualObstacleSpecs.length > 0) {
     addBlueprintManualObstaclePieces({
       group,
@@ -2602,6 +3116,184 @@ function createTrackFromBlueprint(
       manualTestPieces: manualObstacleSpecs,
       manualTestTuning: obstacleSettings?.manualTestTuning,
     });
+  }
+
+  let finishVerticalOffset = 0;
+  let secondLevelBounds:
+    | {
+        minX: number;
+        maxX: number;
+        minZ: number;
+        maxZ: number;
+        lowestFloorY: number;
+        width: number;
+      }
+    | null = null;
+  let tiltPivotLayersLocalY: TrackBuildResult["tiltPivotLayersLocalY"] | undefined;
+  const hasStraightDropSetPiece = manualObstacleSpecs.some(
+    (spec) => spec.kind === "straight-center-hole-respawn",
+  );
+  const centerDropHole = hasStraightDropSetPiece
+    ? (manualFloorHoles.find((hole) => hole.kind === "circle") ?? manualFloorHoles[0] ?? null)
+    : null;
+  if (centerDropHole && samples.length > 0) {
+    const laneForward = centerDropHole.tangent.clone();
+    if (laneForward.lengthSq() <= 1e-8) {
+      laneForward.copy(frames[0]?.tangent ?? new THREE.Vector3(0, 0, 1));
+    }
+    laneForward.normalize();
+
+    const laneRight = centerDropHole.right.clone();
+    laneRight.addScaledVector(laneForward, -laneRight.dot(laneForward));
+    if (laneRight.lengthSq() <= 1e-8) {
+      laneRight.copy(frames[0]?.right ?? new THREE.Vector3(1, 0, 0));
+    }
+    laneRight.normalize();
+
+    const laneUp = laneForward.clone().cross(laneRight);
+    if (laneUp.lengthSq() <= 1e-8) {
+      laneUp.copy(frames[0]?.up ?? new THREE.Vector3(0, 1, 0));
+    } else {
+      laneUp.normalize();
+    }
+    if (laneUp.dot(frames[0]?.up ?? new THREE.Vector3(0, 1, 0)) < 0) {
+      laneUp.negate();
+      laneRight.negate();
+    }
+
+    let nearestSample = samples[0]!;
+    let nearestDistanceSq = Number.POSITIVE_INFINITY;
+    for (const sample of samples) {
+      const distSq = sample.center.distanceToSquared(centerDropHole.center);
+      if (distSq < nearestDistanceSq) {
+        nearestDistanceSq = distSq;
+        nearestSample = sample;
+      }
+    }
+
+    const laneWidth = Math.max(2.8, nearestSample.width);
+    let maxLongitudinal = Number.NEGATIVE_INFINITY;
+    for (const sample of samples) {
+      const longitudinal = sample.center
+        .clone()
+        .sub(centerDropHole.center)
+        .dot(laneForward);
+      maxLongitudinal = Math.max(maxLongitudinal, longitudinal);
+    }
+    if (!Number.isFinite(maxLongitudinal)) {
+      maxLongitudinal = FINISH_LENGTH + 10;
+    }
+
+    const lowerStartLongitudinal = -(centerDropHole.radius + TEST_TRACK_SECOND_LEVEL_LANDING_BACK_PADDING);
+    const lowerEndLongitudinal = Math.max(
+      lowerStartLongitudinal + 10,
+      maxLongitudinal + TEST_TRACK_SECOND_LEVEL_FORWARD_PADDING,
+    );
+    const lowerMidLongitudinal = (lowerStartLongitudinal + lowerEndLongitudinal) * 0.5;
+    const lowerLength = lowerEndLongitudinal - lowerStartLongitudinal;
+    const lowerSurfaceCenter = centerDropHole.center
+      .clone()
+      .addScaledVector(laneForward, lowerMidLongitudinal)
+      .addScaledVector(laneUp, -TEST_TRACK_SECOND_LEVEL_DROP_Y);
+    const lowerFloorCenter = lowerSurfaceCenter
+      .clone()
+      .addScaledVector(laneUp, -FLOOR_THICK * 0.5);
+    addOrientedPart(group, boardBody, {
+      size: new THREE.Vector3(laneWidth, FLOOR_THICK, lowerLength),
+      position: lowerFloorCenter,
+      right: laneRight,
+      up: laneUp,
+      forward: laneForward,
+      material: floorMaterial,
+      uvScale: [Math.max(lowerLength * 0.24, 1), Math.max(laneWidth * 0.24, 1)],
+      uvProjection: "floorSegment",
+    });
+
+    const laneSideOffset = laneWidth * 0.5 - RAIL_INSET;
+    const laneRailCenterYOffset = -FLOOR_THICK + RAIL_FLOOR_OVERLAP + RAIL_H * 0.5;
+    addOrientedPart(group, boardWallBody, {
+      size: new THREE.Vector3(RAIL_THICK, RAIL_H, lowerLength),
+      position: lowerSurfaceCenter
+        .clone()
+        .addScaledVector(laneRight, -laneSideOffset)
+        .addScaledVector(laneUp, laneRailCenterYOffset),
+      right: laneRight,
+      up: laneUp,
+      forward: laneForward,
+      material: railMaterial,
+      uvScale: [Math.max(lowerLength * 0.3, 1), Math.max(RAIL_H, 1)],
+    });
+    addOrientedPart(group, boardWallBody, {
+      size: new THREE.Vector3(RAIL_THICK, RAIL_H, lowerLength),
+      position: lowerSurfaceCenter
+        .clone()
+        .addScaledVector(laneRight, laneSideOffset)
+        .addScaledVector(laneUp, laneRailCenterYOffset),
+      right: laneRight,
+      up: laneUp,
+      forward: laneForward,
+      material: railMaterial,
+      uvScale: [Math.max(lowerLength * 0.3, 1), Math.max(RAIL_H, 1)],
+    });
+
+    const laneCapWidth = Math.max(0.45, laneWidth - (RAIL_INSET * 2 + RAIL_THICK));
+    const lowerStartSurface = centerDropHole.center
+      .clone()
+      .addScaledVector(laneForward, lowerStartLongitudinal)
+      .addScaledVector(laneUp, -TEST_TRACK_SECOND_LEVEL_DROP_Y);
+    addOrientedPart(group, boardWallBody, {
+      size: new THREE.Vector3(laneCapWidth, RAIL_H, RAIL_THICK),
+      position: lowerStartSurface
+        .clone()
+        .addScaledVector(laneForward, RAIL_THICK * 0.5 + START_BACK_WALL_PADDING)
+        .addScaledVector(laneUp, RAIL_H * 0.5 - FLOOR_THICK * 0.5 + RAIL_FLOOR_OVERLAP),
+      right: laneRight,
+      up: laneUp,
+      forward: laneForward,
+      material: railMaterial,
+      uvScale: [Math.max(laneCapWidth * 0.3, 1), Math.max(RAIL_H, 1)],
+    });
+
+    const topBlockerLongitudinal = clamp(
+      centerDropHole.radius + TEST_TRACK_TOP_LEVEL_BLOCKER_EXTRA_OFFSET,
+      centerDropHole.radius + 0.25,
+      Math.max(centerDropHole.radius + 0.25, maxLongitudinal - 0.65),
+    );
+    addOrientedPart(group, boardWallBody, {
+      size: new THREE.Vector3(laneCapWidth, RAIL_H, RAIL_THICK),
+      position: centerDropHole.center
+        .clone()
+        .addScaledVector(laneForward, topBlockerLongitudinal)
+        .addScaledVector(laneUp, RAIL_H * 0.5 - FLOOR_THICK * 0.5 + RAIL_FLOOR_OVERLAP),
+      right: laneRight,
+      up: laneUp,
+      forward: laneForward,
+      material: railMaterial,
+      uvScale: [Math.max(laneCapWidth * 0.3, 1), Math.max(RAIL_H, 1)],
+    });
+
+    const lowerEndSurface = centerDropHole.center
+      .clone()
+      .addScaledVector(laneForward, lowerEndLongitudinal)
+      .addScaledVector(laneUp, -TEST_TRACK_SECOND_LEVEL_DROP_Y);
+    const lowerHalfWidth = laneWidth * 0.5;
+    secondLevelBounds = {
+      minX: Math.min(lowerStartSurface.x, lowerEndSurface.x) - lowerHalfWidth,
+      maxX: Math.max(lowerStartSurface.x, lowerEndSurface.x) + lowerHalfWidth,
+      minZ: Math.min(lowerStartSurface.z, lowerEndSurface.z) - lowerHalfWidth * 0.35,
+      maxZ: Math.max(lowerStartSurface.z, lowerEndSurface.z) + lowerHalfWidth * 0.35,
+      lowestFloorY: lowerFloorCenter.y - FLOOR_THICK * 0.5,
+      width: laneWidth,
+    };
+    const upperPivotY = 0;
+    const lowerPivotY = -TEST_TRACK_SECOND_LEVEL_DROP_Y;
+    tiltPivotLayersLocalY = {
+      upperY: upperPivotY,
+      lowerY: lowerPivotY,
+      switchDownY: upperPivotY + (lowerPivotY - upperPivotY) * TEST_TRACK_TILT_LAYER_SWITCH_DOWN_FRACTION,
+      switchUpY: upperPivotY + (lowerPivotY - upperPivotY) * TEST_TRACK_TILT_LAYER_SWITCH_UP_FRACTION,
+    };
+    finishVerticalOffset = -TEST_TRACK_SECOND_LEVEL_DROP_Y;
   }
 
   let lowestFloorY = Number.POSITIVE_INFINITY;
@@ -2618,6 +3310,14 @@ function createTrackFromBlueprint(
     maxTrackX = Math.max(maxTrackX, sample.center.x + halfWidth);
     minTrackZ = Math.min(minTrackZ, sample.center.z - halfWidth * 0.35);
     maxTrackZ = Math.max(maxTrackZ, sample.center.z + halfWidth * 0.35);
+  }
+  if (secondLevelBounds) {
+    lowestFloorY = Math.min(lowestFloorY, secondLevelBounds.lowestFloorY);
+    minTrackX = Math.min(minTrackX, secondLevelBounds.minX);
+    maxTrackX = Math.max(maxTrackX, secondLevelBounds.maxX);
+    minTrackZ = Math.min(minTrackZ, secondLevelBounds.minZ);
+    maxTrackZ = Math.max(maxTrackZ, secondLevelBounds.maxZ);
+    maxSegmentWidth = Math.max(maxSegmentWidth, secondLevelBounds.width);
   }
   if (!Number.isFinite(lowestFloorY)) {
     lowestFloorY = startTopBackPoint.y - FLOOR_THICK;
@@ -2646,9 +3346,11 @@ function createTrackFromBlueprint(
   const trialFinishZ = finishStart.z + Math.max(FINISH_LENGTH * 0.6, 4);
   const trialStartGatePoint = spawnCenter.clone().addScaledVector(spawnForward, 2);
   const trialStartGateNormal = spawnForward.clone().normalize();
+  const finishUp = frames[frames.length - 1]?.up?.clone().normalize() ?? new THREE.Vector3(0, 1, 0);
   const trialFinishGatePoint = finishStart
     .clone()
-    .addScaledVector(finishDirection, Math.max(FINISH_LENGTH * 0.6, 4));
+    .addScaledVector(finishDirection, Math.max(FINISH_LENGTH * 0.6, 4))
+    .addScaledVector(finishUp, finishVerticalOffset);
   const trialFinishGateNormal = finishDirection.clone().normalize();
 
   const finishYaw = Math.atan2(finishDirection.x, finishDirection.z);
@@ -2665,7 +3367,7 @@ function createTrackFromBlueprint(
     position: finishStart
       .clone()
       .addScaledVector(finishDirection, Math.max(FINISH_LENGTH * 0.58, 3.2))
-      .add(new THREE.Vector3(0, MARKER_THICK / 2 + 0.01, 0)),
+      .addScaledVector(finishUp, finishVerticalOffset + MARKER_THICK / 2 + 0.01),
     rotation: new THREE.Euler(0, finishYaw, 0, "XYZ"),
     material: finishMarkerMaterial,
   });
@@ -2703,6 +3405,7 @@ function createTrackFromBlueprint(
     containmentPathLocal,
     spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
     respawnY: lowestFloorY - 6,
+    tiltPivotLayersLocalY,
     offCourseBoundsLocal,
     trialStartZ,
     trialFinishZ,
@@ -2727,7 +3430,103 @@ function createTrackFromBlueprint(
   };
 }
 
+function createFlatPlaneTrack(): TrackBuildResult {
+  const group = new THREE.Group();
+  group.name = "track";
+
+  const boardBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+  boardBody.position.set(0, 0, 0);
+  boardBody.quaternion.set(0, 0, 0, 1);
+
+  const boardWallBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+  boardWallBody.position.set(0, 0, 0);
+  boardWallBody.quaternion.set(0, 0, 0, 1);
+
+  const trackSurfaceTexture = createTrackSurfaceTexture();
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    map: trackSurfaceTexture,
+    side: THREE.DoubleSide,
+  });
+  addPart(group, boardBody, {
+    size: new THREE.Vector3(FLAT_PLANE_SIZE, FLOOR_THICK, FLAT_PLANE_SIZE),
+    position: new THREE.Vector3(0, 0, 0),
+    rotation: new THREE.Euler(0, 0, 0, "XYZ"),
+    material: floorMaterial,
+    uvProjection: "floorSegment",
+  });
+
+  boardBody.aabbNeedsUpdate = true;
+  boardBody.updateAABB();
+  boardWallBody.aabbNeedsUpdate = true;
+  boardWallBody.updateAABB();
+
+  const spawn = new THREE.Vector3(
+    0,
+    FLOOR_THICK / 2 + MARBLE_RADIUS + 0.6,
+    -FLAT_PLANE_HALF_EXTENT + FLAT_PLANE_EDGE_PADDING,
+  );
+  const trialStartZ = spawn.z + 2;
+  const trialFinishZ = FLAT_PLANE_HALF_EXTENT - FLAT_PLANE_EDGE_PADDING;
+
+  const containmentHalfX = FLAT_PLANE_HALF_EXTENT - MARBLE_RADIUS - OFF_COURSE_MARGIN;
+  const containmentPathLocal: TrackContainmentSample[] = [-1, 0, 1].map((alpha) => ({
+    center: [0, FLOOR_THICK / 2, alpha * (FLAT_PLANE_HALF_EXTENT - FLAT_PLANE_EDGE_PADDING)],
+    right: [1, 0, 0],
+    up: [0, 1, 0],
+    tangent: [0, 0, 1],
+    halfWidth: containmentHalfX,
+    railLeft: false,
+    railRight: false,
+  }));
+
+  return {
+    group,
+    bodies: [boardBody, boardWallBody],
+    wallBody: boardWallBody,
+    movingObstacleBodies: [],
+    containmentLocal: {
+      mainHalfX: containmentHalfX,
+      finishHalfX: containmentHalfX,
+      finishStartZ: trialFinishZ,
+    },
+    wallContainmentMode: "curvedPathClamp",
+    containmentPathLocal,
+    spawn: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
+    respawnY: -8,
+    offCourseBoundsLocal: {
+      minX: -FLAT_PLANE_HALF_EXTENT - OFF_COURSE_MARGIN,
+      maxX: FLAT_PLANE_HALF_EXTENT + OFF_COURSE_MARGIN,
+      minZ: -FLAT_PLANE_HALF_EXTENT - OFF_COURSE_Z_MARGIN,
+      maxZ: FLAT_PLANE_HALF_EXTENT + OFF_COURSE_Z_MARGIN,
+    },
+    trialStartZ,
+    trialFinishZ,
+    trialStartGateLocal: {
+      point: [0, FLOOR_THICK / 2, trialStartZ],
+      normal: [0, 0, 1],
+    },
+    trialFinishGateLocal: {
+      point: [0, FLOOR_THICK / 2, trialFinishZ],
+      normal: [0, 0, 1],
+    },
+    physicsDebug: {
+      colliderPieceCount: 1,
+      primitiveShapeCount: countBodyShapes([boardBody, boardWallBody]),
+      exoticTrimeshPieceCount: 0,
+      floorShapeCount: boardBody.shapes.length,
+      wallShapeCount: boardWallBody.shapes.length,
+      estimatedBoardWallShapeTestsPerStep: boardBody.shapes.length * boardWallBody.shapes.length,
+    },
+    updateMovingObstacles: () => {},
+    setMovingObstacleMaterial: () => {},
+  };
+}
+
 export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
+  if (opts?.preset === "flatPlane") {
+    return createFlatPlaneTrack();
+  }
+
   if (opts?.blueprint) {
     return createTrackFromBlueprint(
       opts.blueprint,

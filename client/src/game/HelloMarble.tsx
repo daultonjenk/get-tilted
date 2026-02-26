@@ -45,7 +45,6 @@ import {
   type MobilePerfTier,
 } from "./perf/mobileGovernor";
 import type {
-  CameraPresetId,
   TuningState,
   TrialState,
   RacePhase,
@@ -59,8 +58,6 @@ import {
   MAX_FRAME_DELTA,
   LOOK_HEIGHT,
   LOOK_AHEAD,
-  TOPDOWN_HEIGHT,
-  TOPDOWN_Z_OFFSET,
   BOARD_TILT_SMOOTH,
   PIVOT_SMOOTH,
   SIDE_IMPACT_NORMAL_UP_DOT_MAX,
@@ -94,7 +91,6 @@ import {
   TRACK_LAB_PIECE_COUNT_STORAGE_KEY,
   COUNTDOWN_LABELS,
   RESULT_SPARKLES,
-  CAMERA_PRESETS,
   DRAWER_TABS,
   DEFAULT_TUNING,
 } from "./gameConstants";
@@ -109,7 +105,6 @@ import {
   buildCanonicalTuning,
   sanitizeTuning,
   loadTuning,
-  getCameraLabel,
   formatTimeMs,
   createMarbleTexture,
   acquireSnapshot,
@@ -182,22 +177,21 @@ const CONTACT_SHADOW_MAX_OPACITY = 0.22;
 const CONTACT_SHADOW_BASE_SCALE = 0.52;
 const CONTACT_SHADOW_SCALE_RANGE = 0.26;
 const TEST_TRACK_MANUAL_SEQUENCE = [
-  { kind: "blank" },
-  { kind: "arc90-obstacle-1" },
+  { kind: "straight-center-hole-respawn" },
   { kind: "finish" },
 ] as const;
 const TEST_TRACK_LAYOUT_PIECE_LENGTHS = {
-  "arc90-obstacle-1": 14,
+  "straight-center-hole-respawn": 16,
 } as const;
 const TEST_TRACK_SET_PIECE_LENGTHS = {
-  "arc90-obstacle-1": 14,
+  "straight-center-hole-respawn": 16,
 } as const;
 type TestTrackManualPieceKind = keyof typeof TEST_TRACK_SET_PIECE_LENGTHS;
 const TEST_TRACK_PIECE_LABELS: Record<TestTrackManualPieceKind, string> = {
-  "arc90-obstacle-1": "Arc 90 Obstacle 1",
+  "straight-center-hole-respawn": "Two-Level Circular Drop",
 };
 const TEST_TRACK_OBSTACLE_SLOT_COUNT_BY_KIND: Record<TestTrackManualPieceKind, number> = {
-  "arc90-obstacle-1": 4,
+  "straight-center-hole-respawn": 0,
 };
 type TestTrackTunablePieceSpec = {
   placementIndex: number;
@@ -238,7 +232,7 @@ const TEST_TRACK_WIDTH_MAX = 12;
 type MenuScreen = "main" | "options" | "trackLab" | "editor";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
-type TrackLayoutPreset = "default" | "testTrack";
+type TrackLayoutPreset = "default" | "testTrack" | "flatPlane";
 const SOLO_TRACK_GENERATION_POLICY: TrackGenerationPolicy = "singleplayer_camera_friendly_10";
 
 type EditorShapeDraft = {
@@ -554,6 +548,7 @@ function toTrackDraft(piece: TrackPieceTemplate): TrackPieceDraft {
 
 function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOptions {
   const seed = sanitizeTrackSeed(config.seed);
+  const isFlatPlane = config.layoutPreset === "flatPlane";
   const isTestTrack = config.layoutPreset === "testTrack";
   const generationPolicy = isTestTrack
     ? "default"
@@ -562,19 +557,40 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
     ? sanitizeTestTrackDebugSettings(config.testTrackDebugSettings)
     : createDefaultTestTrackDebugSettings();
   const trackVisualSettings = sanitizeTrackVisualSettings(config.trackVisualSettings);
+  if (isFlatPlane) {
+    return {
+      seed,
+      preset: "flatPlane",
+      visualSettings: {
+        objectTransparencyPercent: trackVisualSettings.objectTransparencyPercent,
+        showObjectWireframes: trackVisualSettings.showObjectWireframes,
+        wireframeUsesObjectTransparency: trackVisualSettings.wireframeUsesObjectTransparency,
+      },
+    };
+  }
   const pieceCount = isTestTrack
     ? TEST_TRACK_MANUAL_SEQUENCE.length
     : sanitizeTrackPieceCount(config.pieceCount);
   const forcedMainPieces = isTestTrack
     ? Array.from({ length: pieceCount }, (_, index) => {
         const spec = TEST_TRACK_MANUAL_SEQUENCE[index];
-        const isArcObstaclePiece = spec?.kind === "arc90-obstacle-1";
+        const isArcObstaclePiece = (spec?.kind as string) === "arc90-obstacle-1";
+        const manualKind =
+          spec && spec.kind in TEST_TRACK_PIECE_LABELS
+            ? (spec.kind as TestTrackManualPieceKind)
+            : null;
         const piece = createDefaultCustomPiece(isArcObstaclePiece ? "arc90" : "straight");
         piece.id =
           isArcObstaclePiece
             ? `test-track-arc90-obstacle-${index + 1}`
-            : `test-track-straight-${index + 1}`;
-        piece.label = isArcObstaclePiece ? "Arc 90 Obstacle 1" : "Straight";
+            : manualKind
+              ? `test-track-${manualKind}-${index + 1}`
+              : `test-track-straight-${index + 1}`;
+        piece.label = isArcObstaclePiece
+          ? "Arc 90 Obstacle 1"
+          : manualKind
+            ? TEST_TRACK_PIECE_LABELS[manualKind]
+            : "Straight";
         piece.length =
           spec && spec.kind in TEST_TRACK_LAYOUT_PIECE_LENGTHS
             ? TEST_TRACK_LAYOUT_PIECE_LENGTHS[
@@ -967,6 +983,20 @@ export function HelloMarble() {
           [],
           "testTrack",
           testTrackDebugSettingsRef.current,
+          visualSettings,
+        ),
+      );
+      return;
+    }
+    if (gameMode === "flatPlane") {
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          trackLabSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin",
+          [],
+          "flatPlane",
+          undefined,
           visualSettings,
         ),
       );
@@ -1471,6 +1501,7 @@ export function HelloMarble() {
     let lastFilteredIntent: TiltSample = { x: 0, y: 0, z: 0 };
     let currentPitch = 0;
     let currentRoll = 0;
+    let activeTiltPivotLayer: "upper" | "lower" = "upper";
     let trialStartAt: number | null = null;
     const readGateMetric = (
       gate:
@@ -1740,6 +1771,31 @@ export function HelloMarble() {
         marbleBody.position.z - boardBody.position.z,
       );
       marblePosLocalToBoard.applyQuaternion(boardInverseQuatThree);
+    };
+
+    const resolveActivePivotLayerY = (): number => {
+      const layers = track.tiltPivotLayersLocalY;
+      if (!layers) {
+        return 0;
+      }
+      return activeTiltPivotLayer === "lower" ? layers.lowerY : layers.upperY;
+    };
+
+    const updateActiveTiltPivotLayer = (): void => {
+      const layers = track.tiltPivotLayersLocalY;
+      if (!layers) {
+        activeTiltPivotLayer = "upper";
+        return;
+      }
+      updateMarblePosLocalToBoard();
+      const marbleLocalY = marblePosLocalToBoard.y;
+      if (activeTiltPivotLayer === "upper") {
+        if (marbleLocalY <= layers.switchDownY) {
+          activeTiltPivotLayer = "lower";
+        }
+      } else if (marbleLocalY >= layers.switchUpY) {
+        activeTiltPivotLayer = "upper";
+      }
     };
 
     const syncBoardPoseForContainment = (): void => {
@@ -2645,6 +2701,12 @@ export function HelloMarble() {
       squeezeBlockedFrames = 0;
       curvedContainmentNearestIndex = 0;
       railClampCorrectionsCounter = 0;
+      activeTiltPivotLayer = "upper";
+      pivotSmoothed.set(
+        marbleBody.position.x,
+        track.tiltPivotLayersLocalY?.upperY ?? 0,
+        marbleBody.position.z,
+      );
       syncLocalRenderSnapshotsFromBodies();
       setTrialState("idle");
       setTrialCurrentMs(null);
@@ -2654,7 +2716,11 @@ export function HelloMarble() {
     };
     resetRef.current = () => respawnMarble(false);
     respawnMarble(false);
-    if (gameModeRef.current !== "solo" && gameModeRef.current !== "testTrack") {
+    if (
+      gameModeRef.current !== "solo" &&
+      gameModeRef.current !== "testTrack" &&
+      gameModeRef.current !== "flatPlane"
+    ) {
       freezeMarble();
     }
 
@@ -2706,7 +2772,11 @@ export function HelloMarble() {
       currentPitch = 0;
       currentRoll = 0;
       respawnMarble(false);
-      if (gameModeRef.current !== "solo" && gameModeRef.current !== "testTrack") {
+      if (
+        gameModeRef.current !== "solo" &&
+        gameModeRef.current !== "testTrack" &&
+        gameModeRef.current !== "flatPlane"
+      ) {
         freezeMarble();
       }
     };
@@ -3079,7 +3149,12 @@ export function HelloMarble() {
       const boardTiltAlpha = 1 - Math.exp(-BOARD_TILT_SMOOTH * controllerDt);
       track.group.quaternion.slerp(visualTiltTargetQuat, boardTiltAlpha);
 
-      rawPivot.set(marbleBody.position.x, 0, marbleBody.position.z);
+      updateActiveTiltPivotLayer();
+      rawPivot.set(
+        marbleBody.position.x,
+        resolveActivePivotLayerY(),
+        marbleBody.position.z,
+      );
       const pivotAlpha = 1 - Math.exp(-PIVOT_SMOOTH * controllerDt);
       pivotSmoothed.x += (rawPivot.x - pivotSmoothed.x) * pivotAlpha;
       pivotSmoothed.y += (rawPivot.y - pivotSmoothed.y) * pivotAlpha;
@@ -3464,7 +3539,11 @@ export function HelloMarble() {
           }
           if (!countdownGoHandledRef.current && nextIndex >= COUNTDOWN_LABELS.length - 1) {
             countdownGoHandledRef.current = true;
-            if (gameModeRef.current === "solo" || gameModeRef.current === "testTrack") {
+            if (
+              gameModeRef.current === "solo" ||
+              gameModeRef.current === "testTrack" ||
+              gameModeRef.current === "flatPlane"
+            ) {
               unfreezeMarbleRef.current();
             }
             setControlsLocked(false);
@@ -3474,7 +3553,11 @@ export function HelloMarble() {
         } else if (elapsedMs >= stepMs * COUNTDOWN_LABELS.length) {
           if (!countdownGoHandledRef.current) {
             countdownGoHandledRef.current = true;
-            if (gameModeRef.current === "solo" || gameModeRef.current === "testTrack") {
+            if (
+              gameModeRef.current === "solo" ||
+              gameModeRef.current === "testTrack" ||
+              gameModeRef.current === "flatPlane"
+            ) {
               unfreezeMarbleRef.current();
             }
             setControlsLocked(false);
@@ -3663,7 +3746,6 @@ export function HelloMarble() {
       }
 
       const cameraAlpha = 1 - Math.exp(-8 * delta);
-      const sideSign = currentTuning.invertCameraSide ? -1 : 1;
       const zoomDistanceScale = 1 / clamp(currentTuning.cameraZoom, 0.5, 1.4);
       const heightBias = currentTuning.cameraHeightBias;
       const pitchLookAheadBias = clamp(-heightBias * 0.6, -5, 5);
@@ -3672,96 +3754,19 @@ export function HelloMarble() {
         camera.fov = nextFov;
         camera.updateProjectionMatrix();
       }
-      switch (currentTuning.cameraPreset) {
-        case "chaseCentered": {
-          cameraTarget.set(0, 7.5 + heightBias, marbleMesh.position.z - 10 * zoomDistanceScale);
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.x = 0;
-          camera.position.y = 7.5 + heightBias;
-          lookTarget.set(0, LOOK_HEIGHT + heightBias * 0.15, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
-          break;
-        }
-        case "chaseRight": {
-          const side = 4 * sideSign;
-          cameraTarget.set(side * zoomDistanceScale, 7.5 + heightBias, marbleMesh.position.z - 10 * zoomDistanceScale);
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 7.5 + heightBias;
-          lookTarget.set(side * zoomDistanceScale, LOOK_HEIGHT + heightBias * 0.15, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
-          break;
-        }
-        case "chaseLeft": {
-          const side = -4 * sideSign;
-          cameraTarget.set(side * zoomDistanceScale, 7.5 + heightBias, marbleMesh.position.z - 10 * zoomDistanceScale);
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 7.5 + heightBias;
-          lookTarget.set(side * zoomDistanceScale, LOOK_HEIGHT + heightBias * 0.15, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
-          break;
-        }
-        case "isoStandard": {
-          cameraTarget.set(
-            marbleMesh.position.x + 4 * sideSign * zoomDistanceScale,
-            14 + heightBias,
-            marbleMesh.position.z - 8 * zoomDistanceScale,
-          );
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 14 + heightBias;
-          lookTarget.set(marbleMesh.position.x, heightBias * 0.1, marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias);
-          break;
-        }
-        case "isoFlatter": {
-          cameraTarget.set(
-            marbleMesh.position.x + 4 * sideSign * zoomDistanceScale,
-            11 + heightBias,
-            marbleMesh.position.z - 10 * zoomDistanceScale,
-          );
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = 11 + heightBias;
-          lookTarget.set(
-            marbleMesh.position.x,
-            heightBias * 0.1,
-            marbleMesh.position.z + LOOK_AHEAD + 4 + pitchLookAheadBias,
-          );
-          break;
-        }
-        case "topdownPure": {
-          cameraTarget.set(
-            marbleMesh.position.x,
-            TOPDOWN_HEIGHT + heightBias,
-            marbleMesh.position.z - TOPDOWN_Z_OFFSET * zoomDistanceScale,
-          );
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = TOPDOWN_HEIGHT + heightBias;
-          lookTarget.set(marbleMesh.position.x, heightBias * 0.08, marbleMesh.position.z + pitchLookAheadBias * 0.2);
-          break;
-        }
-        case "topdownForward": {
-          cameraTarget.set(
-            marbleMesh.position.x,
-            TOPDOWN_HEIGHT + heightBias,
-            marbleMesh.position.z - TOPDOWN_Z_OFFSET * zoomDistanceScale,
-          );
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = TOPDOWN_HEIGHT + heightBias;
-          lookTarget.set(marbleMesh.position.x, heightBias * 0.08, marbleMesh.position.z + 6 + pitchLookAheadBias * 0.4);
-          break;
-        }
-        case "broadcast": {
-          const broadcastCameraBaseHeight = 15.6;
-          cameraTarget.set(
-            marbleMesh.position.x,
-            broadcastCameraBaseHeight + heightBias,
-            marbleMesh.position.z - 12 * zoomDistanceScale,
-          );
-          camera.position.lerp(cameraTarget, cameraAlpha);
-          camera.position.y = broadcastCameraBaseHeight + heightBias;
-          lookTarget.set(
-            marbleMesh.position.x,
-            LOOK_HEIGHT + heightBias * 0.15,
-            marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias,
-          );
-          break;
-        }
-      }
+      const broadcastCameraBaseHeight = 15.6;
+      cameraTarget.set(
+        marbleMesh.position.x,
+        marbleMesh.position.y + broadcastCameraBaseHeight + heightBias,
+        marbleMesh.position.z - 12 * zoomDistanceScale,
+      );
+      camera.position.lerp(cameraTarget, cameraAlpha);
+      camera.position.y = marbleMesh.position.y + broadcastCameraBaseHeight + heightBias;
+      lookTarget.set(
+        marbleMesh.position.x,
+        marbleMesh.position.y + LOOK_HEIGHT + heightBias * 0.15,
+        marbleMesh.position.z + LOOK_AHEAD + pitchLookAheadBias,
+      );
 
       camera.lookAt(lookTarget);
 
@@ -3958,7 +3963,9 @@ export function HelloMarble() {
   const showingOptionsControls = showOptionsMenu && optionsSubmenu === "controls";
   const showingOptionsCamera = showOptionsMenu && optionsSubmenu === "camera";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
-  const showSoloResult = (gameMode === "solo" || gameMode === "testTrack") && trialState === "finished";
+  const showSoloResult =
+    (gameMode === "solo" || gameMode === "testTrack" || gameMode === "flatPlane") &&
+    trialState === "finished";
   const multiplayerRaceInProgress =
     gameMode === "multiplayer" &&
     racePhase === "racing" &&
@@ -4206,12 +4213,6 @@ export function HelloMarble() {
       ),
     );
     void startSoloRaceSequence();
-  };
-
-  const cycleCameraPreset = () => {
-    const currentIndex = CAMERA_PRESETS.indexOf(tuning.cameraPreset);
-    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % CAMERA_PRESETS.length : 0;
-    updateTuning("cameraPreset", CAMERA_PRESETS[nextIndex]!);
   };
 
   const resetCameraOptionsToDefault = () => {
@@ -5009,7 +5010,7 @@ export function HelloMarble() {
     if (nextMode === gameMode) {
       return;
     }
-    if (nextMode !== "solo" && nextMode !== "testTrack") {
+    if (nextMode !== "solo" && nextMode !== "testTrack" && nextMode !== "flatPlane") {
       soloStartSequenceRef.current += 1;
     }
     setGameMode(nextMode);
@@ -5041,6 +5042,21 @@ export function HelloMarble() {
           [],
           "testTrack",
           testTrackDebugSettings,
+          toTrackVisualSettingsFromTuning(tuningRef.current),
+        ),
+      );
+      void startSoloRaceSequence();
+      return;
+    }
+    if (nextMode === "flatPlane") {
+      applyTrackConfigRef.current(
+        buildTrackConfig(
+          trackLabSeedRef.current,
+          trackLabPieceCountRef.current,
+          "builtin",
+          [],
+          "flatPlane",
+          undefined,
           toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
@@ -5157,6 +5173,13 @@ export function HelloMarble() {
                 onClick={() => switchGameMode("testTrack")}
               >
                 Test Track
+              </button>
+              <button
+                type="button"
+                className="menuActionButton"
+                onClick={() => switchGameMode("flatPlane")}
+              >
+                Flat Plane
               </button>
               <button
                 type="button"
@@ -5292,23 +5315,7 @@ export function HelloMarble() {
               ) : null}
               {showingOptionsCamera ? (
                 <div className="optionsSubmenuPanel">
-                  <label className="optionsField" htmlFor="optionsCameraPreset">
-                    <span className="optionsFieldLabel">Camera Type</span>
-                    <select
-                      id="optionsCameraPreset"
-                      className="menuSelect"
-                      value={tuning.cameraPreset}
-                      onChange={(event) =>
-                        updateTuning("cameraPreset", event.target.value as CameraPresetId)
-                      }
-                    >
-                      {CAMERA_PRESETS.map((preset) => (
-                        <option key={preset} value={preset}>
-                          {getCameraLabel(preset)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <p className="tiltStatus">Camera Type: Broadcast</p>
                   <label className="optionsSliderField" htmlFor="optionsCameraZoom">
                     <span className="optionsFieldLabel">
                       Camera Zoom Level ({tuning.cameraZoom.toFixed(2)})
@@ -6391,14 +6398,6 @@ export function HelloMarble() {
               />
             </div>
           </div>
-          <button
-            type="button"
-            className="mobileCycleCameraButton"
-            onClick={cycleCameraPreset}
-            aria-label="Cycle camera type"
-          >
-            C
-          </button>
         </>
       ) : null}
       {showFloatingGyroCalibrateButton ? (
@@ -6410,7 +6409,10 @@ export function HelloMarble() {
           Recalibrate
         </button>
       ) : null}
-      {(showMultiplayerNetworkUi || gameMode === "solo" || gameMode === "testTrack") &&
+      {(showMultiplayerNetworkUi ||
+        gameMode === "solo" ||
+        gameMode === "testTrack" ||
+        gameMode === "flatPlane") &&
       (debugMenuEnabled || gameMode === "testTrack") ? (
         <DebugDrawer
           open={drawerOpen}
@@ -6743,21 +6745,7 @@ export function HelloMarble() {
               Tilt state: {tiltStatus.enabled ? "enabled" : "disabled"} | permission:{" "}
               {tiltStatus.permission} | mobile: {isMobile ? "yes" : "no"}
             </p>
-            <label className="controlLabel">
-              Camera Preset
-              <select
-                value={tuning.cameraPreset}
-                onChange={(event) =>
-                  updateTuning("cameraPreset", event.target.value as CameraPresetId)
-                }
-              >
-                {CAMERA_PRESETS.map((preset) => (
-                  <option key={preset} value={preset}>
-                    {getCameraLabel(preset)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <p className="tiltStatus">Camera Preset: Broadcast</p>
             <label className="controlCheck">
               <input
                 type="checkbox"
