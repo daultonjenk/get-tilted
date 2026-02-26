@@ -196,26 +196,7 @@ export function loadTuning(): TuningState {
 }
 
 export function getCameraLabel(id: CameraPresetId): string {
-  switch (id) {
-    case "chaseCentered":
-      return "Chase Centered";
-    case "chaseRight":
-      return "Chase Off-Right";
-    case "chaseLeft":
-      return "Chase Off-Left";
-    case "isoStandard":
-      return "Isometric Standard";
-    case "isoFlatter":
-      return "Isometric Flatter";
-    case "topdownPure":
-      return "Top-down Pure";
-    case "topdownForward":
-      return "Top-down Forward";
-    case "broadcast":
-      return "Broadcast";
-    default:
-      return "Unknown";
-  }
+  return id === "broadcast" ? "Broadcast" : "Unknown";
 }
 
 export function formatTimeMs(ms: number | null): string {

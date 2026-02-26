@@ -1281,3 +1281,17 @@ v0.8.10.0 full publish milestone (temporary Flat Plane mode):
     - Menu screenshot confirms new `Flat Plane` button: `output/web-game-flat-menu/shot-0.png`.
     - In-mode screenshot confirms giant obstacle-free plane load: `output/web-game-flat-plane/shot-0.png`.
     - No `errors-*.json` generated in either smoke output folder.
+
+v0.8.10.0 full publish follow-up (commit remaining workspace changes):
+- Captured and committed remaining workspace deltas that were left uncommitted after the Flat Plane milestone.
+- Included camera preset cleanup files:
+  - `client/src/game/gameConstants.ts` (camera preset list now broadcast-only)
+  - `client/src/game/gameUtils.ts` (camera label resolver simplified for broadcast-only)
+- Included latest smoke screenshot artifacts for reproducibility/debug review:
+  - `output/web-game-flat-menu/shot-0.png`
+  - `output/web-game-flat-plane/shot-0.png`
+  - `output/web-game/shot-0.png`
+  - `output/web-game/shot-fall-check.png`
+  - `output/web-game/shot-fall-check-2.png`
+- Verification context:
+  - No additional code changes beyond those already verified in the previous full publish run (`lint`, `typecheck`, `build` were already green on this working tree state).

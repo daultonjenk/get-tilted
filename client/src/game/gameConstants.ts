@@ -91,13 +91,6 @@ export const DEFAULT_TUNING: TuningState = {
 };
 
 export const CAMERA_PRESETS: CameraPresetId[] = [
-  "chaseCentered",
-  "chaseRight",
-  "chaseLeft",
-  "isoStandard",
-  "isoFlatter",
-  "topdownPure",
-  "topdownForward",
   "broadcast",
 ];
 
