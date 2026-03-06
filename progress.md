@@ -1606,3 +1606,31 @@ v0.9.0.0 update:
   - `npm run build` passed.
 - Commit/push context:
   - Commit and push executed in this task.
+
+v0.9.1.0 update (Track Hole Set Pieces + Checkpoints):
+- Phase C — Auto-generated hole set pieces + checkpoint system (createTrack.ts + HelloMarble.tsx):
+  - New types: `AutoHoleKind = "center-hole" | "side-holes" | "double-hole"`, `HoleSetPieceSelection`.
+  - New constants: `AUTO_HOLE_MIN_PIECE_LENGTH`, `AUTO_HOLE_SAFE_START_COUNT`, `AUTO_HOLE_SPAWN_CHANCE`, `AUTO_HOLE_CENTER_RADIUS`, `AUTO_HOLE_SIDE_RADIUS`, `AUTO_HOLE_SIDE_LATERAL_SCALE`, `CHECKPOINT_FORWARD_OFFSET`, `CHECKPOINT_ABOVE_FLOOR`.
+  - `selectBlueprintHoleSetPieces`: seeded-random selection of ~38% of eligible straight pieces beyond safe-start zone; assigns kind with 40/30/30 weight (center/side/double).
+  - `buildAutoFloorHoles`: builds `BlueprintManualFloorHole[]` for each selection using `sampleBlueprintSweepPoseAtDistance`; center-hole at midpoint, side-holes as two lateral circles, double-hole at 35%+65% positions.
+  - `applyRailOverrides`: removes railLeft/railRight from side-holes pieces (marble can fall off open edges).
+  - `buildHoleCheckpoints`: samples spawn pose at `CHECKPOINT_FORWARD_OFFSET` past each hole piece start, stores as track-local `CANNON.Vec3` + nearest collider sample index, sorted ascending.
+  - `addBlueprintPieceSetObstacles` extended with `excludeIds?: Set<string>` to skip hole pieces when placing static obstacles.
+  - `TrackBuildResult` extended with `checkpoints: Array<{spawnPos, sampleIndex}>`.
+  - All three track return paths (blueprint, flat plane, legacy) include `checkpoints` field.
+  - `enableHoleSetPieces?: boolean` added to `blueprintObstacleSettings`.
+  - Wired in `createTrackFromBlueprint`: sweepPlacements uses rail-overridden copies, allFloorHoles merges manual+auto, collider switches to trimesh when holes exist.
+  - HelloMarble.tsx: `lastCheckpointIndex` variable (reset to -1 on refreshCurvedContainment/track rebuild, NOT on respawn).
+  - `computeSpawnWorld` accepts optional `localSpawn?` override for checkpoint-based respawn.
+  - Checkpoint detection in fixed physics step after `resolveCurvedPathContainment`.
+  - `respawnMarble` uses last acquired checkpoint spawn position if available; marble retries from that checkpoint, not track start.
+  - Enabled `enableHoleSetPieces: true` in `createTrackOptionsFromConfig`.
+- Version discipline (Full Publish Test Mode, major feature):
+  - Bumped to `0.9.1.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.1.0`, `appVersionCode=90100`)
+    - `android/app/build.gradle` (`versionName=0.9.1.0`, `versionCode=90100`)
+- Verification (Full Publish Test Mode):
+  - `npm run lint` passed.
+  - `npm run typecheck` passed.
+  - `npm run build` passed.

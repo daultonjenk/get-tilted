@@ -476,6 +476,7 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
     },
     blueprintObstacleSettings: {
       enableMovingObstacles: true,
+      enableHoleSetPieces: true,
     },
   };
 }
@@ -1290,6 +1291,7 @@ export function HelloMarble() {
     let movingObstacleBodySet = new Set(track.movingObstacleBodies);
     let curvedContainmentSamples: RuntimeContainmentSample[] = [];
     let curvedContainmentNearestIndex = 0;
+    let lastCheckpointIndex = -1;
     let colliderPieceCount = track.physicsDebug.colliderPieceCount;
     let primitiveShapeCount = track.physicsDebug.primitiveShapeCount;
     let exoticTrimeshPieceCount = track.physicsDebug.exoticTrimeshPieceCount;
@@ -1638,6 +1640,7 @@ export function HelloMarble() {
     const refreshCurvedContainment = (): void => {
       curvedContainmentSamples = hydrateCurvedContainmentSamples(track.containmentPathLocal);
       curvedContainmentNearestIndex = 0;
+      lastCheckpointIndex = -1;
     };
 
     const findNearestCurvedContainmentIndex = (localPos: THREE.Vector3): number => {
@@ -2400,8 +2403,8 @@ export function HelloMarble() {
       );
     }
 
-    const computeSpawnWorld = (): CANNON.Vec3 => {
-      const spawn = track.spawn;
+    const computeSpawnWorld = (localSpawn?: CANNON.Vec3): CANNON.Vec3 => {
+      const spawn = localSpawn ?? track.spawn;
       const q = boardBody.quaternion;
 
       const x2 = q.x + q.x;
@@ -2494,7 +2497,11 @@ export function HelloMarble() {
       isRaceFinishedLocal = false;
       hasSentFinishRef.current = false;
       unfreezeMarble();
-      marbleBody.position.copy(computeSpawnWorld());
+      const checkpointSpawn =
+        lastCheckpointIndex >= 0
+          ? track.checkpoints[lastCheckpointIndex]?.spawnPos
+          : undefined;
+      marbleBody.position.copy(computeSpawnWorld(checkpointSpawn));
       marbleBody.quaternion.set(0, 0, 0, 1);
       marbleBody.velocity.set(0, 0, 0);
       marbleBody.angularVelocity.set(0, 0, 0);
@@ -3136,6 +3143,16 @@ export function HelloMarble() {
         resolveWallSqueezeAgainstObstacle();
       } else if (track.wallContainmentMode === "curvedPathClamp") {
         resolveCurvedPathContainment();
+        const checkpoints = track.checkpoints;
+        if (checkpoints.length > 0) {
+          for (let ci = lastCheckpointIndex + 1; ci < checkpoints.length; ci += 1) {
+            if (curvedContainmentNearestIndex >= checkpoints[ci]!.sampleIndex) {
+              lastCheckpointIndex = ci;
+            } else {
+              break;
+            }
+          }
+        }
       }
       const physicsMs = performance.now() - physicsStartMs;
 

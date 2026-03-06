@@ -31,6 +31,7 @@ export type CreateTrackOptions = {
     safeStartStraightCount?: number;
     enableAutomaticObstacles?: boolean;
     enableMovingObstacles?: boolean;
+    enableHoleSetPieces?: boolean;
     manualTestPieces?: Array<{
       placementIndex: number;
       testPieceIndex: number;
@@ -100,6 +101,10 @@ export type TrackBuildResult = {
     normal: [number, number, number];
   };
   physicsDebug: TrackPhysicsDebug;
+  checkpoints: Array<{
+    spawnPos: CANNON.Vec3;
+    sampleIndex: number;
+  }>;
   updateMovingObstacles: (
     fixedDt: number,
     boardPos: CANNON.Vec3,
@@ -243,6 +248,15 @@ const TEST_TRACK_TILT_LAYER_SWITCH_UP_FRACTION = 0.28;
 const TEST_TRACK_HOLE_EDGE_BLEND_RENDER = 0;
 const TEST_TRACK_HOLE_EDGE_BLEND_COLLIDER = 0;
 const TEST_TRACK_DECAGON_SIDES = 10;
+
+const AUTO_HOLE_MIN_PIECE_LENGTH = 18;
+const AUTO_HOLE_SAFE_START_COUNT = 3;
+const AUTO_HOLE_SPAWN_CHANCE = 0.38;
+const AUTO_HOLE_CENTER_RADIUS = 1.1;
+const AUTO_HOLE_SIDE_RADIUS = 0.85;
+const AUTO_HOLE_SIDE_LATERAL_SCALE = 0.36;
+const CHECKPOINT_FORWARD_OFFSET = 2.5;
+const CHECKPOINT_ABOVE_FLOOR = FLOOR_THICK / 2 + MARBLE_RADIUS + 0.6;
 
 function degToRad(value: number): number {
   return (value * Math.PI) / 180;
@@ -690,6 +704,13 @@ type BlueprintManualFloorHole = {
   radius: number;
 };
 
+type AutoHoleKind = "center-hole" | "side-holes" | "double-hole";
+
+type HoleSetPieceSelection = {
+  placementId: string;
+  holeKind: AutoHoleKind;
+};
+
 type BlueprintColliderMode = "primitive" | "trimesh";
 
 type BlueprintSweepPath = {
@@ -1110,17 +1131,21 @@ function addBlueprintPieceSetObstacles(params: {
   wireframeOpacity: number;
   wireframeTransparent: boolean;
   safeStartStraightCount?: number;
+  excludeIds?: Set<string>;
 }): void {
   const { group, boardWallBody, placements, seed, material } = params;
   const safeStartStraightCount = Math.max(
     0,
     Math.floor(params.safeStartStraightCount ?? BLUEPRINT_SET_PIECE_SAFE_START_MAIN_COUNT),
   );
-  const selectedPieceIds = selectBlueprintObstaclePieceIds(
+  let selectedPieceIds = selectBlueprintObstaclePieceIds(
     placements,
     seed,
     safeStartStraightCount,
   );
+  if (params.excludeIds && params.excludeIds.size > 0) {
+    selectedPieceIds = new Set([...selectedPieceIds].filter((id) => !params.excludeIds!.has(id)));
+  }
   if (selectedPieceIds.size === 0) {
     return;
   }
@@ -3096,6 +3121,254 @@ function addBlueprintMovingObstacleSet(params: {
   }
 }
 
+function selectBlueprintHoleSetPieces(
+  placements: TrackBlueprint["placements"],
+  seed: string,
+  safeStartCount: number,
+): HoleSetPieceSelection[] {
+  const random = makeSeededRandom(`${seed}-hole-set-pieces`);
+  const mainLane = placements.filter((p) => p.lane === "main");
+  const source = mainLane.length > 0 ? mainLane : placements;
+
+  // Build an index map from placement id → original index (for safe-start ordering)
+  const placementOrder = new Map<string, number>();
+  for (let i = 0; i < placements.length; i += 1) {
+    placementOrder.set(placements[i]!.id, i);
+  }
+
+  // Collect eligible straight placements sorted by placement order
+  const eligibleByOrder = source
+    .filter((p) => p.kind === "straight" && !p.isCompensatingTurn && p.points.length >= 2)
+    .sort((a, b) => (placementOrder.get(a.id) ?? 0) - (placementOrder.get(b.id) ?? 0));
+
+  if (eligibleByOrder.length === 0) {
+    return [];
+  }
+
+  // Protect safe-start pieces
+  const protectedIds = new Set(eligibleByOrder.slice(0, safeStartCount).map((p) => p.id));
+
+  const results: HoleSetPieceSelection[] = [];
+
+  for (const placement of eligibleByOrder) {
+    if (protectedIds.has(placement.id)) {
+      continue;
+    }
+
+    // Check piece length
+    const pieceSamples = buildBlueprintSweepSamples([placement], BLUEPRINT_RENDER_SAMPLE_STEP);
+    const lookup = buildBlueprintSweepDistanceLookup(pieceSamples);
+    if (lookup.totalLength < AUTO_HOLE_MIN_PIECE_LENGTH) {
+      continue;
+    }
+
+    if (random() > AUTO_HOLE_SPAWN_CHANCE) {
+      continue;
+    }
+
+    // Kind weights: 40% center-hole, 30% side-holes, 30% double-hole
+    const kindRoll = random();
+    let holeKind: AutoHoleKind;
+    if (kindRoll < 0.4) {
+      holeKind = "center-hole";
+    } else if (kindRoll < 0.7) {
+      holeKind = "side-holes";
+    } else {
+      holeKind = "double-hole";
+    }
+
+    results.push({ placementId: placement.id, holeKind });
+  }
+
+  return results;
+}
+
+function buildAutoFloorHoles(
+  selections: HoleSetPieceSelection[],
+  placements: TrackBlueprint["placements"],
+): BlueprintManualFloorHole[] {
+  if (selections.length === 0) {
+    return [];
+  }
+
+  const placementById = new Map<string, TrackBlueprint["placements"][number]>();
+  for (const p of placements) {
+    placementById.set(p.id, p);
+  }
+
+  const holes: BlueprintManualFloorHole[] = [];
+
+  for (const selection of selections) {
+    const placement = placementById.get(selection.placementId);
+    if (!placement || placement.kind !== "straight") {
+      continue;
+    }
+
+    const pieceSamples = buildBlueprintSweepSamples([placement], BLUEPRINT_RENDER_SAMPLE_STEP);
+    const pieceFrames = buildBlueprintSweepFrames(pieceSamples);
+    if (pieceSamples.length < 2 || pieceFrames.length !== pieceSamples.length) {
+      continue;
+    }
+    const lookup = buildBlueprintSweepDistanceLookup(pieceSamples);
+    if (lookup.totalLength < AUTO_HOLE_MIN_PIECE_LENGTH) {
+      continue;
+    }
+
+    const innerHalf = placement.width * 0.5 - RAIL_INSET - RAIL_THICK - 0.2;
+
+    if (selection.holeKind === "center-hole") {
+      const pose = sampleBlueprintSweepPoseAtDistance(
+        pieceSamples,
+        pieceFrames,
+        lookup,
+        lookup.totalLength * 0.5,
+      );
+      if (!pose) {
+        continue;
+      }
+      holes.push({
+        kind: "circle",
+        center: pose.center.clone(),
+        right: pose.right.clone().normalize(),
+        tangent: pose.tangent.clone().normalize(),
+        radius: AUTO_HOLE_CENTER_RADIUS,
+      });
+    } else if (selection.holeKind === "side-holes") {
+      const lateralOffset = innerHalf * AUTO_HOLE_SIDE_LATERAL_SCALE;
+      const mid = lookup.totalLength * 0.5;
+      for (const side of [-1, 1]) {
+        const pose = sampleBlueprintSweepPoseAtDistance(pieceSamples, pieceFrames, lookup, mid);
+        if (!pose) {
+          continue;
+        }
+        const center = pose.center.clone().addScaledVector(pose.right, side * lateralOffset);
+        holes.push({
+          kind: "circle",
+          center,
+          right: pose.right.clone().normalize(),
+          tangent: pose.tangent.clone().normalize(),
+          radius: AUTO_HOLE_SIDE_RADIUS,
+        });
+      }
+    } else {
+      // double-hole: one at 35% centered, one at 65% offset left
+      const pose35 = sampleBlueprintSweepPoseAtDistance(
+        pieceSamples,
+        pieceFrames,
+        lookup,
+        lookup.totalLength * 0.35,
+      );
+      if (pose35) {
+        holes.push({
+          kind: "circle",
+          center: pose35.center.clone(),
+          right: pose35.right.clone().normalize(),
+          tangent: pose35.tangent.clone().normalize(),
+          radius: AUTO_HOLE_CENTER_RADIUS,
+        });
+      }
+      const pose65 = sampleBlueprintSweepPoseAtDistance(
+        pieceSamples,
+        pieceFrames,
+        lookup,
+        lookup.totalLength * 0.65,
+      );
+      if (pose65) {
+        const leftOffset = -Math.min(0.9, innerHalf * 0.4);
+        const center = pose65.center.clone().addScaledVector(pose65.right, leftOffset);
+        holes.push({
+          kind: "circle",
+          center,
+          right: pose65.right.clone().normalize(),
+          tangent: pose65.tangent.clone().normalize(),
+          radius: AUTO_HOLE_SIDE_RADIUS,
+        });
+      }
+    }
+  }
+
+  return holes;
+}
+
+function applyRailOverrides(
+  placements: TrackBlueprint["placements"],
+  noRailIds: Set<string>,
+): TrackBlueprint["placements"] {
+  if (noRailIds.size === 0) {
+    return placements;
+  }
+  return placements.map((p) => {
+    if (!noRailIds.has(p.id)) {
+      return p;
+    }
+    return { ...p, railLeft: false, railRight: false };
+  });
+}
+
+function buildHoleCheckpoints(
+  selections: HoleSetPieceSelection[],
+  placements: TrackBlueprint["placements"],
+  colliderSamples: BlueprintSweepSample[],
+): Array<{ spawnPos: CANNON.Vec3; sampleIndex: number }> {
+  if (selections.length === 0 || colliderSamples.length === 0) {
+    return [];
+  }
+
+  const placementById = new Map<string, TrackBlueprint["placements"][number]>();
+  for (const p of placements) {
+    placementById.set(p.id, p);
+  }
+
+  const checkpoints: Array<{ spawnPos: CANNON.Vec3; sampleIndex: number }> = [];
+
+  for (const selection of selections) {
+    const placement = placementById.get(selection.placementId);
+    if (!placement || placement.kind !== "straight") {
+      continue;
+    }
+
+    const pieceSamples = buildBlueprintSweepSamples([placement], BLUEPRINT_RENDER_SAMPLE_STEP);
+    const pieceFrames = buildBlueprintSweepFrames(pieceSamples);
+    if (pieceSamples.length < 2 || pieceFrames.length !== pieceSamples.length) {
+      continue;
+    }
+    const lookup = buildBlueprintSweepDistanceLookup(pieceSamples);
+
+    const pose = sampleBlueprintSweepPoseAtDistance(
+      pieceSamples,
+      pieceFrames,
+      lookup,
+      CHECKPOINT_FORWARD_OFFSET,
+    );
+    if (!pose) {
+      continue;
+    }
+
+    const spawnLocalPos = pose.center.clone().addScaledVector(pose.up, CHECKPOINT_ABOVE_FLOOR);
+
+    // Find nearest collider sample index by squared-distance scan
+    let nearestIndex = 0;
+    let nearestDistSq = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < colliderSamples.length; i += 1) {
+      const distSq = colliderSamples[i]!.center.distanceToSquared(spawnLocalPos);
+      if (distSq < nearestDistSq) {
+        nearestDistSq = distSq;
+        nearestIndex = i;
+      }
+    }
+
+    checkpoints.push({
+      spawnPos: new CANNON.Vec3(spawnLocalPos.x, spawnLocalPos.y, spawnLocalPos.z),
+      sampleIndex: nearestIndex,
+    });
+  }
+
+  // Sort ascending by sampleIndex
+  checkpoints.sort((a, b) => a.sampleIndex - b.sampleIndex);
+
+  return checkpoints;
+}
+
 function createTrackFromBlueprint(
   blueprint: TrackBlueprint,
   obstacleSettings?: CreateTrackOptions["blueprintObstacleSettings"],
@@ -3151,13 +3424,31 @@ function createTrackFromBlueprint(
   const requestedManualSpecs = obstacleSettings?.manualTestPieces ?? [];
   const manualObstacleSpecs = [...authoredSetPieceManualSpecs, ...requestedManualSpecs];
   const manualFloorHoles = collectManualFloorHoles(sourcePlacements, manualObstacleSpecs);
+
+  // Hole set pieces
+  const holeSelections = obstacleSettings?.enableHoleSetPieces
+    ? selectBlueprintHoleSetPieces(
+        sourcePlacements,
+        blueprint.seed,
+        Math.max(0, Math.floor(obstacleSettings?.safeStartStraightCount ?? AUTO_HOLE_SAFE_START_COUNT)),
+      )
+    : [];
+  const holeSetPieceIds = new Set(holeSelections.map((s) => s.placementId));
+  const noRailIds = new Set(
+    holeSelections.filter((s) => s.holeKind === "side-holes").map((s) => s.placementId),
+  );
+  const sweepPlacements =
+    holeSelections.length > 0 ? applyRailOverrides(sourcePlacements, noRailIds) : sourcePlacements;
+  const autoFloorHoles = buildAutoFloorHoles(holeSelections, sourcePlacements);
+  const allFloorHoles = [...manualFloorHoles, ...autoFloorHoles];
+
   const renderPath = buildBlueprintSweepPath(
-    sourcePlacements,
+    sweepPlacements,
     BLUEPRINT_RENDER_SAMPLE_STEP,
     startTopBackPoint,
   );
   const colliderPath = buildBlueprintSweepPath(
-    sourcePlacements,
+    sweepPlacements,
     BLUEPRINT_COLLIDER_SAMPLE_STEP,
     startTopBackPoint,
   );
@@ -3171,7 +3462,7 @@ function createTrackFromBlueprint(
   const floorSlices = buildFloorSliceGeometries(
     samples,
     frames,
-    manualFloorHoles,
+    allFloorHoles,
     TEST_TRACK_HOLE_EDGE_BLEND_RENDER,
   );
   const mergedFloorGeometry =
@@ -3246,7 +3537,7 @@ function createTrackFromBlueprint(
   let colliderPieceCount = 0;
   let exoticTrimeshPieceCount = 0;
   if (BLUEPRINT_COLLIDER_MODE === "primitive") {
-    const useExactFloorCollider = manualFloorHoles.length > 0;
+    const useExactFloorCollider = allFloorHoles.length > 0;
     if (useExactFloorCollider) {
       if (mergedFloorGeometry) {
         boardBody.addShape(geometryToTrimesh(mergedFloorGeometry));
@@ -3268,7 +3559,7 @@ function createTrackFromBlueprint(
     const colliderFloorGeometries = buildFloorSliceGeometries(
       colliderSamples,
       colliderFrames,
-      manualFloorHoles,
+      allFloorHoles,
       TEST_TRACK_HOLE_EDGE_BLEND_COLLIDER,
     );
     const colliderLeftRailGeometry = buildSweptRectGeometry(
@@ -3383,6 +3674,7 @@ function createTrackFromBlueprint(
       wireframeOpacity: obstacleVisualSettings.wireframeOpacity,
       wireframeTransparent: obstacleVisualSettings.wireframeTransparent,
       safeStartStraightCount: obstacleSettings?.safeStartStraightCount,
+      excludeIds: holeSetPieceIds.size > 0 ? holeSetPieceIds : undefined,
     });
   }
   if (manualObstacleSpecs.length > 0) {
@@ -3715,6 +4007,8 @@ function createTrackFromBlueprint(
     }
   };
 
+  const checkpoints = buildHoleCheckpoints(holeSelections, sourcePlacements, colliderSamples);
+
   return {
     group,
     bodies: [boardBody, boardWallBody],
@@ -3749,6 +4043,7 @@ function createTrackFromBlueprint(
       wallShapeCount: boardWallBody.shapes.length,
       estimatedBoardWallShapeTestsPerStep: boardBody.shapes.length * boardWallBody.shapes.length,
     },
+    checkpoints,
     updateMovingObstacles,
     setMovingObstacleMaterial,
   };
@@ -3841,6 +4136,7 @@ function createFlatPlaneTrack(): TrackBuildResult {
       wallShapeCount: boardWallBody.shapes.length,
       estimatedBoardWallShapeTestsPerStep: boardBody.shapes.length * boardWallBody.shapes.length,
     },
+    checkpoints: [],
     updateMovingObstacles: () => {},
     setMovingObstacleMaterial: () => {},
   };
@@ -4709,6 +5005,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       wallShapeCount: boardWallBody.shapes.length,
       estimatedBoardWallShapeTestsPerStep: boardBody.shapes.length * boardWallBody.shapes.length,
     },
+    checkpoints: [],
     updateMovingObstacles,
     setMovingObstacleMaterial,
   };
