@@ -474,6 +474,9 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
       showObjectWireframes: trackVisualSettings.showObjectWireframes,
       wireframeUsesObjectTransparency: trackVisualSettings.wireframeUsesObjectTransparency,
     },
+    blueprintObstacleSettings: {
+      enableMovingObstacles: true,
+    },
   };
 }
 

@@ -1580,3 +1580,29 @@ v0.8.17.0 full publish milestone (singleplayer-first track workflow + debug tuni
   - `npm run build` passed.
 - Commit/push context:
   - Commit and push executed in this task.
+
+v0.9.0.0 update:
+- Implemented Phase A (banking) and Phase B (moving obstacles) from Track Mechanics Brainstorm plan.
+- Phase A — Banking (createTrack.ts):
+  - Added `bankDeg: number` field to `BlueprintSweepSample` type; populated from `placement.bankDeg` in `buildBlueprintSweepSamples`.
+  - Added Rodrigues-style bank rotation in `buildBlueprintSweepFrames`: after Frenet right/up computation, rotate both vectors around tangent by `bankDeg` degrees.
+  - Grade (`gradeDeg`) was already functional via `tracePiecePoints` in `modularTrack.ts` — no change needed.
+- Phase B — New obstacle types (createTrack.ts):
+  - Added `ObstacleMotionKind = "sweepX" | "sweepY" | "spin"` type.
+  - Extended `ObstacleActor` with `motionKind`, `minY`, `maxY`, `trackUp` fields.
+  - Added module-level `stepObstacleActors` helper to drive all three motion kinds and sync to world space.
+  - Added `addBlueprintMovingObstacleSet` function placing vertical gates (sweepY), spinning bars (spin), and pinch gates (sweepX pair) on eligible blueprint straight pieces via seeded random selection.
+  - Wired into `createTrackFromBlueprint`: actor arrays created, obstacles built when `enableMovingObstacles: true`, real `updateMovingObstacles`/`setMovingObstacleMaterial` closures returned, `movingObstacleBodies` populated.
+  - Removed unused legacy-path `addVerticalGate`, `addSpinningBar`, `addPinchGate` functions.
+  - Enabled `enableMovingObstacles: true` in `createTrackOptionsFromConfig` in `HelloMarble.tsx`.
+- Version discipline (Full Publish, major feature scope jump):
+  - Bumped to `0.9.0.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.0.0`, `appVersionCode=90000`)
+    - `android/app/build.gradle` (`versionName=0.9.0.0`, `versionCode=90000`)
+- Verification (Full Publish Test Mode):
+  - `npm run lint` passed.
+  - `npm run typecheck` passed.
+  - `npm run build` passed.
+- Commit/push context:
+  - Commit and push executed in this task.

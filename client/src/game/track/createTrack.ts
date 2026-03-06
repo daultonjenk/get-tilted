@@ -30,6 +30,7 @@ export type CreateTrackOptions = {
   blueprintObstacleSettings?: {
     safeStartStraightCount?: number;
     enableAutomaticObstacles?: boolean;
+    enableMovingObstacles?: boolean;
     manualTestPieces?: Array<{
       placementIndex: number;
       testPieceIndex: number;
@@ -135,6 +136,8 @@ type OrientedPartSpec = {
   uvProjection?: "default" | "floorSegment";
 };
 
+type ObstacleMotionKind = "sweepX" | "sweepY" | "spin";
+
 type ObstacleActor = {
   visual: THREE.Object3D;
   body: CANNON.Body;
@@ -142,10 +145,15 @@ type ObstacleActor = {
   localQuat: CANNON.Quaternion;
   hasLocalRotation: boolean;
   isLocallyDynamic: boolean;
+  motionKind: ObstacleMotionKind;
   minX: number;
   maxX: number;
+  minY: number;
+  maxY: number;
   phase: number;
   speedHz: number;
+  /** Normalized up axis in board-local space (for sweepY and spin). */
+  trackUp: CANNON.Vec3;
 };
 
 type MovingObstacleSpec = {
@@ -653,6 +661,7 @@ type BlueprintSweepSample = {
   railLeft: boolean;
   railRight: boolean;
   tunnelRoof: boolean;
+  bankDeg: number;
 };
 
 type BlueprintSweepFrame = {
@@ -764,6 +773,7 @@ function buildBlueprintSweepSamples(
         railLeft: placement.railLeft,
         railRight: placement.railRight,
         tunnelRoof: placement.tunnelRoof,
+        bankDeg: placement.bankDeg,
       });
     }
   }
@@ -813,6 +823,18 @@ function buildBlueprintSweepFrames(samples: BlueprintSweepSample[]): BlueprintSw
       up.copy(worldUp);
     } else {
       up.normalize();
+    }
+
+    // Apply lateral bank rotation around the tangent axis.
+    const bankDeg = samples[i]!.bankDeg;
+    if (bankDeg !== 0) {
+      const bankRad = (bankDeg * Math.PI) / 180;
+      const cosB = Math.cos(bankRad);
+      const sinB = Math.sin(bankRad);
+      const bankedRight = right.clone().multiplyScalar(cosB).addScaledVector(up, sinB);
+      const bankedUp = right.clone().multiplyScalar(-sinB).addScaledVector(up, cosB);
+      right.copy(bankedRight);
+      up.copy(bankedUp);
     }
 
     frames.push({ tangent, right, up });
@@ -2562,6 +2584,7 @@ function buildBlueprintSweepPath(
         railLeft: true,
         railRight: true,
         tunnelRoof: false,
+        bankDeg: 0,
       });
     }
   }
@@ -2587,6 +2610,7 @@ function buildBlueprintSweepPath(
       railLeft: true,
       railRight: true,
       tunnelRoof: false,
+      bankDeg: 0,
     });
   }
 
@@ -2797,6 +2821,279 @@ function addBlueprintPrimitiveColliders(
     colliderPieceCount,
     primitiveShapeCount,
   };
+}
+
+/**
+ * Shared obstacle actor step function used by both the legacy and blueprint track builders.
+ * Drives per-frame position and rotation of kinematic obstacle actors, then syncs them
+ * to world space using the current board transform.
+ */
+function stepObstacleActors(
+  dynamicActors: ObstacleActor[],
+  allActors: ObstacleActor[],
+  fixedDt: number,
+  boardPos: CANNON.Vec3,
+  boardQuat: CANNON.Quaternion,
+): void {
+  const tempOffset = new CANNON.Vec3();
+  const tempWorldPos = new CANNON.Vec3();
+  const tempWorldQuat = new CANNON.Quaternion();
+
+  for (const obstacle of dynamicActors) {
+    obstacle.phase += fixedDt * obstacle.speedHz * Math.PI * 2;
+    if (obstacle.motionKind === "sweepX") {
+      const centerX = (obstacle.minX + obstacle.maxX) / 2;
+      const amplitude = (obstacle.maxX - obstacle.minX) / 2;
+      const localX = centerX + Math.sin(obstacle.phase) * amplitude;
+      obstacle.baseLocalPos.x = localX;
+      obstacle.visual.position.x = localX;
+    } else if (obstacle.motionKind === "sweepY") {
+      const centerY = (obstacle.minY + obstacle.maxY) / 2;
+      const amplitude = (obstacle.maxY - obstacle.minY) / 2;
+      const localY = centerY + Math.sin(obstacle.phase) * amplitude;
+      obstacle.baseLocalPos.y = localY;
+      obstacle.visual.position.y = localY;
+    } else if (obstacle.motionKind === "spin") {
+      const halfAngle = obstacle.phase * 0.5;
+      const s = Math.sin(halfAngle);
+      const c = Math.cos(halfAngle);
+      obstacle.localQuat.set(
+        obstacle.trackUp.x * s,
+        obstacle.trackUp.y * s,
+        obstacle.trackUp.z * s,
+        c,
+      );
+      obstacle.hasLocalRotation = true;
+    }
+  }
+
+  for (const obstacle of allActors) {
+    boardQuat.vmult(obstacle.baseLocalPos, tempOffset);
+    tempWorldPos.set(
+      boardPos.x + tempOffset.x,
+      boardPos.y + tempOffset.y,
+      boardPos.z + tempOffset.z,
+    );
+    if (obstacle.hasLocalRotation) {
+      boardQuat.mult(obstacle.localQuat, tempWorldQuat);
+    } else {
+      tempWorldQuat.copy(boardQuat);
+    }
+    obstacle.body.position.copy(tempWorldPos);
+    obstacle.body.quaternion.copy(tempWorldQuat);
+    obstacle.body.aabbNeedsUpdate = true;
+    obstacle.body.updateAABB();
+  }
+}
+
+const BLUEPRINT_MOVING_OBSTACLE_MIN_PIECE_LENGTH = 18;
+const BLUEPRINT_MOVING_GATE_WIDTH_SCALE = 0.88;
+const BLUEPRINT_MOVING_GATE_DEPTH = 0.42;
+const BLUEPRINT_MOVING_GATE_LOW_Y = FLOOR_THICK / 2 + MOVING_OBSTACLE_H / 2;
+const BLUEPRINT_MOVING_GATE_HIGH_Y = FLOOR_THICK / 2 + MARBLE_RADIUS * 2.4 + MOVING_OBSTACLE_H / 2;
+const BLUEPRINT_SPINNING_BAR_WIDTH_SCALE = 0.84;
+const BLUEPRINT_SPINNING_BAR_DEPTH_SCALE = 0.18;
+const BLUEPRINT_PINCH_BAR_WIDTH_SCALE = 0.44;
+
+/**
+ * Places moving obstacles (vertical gates, spinning bars, pinch gates) on eligible blueprint
+ * pieces and registers them as kinematic ObstacleActors in the provided arrays.
+ */
+function addBlueprintMovingObstacleSet(params: {
+  group: THREE.Group;
+  placements: TrackBlueprint["placements"];
+  seed: string;
+  material: THREE.Material;
+  obstacleVisualSettings: ReturnType<typeof resolveObstacleVisualSettings>;
+  safeStartStraightCount: number;
+  actors: ObstacleActor[];
+  dynamicActors: ObstacleActor[];
+  movingBodies: CANNON.Body[];
+}): void {
+  const { group, placements, seed, material, obstacleVisualSettings, safeStartStraightCount } =
+    params;
+  const { actors, dynamicActors, movingBodies } = params;
+  const random = makeSeededRandom(`${seed}-moving-obstacles`);
+
+  // Select eligible straight pieces beyond the safe-start zone.
+  const eligiblePlacements = placements.filter(
+    (p, index) =>
+      p.kind === "straight" && !p.isCompensatingTurn && index >= safeStartStraightCount,
+  );
+  if (eligiblePlacements.length === 0) {
+    return;
+  }
+
+  const addMovingObstacleMesh = (
+    center: THREE.Vector3,
+    width: number,
+    height: number,
+    depth: number,
+  ): THREE.Object3D => {
+    const geom = new THREE.BoxGeometry(width, height, depth);
+    const mesh = new THREE.Mesh(geom, material);
+    mesh.position.copy(center);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    if (obstacleVisualSettings.showObjectWireframes) {
+      const edgesGeom = createWireframeEdgesGeometry(geom, false);
+      const pos = edgesGeom.getAttribute("position");
+      if (pos instanceof THREE.BufferAttribute && pos.count > 0) {
+        const edgeLines = new THREE.LineSegments(
+          edgesGeom,
+          new THREE.LineBasicMaterial({
+            color: 0x3d0b0b,
+            transparent: obstacleVisualSettings.wireframeTransparent,
+            opacity: obstacleVisualSettings.wireframeOpacity,
+          }),
+        );
+        edgeLines.scale.set(1.002, 1.002, 1.002);
+        mesh.add(edgeLines);
+      } else {
+        edgesGeom.dispose();
+      }
+    }
+    group.add(mesh);
+    return mesh;
+  };
+
+  const registerBpActor = (actor: ObstacleActor): void => {
+    actors.push(actor);
+    if (actor.isLocallyDynamic) {
+      dynamicActors.push(actor);
+    }
+    movingBodies.push(actor.body);
+  };
+
+  for (const placement of eligiblePlacements) {
+    const pieceSamples = buildBlueprintSweepSamples([placement], BLUEPRINT_RENDER_SAMPLE_STEP);
+    const pieceFrames = buildBlueprintSweepFrames(pieceSamples);
+    if (pieceSamples.length < 3 || pieceFrames.length !== pieceSamples.length) {
+      continue;
+    }
+    const lookup = buildBlueprintSweepDistanceLookup(pieceSamples);
+    if (lookup.totalLength < BLUEPRINT_MOVING_OBSTACLE_MIN_PIECE_LENGTH) {
+      continue;
+    }
+
+    const edgePad = clamp(lookup.totalLength * 0.12, 1.2, 3.5);
+    const spanStart = edgePad;
+    const spanEnd = lookup.totalLength - edgePad;
+    const usableSpan = spanEnd - spanStart;
+    if (usableSpan < 5) {
+      continue;
+    }
+
+    // Decide how many moving obstacles to place on this piece (1–4 based on length).
+    const obstacleCount = clamp(Math.floor(usableSpan / 28), 1, 4);
+    const spacing = usableSpan / obstacleCount;
+
+    for (let oi = 0; oi < obstacleCount; oi += 1) {
+      const dist = spanStart + spacing * (oi + 0.5);
+      const pose = sampleBlueprintSweepPoseAtDistance(pieceSamples, pieceFrames, lookup, dist);
+      if (!pose) {
+        continue;
+      }
+
+      const innerHalf = Math.max(1.4, pose.width * 0.5 - RAIL_INSET - RAIL_THICK - 0.15);
+      const baseY = FLOOR_THICK / 2 + MOVING_OBSTACLE_H / 2;
+
+      // Rotate through gate → spinning → pinch based on random roll.
+      const roll = random();
+      const phase = random() * Math.PI * 2;
+      const speedHz = lerp(0.1, 0.35, random());
+
+      if (roll < 0.4) {
+        // Vertical gate: descends/rises across full track width.
+        const gateW = innerHalf * 2 * BLUEPRINT_MOVING_GATE_WIDTH_SCALE;
+        const gateH = MOVING_OBSTACLE_H;
+        const gateD = BLUEPRINT_MOVING_GATE_DEPTH;
+        const center = pose.center.clone().addScaledVector(pose.up, BLUEPRINT_MOVING_GATE_HIGH_Y);
+        const mesh = addMovingObstacleMesh(center, gateW, gateH, gateD);
+        const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+        body.addShape(new CANNON.Box(new CANNON.Vec3(gateW / 2, gateH / 2, gateD / 2)));
+        const actor: ObstacleActor = {
+          visual: mesh,
+          body,
+          baseLocalPos: new CANNON.Vec3(center.x, center.y, center.z),
+          localQuat: new CANNON.Quaternion(0, 0, 0, 1),
+          hasLocalRotation: false,
+          isLocallyDynamic: true,
+          motionKind: "sweepY",
+          minX: center.x,
+          maxX: center.x,
+          minY: pose.center.y + BLUEPRINT_MOVING_GATE_LOW_Y,
+          maxY: pose.center.y + BLUEPRINT_MOVING_GATE_HIGH_Y,
+          phase,
+          speedHz,
+          trackUp: new CANNON.Vec3(pose.up.x, pose.up.y, pose.up.z),
+        };
+        registerBpActor(actor);
+      } else if (roll < 0.72) {
+        // Spinning bar: rotates around track-up axis.
+        const barW = innerHalf * 2 * BLUEPRINT_SPINNING_BAR_WIDTH_SCALE;
+        const barH = MOVING_OBSTACLE_H;
+        const barD = Math.max(barW * BLUEPRINT_SPINNING_BAR_DEPTH_SCALE, 0.35);
+        const center = pose.center.clone().addScaledVector(pose.up, baseY);
+        const mesh = addMovingObstacleMesh(center, barW, barH, barD);
+        const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+        body.addShape(new CANNON.Box(new CANNON.Vec3(barW / 2, barH / 2, barD / 2)));
+        const actor: ObstacleActor = {
+          visual: mesh,
+          body,
+          baseLocalPos: new CANNON.Vec3(center.x, center.y, center.z),
+          localQuat: new CANNON.Quaternion(0, 0, 0, 1),
+          hasLocalRotation: true,
+          isLocallyDynamic: true,
+          motionKind: "spin",
+          minX: center.x,
+          maxX: center.x,
+          minY: center.y,
+          maxY: center.y,
+          phase,
+          speedHz: lerp(0.08, 0.22, random()),
+          trackUp: new CANNON.Vec3(pose.up.x, pose.up.y, pose.up.z),
+        };
+        registerBpActor(actor);
+      } else {
+        // Pinch gate: two bars that sweep toward each other.
+        const barW = innerHalf * BLUEPRINT_PINCH_BAR_WIDTH_SCALE;
+        const barH = MOVING_OBSTACLE_H;
+        const barD = BLUEPRINT_MOVING_GATE_DEPTH;
+        const gap = MARBLE_RADIUS * 2 * BLUEPRINT_SET_PIECE_GATE_CLEARANCE_MULTIPLIER;
+        for (const side of [-1, 1] as const) {
+          const sidePhase = side < 0 ? phase : phase + Math.PI;
+          const sideMinX = side < 0 ? -innerHalf : gap / 2;
+          const sideMaxX = side < 0 ? -gap / 2 : innerHalf;
+          const startX = (sideMinX + sideMaxX) / 2;
+          const center = pose.center
+            .clone()
+            .addScaledVector(pose.right, startX)
+            .addScaledVector(pose.up, baseY);
+          const mesh = addMovingObstacleMesh(center, barW, barH, barD);
+          const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+          body.addShape(new CANNON.Box(new CANNON.Vec3(barW / 2, barH / 2, barD / 2)));
+          const actor: ObstacleActor = {
+            visual: mesh,
+            body,
+            baseLocalPos: new CANNON.Vec3(center.x, center.y, center.z),
+            localQuat: new CANNON.Quaternion(0, 0, 0, 1),
+            hasLocalRotation: false,
+            isLocallyDynamic: true,
+            motionKind: "sweepX",
+            minX: pose.center.x + sideMinX,
+            maxX: pose.center.x + sideMaxX,
+            minY: center.y,
+            maxY: center.y,
+            phase: sidePhase,
+            speedHz,
+            trackUp: new CANNON.Vec3(pose.up.x, pose.up.y, pose.up.z),
+          };
+          registerBpActor(actor);
+        }
+      }
+    }
+  }
 }
 
 function createTrackFromBlueprint(
@@ -3320,6 +3617,31 @@ function createTrackFromBlueprint(
   boardWallBody.aabbNeedsUpdate = true;
   boardWallBody.updateAABB();
 
+  const bpActors: ObstacleActor[] = [];
+  const bpDynamicActors: ObstacleActor[] = [];
+  const bpMovingBodies: CANNON.Body[] = [];
+
+  if (obstacleSettings?.enableMovingObstacles) {
+    addBlueprintMovingObstacleSet({
+      group,
+      placements: sourcePlacements,
+      seed: blueprint.seed,
+      material: setPieceObstacleMaterial,
+      obstacleVisualSettings,
+      safeStartStraightCount: Math.max(
+        0,
+        Math.floor(obstacleSettings?.safeStartStraightCount ?? BLUEPRINT_SET_PIECE_SAFE_START_MAIN_COUNT),
+      ),
+      actors: bpActors,
+      dynamicActors: bpDynamicActors,
+      movingBodies: bpMovingBodies,
+    });
+    for (const body of bpMovingBodies) {
+      body.aabbNeedsUpdate = true;
+      body.updateAABB();
+    }
+  }
+
   const spawnForward = frames[0]?.tangent ?? new THREE.Vector3(0, 0, 1);
   const spawnCenter = samples[0]?.center ?? startTopBackPoint;
   const spawn = spawnCenter
@@ -3377,11 +3699,27 @@ function createTrackFromBlueprint(
     };
   });
 
+  const updateMovingObstacles = (
+    fixedDt: number,
+    boardPos: CANNON.Vec3,
+    boardQuat: CANNON.Quaternion,
+  ): void => {
+    if (bpActors.length > 0) {
+      stepObstacleActors(bpDynamicActors, bpActors, fixedDt, boardPos, boardQuat);
+    }
+  };
+
+  const setMovingObstacleMaterial = (material: CANNON.Material): void => {
+    for (const actor of bpActors) {
+      actor.body.material = material;
+    }
+  };
+
   return {
     group,
     bodies: [boardBody, boardWallBody],
     wallBody: boardWallBody,
-    movingObstacleBodies: [],
+    movingObstacleBodies: bpMovingBodies,
     containmentLocal: {
       mainHalfX: computeContainmentHalfX(maxSegmentWidth),
       finishHalfX: computeContainmentHalfX(maxSegmentWidth),
@@ -3411,8 +3749,8 @@ function createTrackFromBlueprint(
       wallShapeCount: boardWallBody.shapes.length,
       estimatedBoardWallShapeTestsPerStep: boardBody.shapes.length * boardWallBody.shapes.length,
     },
-    updateMovingObstacles: () => {},
-    setMovingObstacleMaterial: () => {},
+    updateMovingObstacles,
+    setMovingObstacleMaterial,
   };
 }
 
@@ -3638,12 +3976,28 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     phase?: number;
     speedHz?: number;
     lockX?: boolean;
+    motionKind?: ObstacleMotionKind;
+    minY?: number;
+    maxY?: number;
+    trackUp?: CANNON.Vec3;
   }): void => {
+    const motionKind: ObstacleMotionKind = params.motionKind ?? "sweepX";
     const bounds = createBounds(params.trackWidth, params.obstacleWidth);
     const startX = clamp(params.localPos.x, bounds.minX, bounds.maxX);
     const lockX = params.lockX ?? (params.speedHz ?? 0) === 0;
     const minX = lockX ? startX : bounds.minX;
     const maxX = lockX ? startX : bounds.maxX;
+    const baseY = params.localPos.y;
+    const minY = params.minY ?? baseY;
+    const maxY = params.maxY ?? baseY;
+    const speedHz = params.speedHz ?? 0;
+    const isDynamic =
+      speedHz !== 0 &&
+      (motionKind === "sweepX"
+        ? maxX > minX
+        : motionKind === "sweepY"
+          ? maxY > minY
+          : motionKind === "spin");
     params.visual.position.set(startX, params.localPos.y, params.localPos.z);
     params.body.position.set(startX, params.localPos.y, params.localPos.z);
     params.body.quaternion.set(0, 0, 0, 1);
@@ -3656,11 +4010,15 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
       baseLocalPos: new CANNON.Vec3(startX, params.localPos.y, params.localPos.z),
       localQuat,
       hasLocalRotation: false,
-      isLocallyDynamic: (params.speedHz ?? 0) !== 0 && maxX > minX,
+      isLocallyDynamic: isDynamic,
+      motionKind,
       minX,
       maxX,
+      minY,
+      maxY,
       phase: params.phase ?? 0,
-      speedHz: params.speedHz ?? 0,
+      speedHz,
+      trackUp: params.trackUp ?? new CANNON.Vec3(0, 1, 0),
     };
     obstacleActors.push(actor);
     if (actor.isLocallyDynamic) {
@@ -4051,12 +4409,30 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
   ): void => {
     for (const obstacle of dynamicObstacleActors) {
       obstacle.phase += fixedDt * obstacle.speedHz * Math.PI * 2;
-      const centerX = (obstacle.minX + obstacle.maxX) / 2;
-      const amplitude = (obstacle.maxX - obstacle.minX) / 2;
-      const localX = centerX + Math.sin(obstacle.phase) * amplitude;
-
-      obstacle.baseLocalPos.x = localX;
-      obstacle.visual.position.x = localX;
+      if (obstacle.motionKind === "sweepX") {
+        const centerX = (obstacle.minX + obstacle.maxX) / 2;
+        const amplitude = (obstacle.maxX - obstacle.minX) / 2;
+        const localX = centerX + Math.sin(obstacle.phase) * amplitude;
+        obstacle.baseLocalPos.x = localX;
+        obstacle.visual.position.x = localX;
+      } else if (obstacle.motionKind === "sweepY") {
+        const centerY = (obstacle.minY + obstacle.maxY) / 2;
+        const amplitude = (obstacle.maxY - obstacle.minY) / 2;
+        const localY = centerY + Math.sin(obstacle.phase) * amplitude;
+        obstacle.baseLocalPos.y = localY;
+        obstacle.visual.position.y = localY;
+      } else if (obstacle.motionKind === "spin") {
+        const halfAngle = obstacle.phase * 0.5;
+        const s = Math.sin(halfAngle);
+        const c = Math.cos(halfAngle);
+        obstacle.localQuat.set(
+          obstacle.trackUp.x * s,
+          obstacle.trackUp.y * s,
+          obstacle.trackUp.z * s,
+          c,
+        );
+        obstacle.hasLocalRotation = true;
+      }
     }
 
     for (const obstacle of obstacleActors) {
