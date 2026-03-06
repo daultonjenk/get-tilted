@@ -813,9 +813,10 @@ export function HelloMarble() {
       return;
     }
     if (gameMode === "solo") {
+      const soloSeed = randomTrackSeed("solo");
       applyTrackConfigRef.current(
         buildTrackConfig(
-          trackLabSeedRef.current,
+          soloSeed,
           trackLabPieceCountRef.current,
           "builtin_plus_custom",
           trackLabCustomPiecesRef.current,
