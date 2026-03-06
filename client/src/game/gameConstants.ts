@@ -88,6 +88,9 @@ export const DEFAULT_TUNING: TuningState = {
   showObjectWireframes: true,
   wireframeUsesObjectTransparency: true,
   shadowMapSize: 1024,
+  shadowLightOffsetX: 10,
+  shadowLightOffsetY: 14,
+  shadowLightOffsetZ: 8,
 };
 
 export const CAMERA_PRESETS: CameraPresetId[] = [

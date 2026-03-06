@@ -221,6 +221,8 @@ const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MIN = 0.08;
 const BLUEPRINT_OBSTACLE_CORNER_RADIUS_MAX = 0.32;
 const BLUEPRINT_OBSTACLE_CORNER_CURVE_SEGMENTS = 8;
 const BLUEPRINT_OBSTACLE_WALL_TOUCH_EPSILON = 0.03;
+// Archived test-track set piece constants are intentionally retained for future reuse.
+// Active singleplayer generation currently comes from the temporary forced-piece blueprint path.
 const TEST_TRACK_CENTER_HOLE_DIAMETER = MARBLE_RADIUS * 4;
 const TEST_TRACK_CENTER_HOLE_RADIUS = TEST_TRACK_CENTER_HOLE_DIAMETER * 0.5;
 const TEST_TRACK_HOLE_WALL_MARGIN = 0.22;

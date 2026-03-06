@@ -1540,3 +1540,43 @@ v0.8.16.0 full publish task (commit + push pending workspace changes):
     - `android/app/build.gradle`
 - Commit/push context:
   - Commit and push executed in this task.
+
+v0.8.17.0 full publish milestone (singleplayer-first track workflow + debug tuning expansion):
+- Removed active Test Track mode entry and runtime wiring in `client/src/game/HelloMarble.tsx`:
+  - Removed `Test Track` button from the main menu.
+  - Removed `testTrack` mode handling from game mode switching and race gating checks.
+  - Removed test-track-specific debug state, storage, and tuning handlers from active UI/runtime paths.
+  - Debug drawer now appears for enabled debug mode in solo/flat-plane/network contexts without a forced test-track override.
+- Preserved test-track/two-layer generation code for later reuse:
+  - Left legacy hole/drop track generation logic intact in `client/src/game/track/createTrack.ts`.
+  - Added explicit archive intent comment near test-track constants to clarify active vs parked paths.
+- Expanded tuning model and sanitization for higher-value local iteration:
+  - `maxSpeed` sanitize clamp increased from `20` to `60` in `client/src/game/gameUtils.ts`.
+  - Added directional light offset tuning fields to `TuningState` in `client/src/game/gameTypes.ts`:
+    - `shadowLightOffsetX`
+    - `shadowLightOffsetY`
+    - `shadowLightOffsetZ`
+  - Added default values in `client/src/game/gameConstants.ts`:
+    - `shadowLightOffsetX: 10`
+    - `shadowLightOffsetY: 14`
+    - `shadowLightOffsetZ: 8`
+  - Added sanitize bounds in `client/src/game/gameUtils.ts`:
+    - X/Z: `[-30, 30]`
+    - Y: `[2, 40]`
+- Upgraded scalar control UX for fine tuning past slider limits:
+  - `client/src/ui/DebugScalarControl.tsx` now supports optional numeric override input with independent clamp bounds.
+  - `Max Speed` control remains slider-capped for quick scrub (`4..20`) while numeric entry allows up to `60`.
+- Added directional light placement controls in debug tuning UI:
+  - `Light Offset X/Y/Z` sliders added in `client/src/game/HelloMarble.tsx`.
+  - Dynamic shadow framing now reads live tuning offsets each frame instead of fixed static offset.
+- Version discipline (Full Publish, behavior/UI changes):
+  - Bumped to `0.8.17.0` and synchronized Android wrapper versions in the same change:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.17.0`, `appVersionCode=81700`)
+    - `android/app/build.gradle` (`versionName=0.8.17.0`, `versionCode=81700`)
+- Verification (Full Publish Test Mode):
+  - `npm run lint` passed.
+  - `npm run typecheck` passed.
+  - `npm run build` passed.
+- Commit/push context:
+  - Commit and push executed in this task.

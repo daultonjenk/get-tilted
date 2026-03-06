@@ -8,6 +8,9 @@ type DebugScalarControlProps = {
   step: number;
   onChange: (next: number) => void;
   formatValue?: (value: number) => string;
+  allowNumericInput?: boolean;
+  clampMin?: number;
+  clampMax?: number;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -39,7 +42,14 @@ export function DebugScalarControl({
   step,
   onChange,
   formatValue,
+  allowNumericInput = false,
+  clampMin,
+  clampMax,
 }: DebugScalarControlProps) {
+  const effectiveMin =
+    typeof clampMin === "number" && Number.isFinite(clampMin) ? clampMin : min;
+  const effectiveMax =
+    typeof clampMax === "number" && Number.isFinite(clampMax) ? clampMax : max;
   const displayValue = useMemo(() => {
     if (formatValue) {
       return formatValue(value);
@@ -49,7 +59,7 @@ export function DebugScalarControl({
   }, [formatValue, step, value]);
 
   const applyDelta = (delta: number) => {
-    onChange(snapToStep(value + delta, min, max, step));
+    onChange(snapToStep(value + delta, effectiveMin, effectiveMax, step));
   };
 
   return (
@@ -69,8 +79,10 @@ export function DebugScalarControl({
           min={min}
           max={max}
           step={step}
-          value={value}
-          onChange={(event) => onChange(snapToStep(Number(event.target.value), min, max, step))}
+          value={clamp(value, min, max)}
+          onChange={(event) =>
+            onChange(snapToStep(Number(event.target.value), effectiveMin, effectiveMax, step))
+          }
           aria-label={label}
         />
         <button
@@ -82,6 +94,25 @@ export function DebugScalarControl({
           +
         </button>
       </div>
+      {allowNumericInput ? (
+        <div className="controlRow">
+          <input
+            type="number"
+            min={effectiveMin}
+            max={effectiveMax}
+            step={step}
+            value={Number.isFinite(value) ? value : 0}
+            onChange={(event) => {
+              const parsed = Number(event.target.value);
+              if (!Number.isFinite(parsed)) {
+                return;
+              }
+              onChange(snapToStep(parsed, effectiveMin, effectiveMax, step));
+            }}
+            aria-label={`${label} numeric input`}
+          />
+        </div>
+      ) : null}
       <span className="controlValueChip">{displayValue}</span>
     </label>
   );

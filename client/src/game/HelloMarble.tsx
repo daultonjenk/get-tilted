@@ -174,7 +174,6 @@ const COLLISION_GROUP_OBSTACLE = 1 << 3;
 const COLLISION_MASK_MARBLE =
   COLLISION_GROUP_TRACK_FLOOR | COLLISION_GROUP_TRACK_WALL | COLLISION_GROUP_OBSTACLE;
 const COLLISION_MASK_TRACK = COLLISION_GROUP_MARBLE;
-const SHADOW_LIGHT_OFFSET = new THREE.Vector3(10, 14, 8);
 const CONTACT_SHADOW_RAYCAST_MAX_DIST = 5;
 const CONTACT_SHADOW_FADE_MAX_DIST = 1.8;
 const CONTACT_SHADOW_SURFACE_OFFSET = 0.02;
@@ -185,32 +184,23 @@ const SCENE_BACKGROUND_COLOR = 0x0b1320;
 const CAMERA_FAR_PLANE = 2200;
 const DISTANCE_FADE_START = 350;
 const DISTANCE_FADE_END = 1200;
-type TestTrackManualPieceKind = NonNullable<
-  NonNullable<CreateTrackOptions["blueprintObstacleSettings"]>["manualTestPieces"]
->[number]["kind"];
-type TestTrackTunablePieceSpec = {
-  placementIndex: number;
-  trackIndex: number;
-  kind: TestTrackManualPieceKind;
-  label: string;
-  obstacleSlotCount: number;
-};
-const TEST_TRACK_TUNABLE_PIECES: TestTrackTunablePieceSpec[] = [];
-const TEST_TRACK_DEBUG_STORAGE_KEY = "get-tilted:v0.8.6.1:test-track-debug-settings";
 const EDITOR_LAYOUT_STORAGE_KEY = "get-tilted:v0.8.7.0:editor-layout";
 const EDITOR_VIEWBOX_WIDTH = 760;
 const EDITOR_VIEWBOX_HEIGHT = 420;
 const EDITOR_TRACK_PADDING = 34;
-const TEST_TRACK_OBSTACLE_SCALE_MIN = 0.5;
-const TEST_TRACK_OBSTACLE_SCALE_MAX = 1.8;
-const TEST_TRACK_LENGTH_SCALE_MIN = 0.6;
-const TEST_TRACK_LENGTH_SCALE_MAX = 1.8;
-const TEST_TRACK_WIDTH_MIN = DEFAULT_RUNTIME_TRACK_WIDTH;
-const TEST_TRACK_WIDTH_MAX = DEFAULT_RUNTIME_TRACK_WIDTH;
+const MAX_SPEED_SLIDER_MIN = 4;
+const MAX_SPEED_SLIDER_MAX = 20;
+const MAX_SPEED_TUNING_MAX = 60;
+const SHADOW_LIGHT_OFFSET_X_MIN = -30;
+const SHADOW_LIGHT_OFFSET_X_MAX = 30;
+const SHADOW_LIGHT_OFFSET_Y_MIN = 2;
+const SHADOW_LIGHT_OFFSET_Y_MAX = 40;
+const SHADOW_LIGHT_OFFSET_Z_MIN = -30;
+const SHADOW_LIGHT_OFFSET_Z_MAX = 30;
 type MenuScreen = "main" | "options" | "trackLab" | "editor";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
-type TrackLayoutPreset = "default" | "testTrack" | "flatPlane";
+type TrackLayoutPreset = "default" | "flatPlane";
 const SOLO_TRACK_GENERATION_POLICY: TrackGenerationPolicy = "singleplayer_camera_friendly_10";
 
 type EditorShapeDraft = {
@@ -239,14 +229,7 @@ type RuntimeTrackConfig = {
   customPieces: TrackPieceTemplate[];
   layoutPreset: TrackLayoutPreset;
   generationPolicy?: TrackGenerationPolicy;
-  testTrackDebugSettings?: TestTrackDebugSettings;
   trackVisualSettings?: TrackVisualSettings;
-};
-
-type TestTrackDebugSettings = {
-  trackWidth: number;
-  setPieceLengthScale: number;
-  pieceObstacleScales: number[][];
 };
 
 type TrackVisualSettings = {
@@ -306,76 +289,6 @@ function readStoredTrackLibrary(): TrackPieceTemplate[] {
     return sanitizeTrackPieceLibrary(parsed);
   } catch {
     return [];
-  }
-}
-
-function createDefaultTestTrackDebugSettings(): TestTrackDebugSettings {
-  return {
-    trackWidth: DEFAULT_RUNTIME_TRACK_WIDTH,
-    setPieceLengthScale: 1,
-    pieceObstacleScales: TEST_TRACK_TUNABLE_PIECES.map((piece) =>
-      Array.from({ length: piece.obstacleSlotCount }, () => 1),
-    ),
-  };
-}
-
-function sanitizeTestTrackDebugSettings(input: unknown): TestTrackDebugSettings {
-  const defaults = createDefaultTestTrackDebugSettings();
-  if (!input || typeof input !== "object") {
-    return defaults;
-  }
-  const value = input as Partial<TestTrackDebugSettings> & {
-    obstacleScales?: unknown;
-  };
-  const trackWidth = clamp(
-    typeof value.trackWidth === "number" && Number.isFinite(value.trackWidth)
-      ? value.trackWidth
-      : defaults.trackWidth,
-    TEST_TRACK_WIDTH_MIN,
-    TEST_TRACK_WIDTH_MAX,
-  );
-  const setPieceLengthScale = clamp(
-    typeof value.setPieceLengthScale === "number" && Number.isFinite(value.setPieceLengthScale)
-      ? value.setPieceLengthScale
-      : defaults.setPieceLengthScale,
-    TEST_TRACK_LENGTH_SCALE_MIN,
-    TEST_TRACK_LENGTH_SCALE_MAX,
-  );
-  const rawPieceObstacleScales = Array.isArray(value.pieceObstacleScales)
-    ? value.pieceObstacleScales
-    : [];
-  const legacyObstacleScales = Array.isArray(value.obstacleScales) ? value.obstacleScales : [];
-  const pieceObstacleScales = TEST_TRACK_TUNABLE_PIECES.map((piece, pieceIndex) => {
-    const rawPiece = rawPieceObstacleScales[pieceIndex];
-    return Array.from({ length: piece.obstacleSlotCount }, (_, obstacleIndex) => {
-      const candidate = Array.isArray(rawPiece)
-        ? rawPiece[obstacleIndex]
-        : legacyObstacleScales[obstacleIndex];
-      if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
-        return 1;
-      }
-      return clamp(candidate, TEST_TRACK_OBSTACLE_SCALE_MIN, TEST_TRACK_OBSTACLE_SCALE_MAX);
-    });
-  });
-  return {
-    trackWidth,
-    setPieceLengthScale,
-    pieceObstacleScales,
-  };
-}
-
-function readStoredTestTrackDebugSettings(): TestTrackDebugSettings {
-  if (typeof window === "undefined") {
-    return createDefaultTestTrackDebugSettings();
-  }
-  const raw = window.localStorage.getItem(TEST_TRACK_DEBUG_STORAGE_KEY);
-  if (!raw) {
-    return createDefaultTestTrackDebugSettings();
-  }
-  try {
-    return sanitizeTestTrackDebugSettings(JSON.parse(raw));
-  } catch {
-    return createDefaultTestTrackDebugSettings();
   }
 }
 
@@ -570,7 +483,6 @@ function buildTrackConfig(
   catalogMode: TrackCatalogMode,
   customPieces: TrackPieceTemplate[],
   layoutPreset: TrackLayoutPreset = "default",
-  testTrackDebugSettings?: TestTrackDebugSettings,
   trackVisualSettings?: TrackVisualSettings,
   generationPolicy: TrackGenerationPolicy = "default",
 ): RuntimeTrackConfig {
@@ -585,9 +497,6 @@ function buildTrackConfig(
     customPieces: sanitizeTrackPieceLibrary(customPieces),
     layoutPreset,
     generationPolicy: sanitizedGenerationPolicy,
-    testTrackDebugSettings: testTrackDebugSettings
-      ? sanitizeTestTrackDebugSettings(testTrackDebugSettings)
-      : undefined,
     trackVisualSettings: sanitizeTrackVisualSettings(trackVisualSettings),
   };
 }
@@ -713,12 +622,6 @@ export function HelloMarble() {
   const [editorShapeDraft, setEditorShapeDraft] = useState<EditorShapeDraft>(() =>
     createDefaultEditorShapeDraft("straight"),
   );
-  const [testTrackDebugSettings, setTestTrackDebugSettings] = useState<TestTrackDebugSettings>(() =>
-    readStoredTestTrackDebugSettings(),
-  );
-  const [testTrackPiecePanelsOpen, setTestTrackPiecePanelsOpen] = useState<boolean[]>(() =>
-    TEST_TRACK_TUNABLE_PIECES.map((_, index) => index === 0),
-  );
   const [multiplayerTrackSeed, setMultiplayerTrackSeed] = useState(DEFAULT_TRACK_SEED);
 
   const tiltStatusRef = useRef(tiltStatus);
@@ -751,7 +654,6 @@ export function HelloMarble() {
   const editorLayoutRef = useRef(editorLayout);
   const editorSvgRef = useRef<SVGSVGElement | null>(null);
   const editorDragStateRef = useRef<EditorDragState | null>(null);
-  const testTrackDebugSettingsRef = useRef(testTrackDebugSettings);
   const multiplayerTrackSeedRef = useRef(multiplayerTrackSeed);
 
   useEffect(() => {
@@ -893,20 +795,6 @@ export function HelloMarble() {
 
   useEffect(() => {
     const visualSettings = toTrackVisualSettingsFromTuning(tuningRef.current);
-    if (gameMode === "testTrack") {
-      applyTrackConfigRef.current(
-        buildTrackConfig(
-          trackLabSeedRef.current,
-          trackLabPieceCountRef.current,
-          "builtin",
-          [],
-          "testTrack",
-          testTrackDebugSettingsRef.current,
-          visualSettings,
-        ),
-      );
-      return;
-    }
     if (gameMode === "flatPlane") {
       applyTrackConfigRef.current(
         buildTrackConfig(
@@ -915,7 +803,6 @@ export function HelloMarble() {
           "builtin",
           [],
           "flatPlane",
-          undefined,
           visualSettings,
         ),
       );
@@ -929,7 +816,6 @@ export function HelloMarble() {
           "builtin_plus_custom",
           trackLabCustomPiecesRef.current,
           "default",
-          undefined,
           visualSettings,
           SOLO_TRACK_GENERATION_POLICY,
         ),
@@ -1063,15 +949,6 @@ export function HelloMarble() {
   }, [editorLayout.template]);
 
   useEffect(() => {
-    testTrackDebugSettingsRef.current = sanitizeTestTrackDebugSettings(testTrackDebugSettings);
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      TEST_TRACK_DEBUG_STORAGE_KEY,
-      JSON.stringify(testTrackDebugSettingsRef.current),
-    );
-  }, [testTrackDebugSettings]);
-
-  useEffect(() => {
     multiplayerTrackSeedRef.current = sanitizeTrackSeed(multiplayerTrackSeed);
   }, [multiplayerTrackSeed]);
 
@@ -1148,7 +1025,11 @@ export function HelloMarble() {
     scene.add(ambientLight);
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(6, 8, 5);
+    directionalLight.position.set(
+      tuningRef.current.shadowLightOffsetX,
+      tuningRef.current.shadowLightOffsetY,
+      tuningRef.current.shadowLightOffsetZ,
+    );
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.set(tuningRef.current.shadowMapSize, tuningRef.current.shadowMapSize);
     directionalLight.shadow.camera.near = 0.5;
@@ -1170,7 +1051,6 @@ export function HelloMarble() {
       "builtin_plus_custom",
       trackLabCustomPiecesRef.current,
       "default",
-      undefined,
       toTrackVisualSettingsFromTuning(tuningRef.current),
     );
     let track = createTrack(createTrackOptionsFromConfig(initialTrackConfig));
@@ -1369,6 +1249,7 @@ export function HelloMarble() {
     const shadowNormalMatrix = new THREE.Matrix3();
     const shadowHitResults: THREE.Intersection<THREE.Object3D<THREE.Object3DEventMap>>[] = [];
     const shadowLightTarget = new THREE.Vector3();
+    const shadowLightOffset = new THREE.Vector3();
     // Pre-allocated tuples for network sends to avoid per-send GC pressure.
     const sendPos: [number, number, number] = [0, 0, 0];
     const sendQuat: [number, number, number, number] = [0, 0, 0, 0];
@@ -1491,9 +1372,15 @@ export function HelloMarble() {
     };
 
     const updateDynamicShadowFraming = (): void => {
+      const currentTuning = tuningRef.current;
+      shadowLightOffset.set(
+        currentTuning.shadowLightOffsetX,
+        currentTuning.shadowLightOffsetY,
+        currentTuning.shadowLightOffsetZ,
+      );
       shadowLightTarget.copy(marbleMesh.position);
       directionalLight.target.position.copy(shadowLightTarget);
-      directionalLight.position.copy(shadowLightTarget).add(SHADOW_LIGHT_OFFSET);
+      directionalLight.position.copy(shadowLightTarget).add(shadowLightOffset);
       directionalLight.target.updateMatrixWorld();
       directionalLight.updateMatrixWorld();
     };
@@ -2281,7 +2168,6 @@ export function HelloMarble() {
                 "builtin",
                 [],
                 "default",
-                undefined,
                 toTrackVisualSettingsFromTuning(tuningRef.current),
               ),
             );
@@ -2319,7 +2205,6 @@ export function HelloMarble() {
               "builtin",
               [],
               "default",
-              undefined,
               toTrackVisualSettingsFromTuning(tuningRef.current),
             );
             setMultiplayerTrackSeed(seededConfig.seed);
@@ -2642,7 +2527,6 @@ export function HelloMarble() {
     respawnMarble(false);
     if (
       gameModeRef.current !== "solo" &&
-      gameModeRef.current !== "testTrack" &&
       gameModeRef.current !== "flatPlane"
     ) {
       freezeMarble();
@@ -2698,7 +2582,6 @@ export function HelloMarble() {
       respawnMarble(false);
       if (
         gameModeRef.current !== "solo" &&
-        gameModeRef.current !== "testTrack" &&
         gameModeRef.current !== "flatPlane"
       ) {
         freezeMarble();
@@ -3465,7 +3348,6 @@ export function HelloMarble() {
             countdownGoHandledRef.current = true;
             if (
               gameModeRef.current === "solo" ||
-              gameModeRef.current === "testTrack" ||
               gameModeRef.current === "flatPlane"
             ) {
               unfreezeMarbleRef.current();
@@ -3479,7 +3361,6 @@ export function HelloMarble() {
             countdownGoHandledRef.current = true;
             if (
               gameModeRef.current === "solo" ||
-              gameModeRef.current === "testTrack" ||
               gameModeRef.current === "flatPlane"
             ) {
               unfreezeMarbleRef.current();
@@ -3888,7 +3769,7 @@ export function HelloMarble() {
   const showingOptionsCamera = showOptionsMenu && optionsSubmenu === "camera";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
   const showSoloResult =
-    (gameMode === "solo" || gameMode === "testTrack" || gameMode === "flatPlane") &&
+    (gameMode === "solo" || gameMode === "flatPlane") &&
     trialState === "finished";
   const multiplayerRaceInProgress =
     gameMode === "multiplayer" &&
@@ -4066,77 +3947,6 @@ export function HelloMarble() {
       }
       return { ...prev, [key]: value };
     });
-  };
-
-  const updateTestTrackSetting = <K extends keyof TestTrackDebugSettings>(
-    key: K,
-    value: TestTrackDebugSettings[K],
-  ) => {
-    setTestTrackDebugSettings((prev) =>
-      sanitizeTestTrackDebugSettings({
-        ...prev,
-        [key]: value,
-      }),
-    );
-  };
-
-  const updateTestTrackObstacleScale = (
-    pieceIndex: number,
-    obstacleIndex: number,
-    value: number,
-  ) => {
-    setTestTrackDebugSettings((prev) => {
-      const nextPieceScales = prev.pieceObstacleScales.map((pieceScales) => [...pieceScales]);
-      while (nextPieceScales.length < TEST_TRACK_TUNABLE_PIECES.length) {
-        nextPieceScales.push([]);
-      }
-      const targetPieceScales = [...(nextPieceScales[pieceIndex] ?? [])];
-      const targetCount = TEST_TRACK_TUNABLE_PIECES[pieceIndex]?.obstacleSlotCount ?? 0;
-      while (targetPieceScales.length < targetCount) {
-        targetPieceScales.push(1);
-      }
-      targetPieceScales[obstacleIndex] = value;
-      nextPieceScales[pieceIndex] = targetPieceScales;
-      return sanitizeTestTrackDebugSettings({
-        ...prev,
-        pieceObstacleScales: nextPieceScales,
-      });
-    });
-  };
-
-  const resetTestTrackDebugSettings = () => {
-    setTestTrackDebugSettings(createDefaultTestTrackDebugSettings());
-  };
-
-  const setTestTrackPiecePanelOpen = (pieceIndex: number, open: boolean) => {
-    setTestTrackPiecePanelsOpen((prev) => {
-      const next = [...prev];
-      while (next.length < TEST_TRACK_TUNABLE_PIECES.length) {
-        next.push(false);
-      }
-      next[pieceIndex] = open;
-      return next;
-    });
-  };
-
-  const applyTestTrackDebugSettings = () => {
-    const sanitized = sanitizeTestTrackDebugSettings(testTrackDebugSettingsRef.current);
-    setTestTrackDebugSettings(sanitized);
-    if (gameModeRef.current !== "testTrack") {
-      return;
-    }
-    applyTrackConfigRef.current(
-      buildTrackConfig(
-        trackLabSeedRef.current,
-        trackLabPieceCountRef.current,
-        "builtin",
-        [],
-        "testTrack",
-        sanitized,
-        toTrackVisualSettingsFromTuning(tuningRef.current),
-      ),
-    );
-    void startSoloRaceSequence();
   };
 
   const resetCameraOptionsToDefault = () => {
@@ -4757,7 +4567,6 @@ export function HelloMarble() {
       "builtin_plus_custom",
       trackLabCustomPieces,
       "default",
-      undefined,
       toTrackVisualSettingsFromTuning(tuningRef.current),
     );
     setTrackLabSeed(nextConfig.seed);
@@ -4880,7 +4689,6 @@ export function HelloMarble() {
       "builtin_plus_custom",
       trackLabCustomPiecesRef.current,
       "default",
-      undefined,
       toTrackVisualSettingsFromTuning(tuningRef.current),
       SOLO_TRACK_GENERATION_POLICY,
     );
@@ -4934,7 +4742,7 @@ export function HelloMarble() {
     if (nextMode === gameMode) {
       return;
     }
-    if (nextMode !== "solo" && nextMode !== "testTrack" && nextMode !== "flatPlane") {
+    if (nextMode !== "solo" && nextMode !== "flatPlane") {
       soloStartSequenceRef.current += 1;
     }
     setGameMode(nextMode);
@@ -4957,21 +4765,6 @@ export function HelloMarble() {
       void startSoloRaceSequence();
       return;
     }
-    if (nextMode === "testTrack") {
-      applyTrackConfigRef.current(
-        buildTrackConfig(
-          trackLabSeedRef.current,
-          trackLabPieceCountRef.current,
-          "builtin",
-          [],
-          "testTrack",
-          testTrackDebugSettings,
-          toTrackVisualSettingsFromTuning(tuningRef.current),
-        ),
-      );
-      void startSoloRaceSequence();
-      return;
-    }
     if (nextMode === "flatPlane") {
       applyTrackConfigRef.current(
         buildTrackConfig(
@@ -4980,7 +4773,6 @@ export function HelloMarble() {
           "builtin",
           [],
           "flatPlane",
-          undefined,
           toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
@@ -4996,7 +4788,6 @@ export function HelloMarble() {
           "builtin",
           [],
           "default",
-          undefined,
           toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
@@ -5016,7 +4807,6 @@ export function HelloMarble() {
           "builtin_plus_custom",
           trackLabCustomPiecesRef.current,
           "default",
-          undefined,
           toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
@@ -5090,13 +4880,6 @@ export function HelloMarble() {
                 onClick={() => switchGameMode("solo")}
               >
                 Singleplayer
-              </button>
-              <button
-                type="button"
-                className="menuActionButton"
-                onClick={() => switchGameMode("testTrack")}
-              >
-                Test Track
               </button>
               <button
                 type="button"
@@ -6335,9 +6118,8 @@ export function HelloMarble() {
       ) : null}
       {(showMultiplayerNetworkUi ||
         gameMode === "solo" ||
-        gameMode === "testTrack" ||
         gameMode === "flatPlane") &&
-      (debugMenuEnabled || gameMode === "testTrack") ? (
+      debugMenuEnabled ? (
         <DebugDrawer
           open={drawerOpen}
           onToggle={() => setDrawerOpen((open) => !open)}
@@ -6348,70 +6130,15 @@ export function HelloMarble() {
         {activeDebugTab === "tuning" ? (
           <div className="debugSection">
             <p className="tiltMessage">{statusMessage}</p>
-            {gameMode === "testTrack" ? (
-              <>
-                <p className="tiltStatus">Test Track Piece Tuning</p>
-                <DebugScalarControl
-                  label="Track Width"
-                  min={TEST_TRACK_WIDTH_MIN}
-                  max={TEST_TRACK_WIDTH_MAX}
-                  step={0.1}
-                  value={testTrackDebugSettings.trackWidth}
-                  onChange={(value) => updateTestTrackSetting("trackWidth", value)}
-                />
-                <DebugScalarControl
-                  label="Set Piece Length Scale"
-                  min={TEST_TRACK_LENGTH_SCALE_MIN}
-                  max={TEST_TRACK_LENGTH_SCALE_MAX}
-                  step={0.01}
-                  value={testTrackDebugSettings.setPieceLengthScale}
-                  onChange={(value) => updateTestTrackSetting("setPieceLengthScale", value)}
-                />
-                {TEST_TRACK_TUNABLE_PIECES.map((piece, pieceIndex) => {
-                  const pieceScales = testTrackDebugSettings.pieceObstacleScales[pieceIndex] ?? [];
-                  return (
-                    <details
-                      key={`test-track-piece-${piece.trackIndex}`}
-                      className="testTrackPieceTuningGroup"
-                      open={testTrackPiecePanelsOpen[pieceIndex] ?? false}
-                      onToggle={(event) =>
-                        setTestTrackPiecePanelOpen(pieceIndex, event.currentTarget.open)
-                      }
-                    >
-                      <summary>{`TRACK ${piece.trackIndex} · ${piece.label}`}</summary>
-                      {pieceScales.map((value, obstacleIndex) => (
-                        <DebugScalarControl
-                          key={`test-track-piece-${piece.trackIndex}-obstacle-${obstacleIndex + 1}`}
-                          label={`Obstacle ${obstacleIndex + 1} Scale`}
-                          min={TEST_TRACK_OBSTACLE_SCALE_MIN}
-                          max={TEST_TRACK_OBSTACLE_SCALE_MAX}
-                          step={0.01}
-                          value={value}
-                          onChange={(next) =>
-                            updateTestTrackObstacleScale(pieceIndex, obstacleIndex, next)
-                          }
-                        />
-                      ))}
-                    </details>
-                  );
-                })}
-                <div className="debugButtonRow">
-                  <button type="button" onClick={applyTestTrackDebugSettings}>
-                    Apply Test Track Tuning
-                  </button>
-                  <button type="button" onClick={resetTestTrackDebugSettings}>
-                    Reset Piece Tuning
-                  </button>
-                </div>
-              </>
-            ) : null}
             <DebugScalarControl
               label="Max Speed"
-              min={4}
-              max={20}
+              min={MAX_SPEED_SLIDER_MIN}
+              max={MAX_SPEED_SLIDER_MAX}
               step={0.1}
               value={tuning.maxSpeed}
               onChange={(value) => updateTuning("maxSpeed", value)}
+              allowNumericInput
+              clampMax={MAX_SPEED_TUNING_MAX}
             />
             <DebugScalarControl
               label="Tilt Strength"
@@ -6538,6 +6265,30 @@ export function HelloMarble() {
                 </select>
               </div>
             </label>
+            <DebugScalarControl
+              label="Light Offset X"
+              min={SHADOW_LIGHT_OFFSET_X_MIN}
+              max={SHADOW_LIGHT_OFFSET_X_MAX}
+              step={0.5}
+              value={tuning.shadowLightOffsetX}
+              onChange={(value) => updateTuning("shadowLightOffsetX", value)}
+            />
+            <DebugScalarControl
+              label="Light Offset Y"
+              min={SHADOW_LIGHT_OFFSET_Y_MIN}
+              max={SHADOW_LIGHT_OFFSET_Y_MAX}
+              step={0.5}
+              value={tuning.shadowLightOffsetY}
+              onChange={(value) => updateTuning("shadowLightOffsetY", value)}
+            />
+            <DebugScalarControl
+              label="Light Offset Z"
+              min={SHADOW_LIGHT_OFFSET_Z_MIN}
+              max={SHADOW_LIGHT_OFFSET_Z_MAX}
+              step={0.5}
+              value={tuning.shadowLightOffsetZ}
+              onChange={(value) => updateTuning("shadowLightOffsetZ", value)}
+            />
             <label className="controlLabel controlLabelCheckbox">
               <input
                 type="checkbox"

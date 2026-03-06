@@ -82,7 +82,7 @@ export function sanitizeTuning(input: unknown): TuningState {
   if (typeof value.gyroSensitivity === "number") {
     base.gyroSensitivity = clamp(value.gyroSensitivity, 0.8, 1.2);
   }
-  if (typeof value.maxSpeed === "number") base.maxSpeed = clamp(value.maxSpeed, 4, 20);
+  if (typeof value.maxSpeed === "number") base.maxSpeed = clamp(value.maxSpeed, 4, 60);
   if (typeof value.maxTiltDeg === "number") {
     base.maxTiltDeg = clamp(value.maxTiltDeg, 6, 25);
   }
@@ -179,6 +179,15 @@ export function sanitizeTuning(input: unknown): TuningState {
   }
   if (value.shadowMapSize === 512 || value.shadowMapSize === 1024) {
     base.shadowMapSize = value.shadowMapSize;
+  }
+  if (typeof value.shadowLightOffsetX === "number") {
+    base.shadowLightOffsetX = clamp(value.shadowLightOffsetX, -30, 30);
+  }
+  if (typeof value.shadowLightOffsetY === "number") {
+    base.shadowLightOffsetY = clamp(value.shadowLightOffsetY, 2, 40);
+  }
+  if (typeof value.shadowLightOffsetZ === "number") {
+    base.shadowLightOffsetZ = clamp(value.shadowLightOffsetZ, -30, 30);
   }
 
   return base;

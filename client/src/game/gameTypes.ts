@@ -40,11 +40,14 @@ export type TuningState = {
   showObjectWireframes: boolean;
   wireframeUsesObjectTransparency: boolean;
   shadowMapSize: 512 | 1024;
+  shadowLightOffsetX: number;
+  shadowLightOffsetY: number;
+  shadowLightOffsetZ: number;
 };
 
 export type TrialState = "idle" | "running" | "finished";
 export type RacePhase = "waiting" | "countdown" | "racing";
-export type GameMode = "unselected" | "solo" | "testTrack" | "flatPlane" | "multiplayer";
+export type GameMode = "unselected" | "solo" | "flatPlane" | "multiplayer";
 
 export type GhostSnapshot = {
   seq: number | undefined;
