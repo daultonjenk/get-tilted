@@ -1,3 +1,8 @@
+import {
+  DEFAULT_RUNTIME_TRACK_WIDTH,
+  buildTemporaryThreeStraightForcedPieces,
+} from "./temporary/temporaryThreeStraightTrack";
+
 export type TrackPieceKind =
   | "straight"
   | "arc90"
@@ -111,7 +116,7 @@ export const TRACK_PIECE_COUNT_MIN = 6;
 export const TRACK_PIECE_COUNT_MAX = 48;
 export const TRACK_PIECE_COUNT_DEFAULT = 16;
 const TRACK_SEED_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const FALLBACK_TRACK_WIDTH = 9;
+const FALLBACK_TRACK_WIDTH = DEFAULT_RUNTIME_TRACK_WIDTH;
 const ENABLED_RUNTIME_KINDS: ReadonlySet<TrackPieceKind> = new Set(["straight", "arc90"]);
 
 const DEFAULT_CUSTOM_TEMPLATE: Omit<TrackPieceTemplate, "id" | "label"> = {
@@ -128,83 +133,9 @@ const DEFAULT_CUSTOM_TEMPLATE: Omit<TrackPieceTemplate, "id" | "label"> = {
   railRight: true,
 };
 
-export const BUILTIN_TRACK_PIECES: ReadonlyArray<TrackPieceTemplate> = [
-  {
-    id: "builtin-straight",
-    label: "Straight",
-    kind: "straight",
-    weight: 1.45,
-    length: 13,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 0,
-    turnDirection: "left",
-    turnDeg: 0,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: "builtin-arc-left",
-    label: "Arc 90 Left",
-    kind: "arc90",
-    weight: 1,
-    length: 14,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 8,
-    turnDirection: "left",
-    turnDeg: 90,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: "builtin-arc-right",
-    label: "Arc 90 Right",
-    kind: "arc90",
-    weight: 1,
-    length: 14,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: -8,
-    turnDirection: "right",
-    turnDeg: 90,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: ARC90_OBSTACLE_1_SETPIECE_ID_LEFT,
-    label: "Arc 90 Obstacle 1 (Left Set)",
-    kind: "arc90",
-    weight: 0.52,
-    length: 14,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 8,
-    turnDirection: "left",
-    turnDeg: 90,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: ARC90_OBSTACLE_1_SETPIECE_ID_RIGHT,
-    label: "Arc 90 Obstacle 1 (Right Set)",
-    kind: "arc90",
-    weight: 0.52,
-    length: 14,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: -8,
-    turnDirection: "right",
-    turnDeg: 90,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-];
+// Temporary active catalog while legacy tracks remain quarantined under ./temporary/.
+export const BUILTIN_TRACK_PIECES: ReadonlyArray<TrackPieceTemplate> =
+  buildTemporaryThreeStraightForcedPieces();
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);

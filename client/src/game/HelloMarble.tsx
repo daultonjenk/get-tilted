@@ -130,6 +130,11 @@ import {
   type TrackPieceTemplate,
 } from "./track/modularTrack";
 import {
+  DEFAULT_RUNTIME_TRACK_WIDTH,
+  TEMPORARY_ACTIVE_TRACK_PIECE_COUNT,
+  buildTemporaryThreeStraightForcedPieces,
+} from "./track/temporary/temporaryThreeStraightTrack";
+import {
   EDITOR_REFERENCE_MARBLE_RADIUS,
   clampEditorReferenceMarble,
   clampEditorObstacle,
@@ -176,23 +181,13 @@ const CONTACT_SHADOW_SURFACE_OFFSET = 0.02;
 const CONTACT_SHADOW_MAX_OPACITY = 0.22;
 const CONTACT_SHADOW_BASE_SCALE = 0.52;
 const CONTACT_SHADOW_SCALE_RANGE = 0.26;
-const TEST_TRACK_MANUAL_SEQUENCE = [
-  { kind: "straight-center-hole-respawn" },
-  { kind: "finish" },
-] as const;
-const TEST_TRACK_LAYOUT_PIECE_LENGTHS = {
-  "straight-center-hole-respawn": 16,
-} as const;
-const TEST_TRACK_SET_PIECE_LENGTHS = {
-  "straight-center-hole-respawn": 16,
-} as const;
-type TestTrackManualPieceKind = keyof typeof TEST_TRACK_SET_PIECE_LENGTHS;
-const TEST_TRACK_PIECE_LABELS: Record<TestTrackManualPieceKind, string> = {
-  "straight-center-hole-respawn": "Two-Level Circular Drop",
-};
-const TEST_TRACK_OBSTACLE_SLOT_COUNT_BY_KIND: Record<TestTrackManualPieceKind, number> = {
-  "straight-center-hole-respawn": 0,
-};
+const SCENE_BACKGROUND_COLOR = 0x0b1320;
+const CAMERA_FAR_PLANE = 2200;
+const DISTANCE_FADE_START = 350;
+const DISTANCE_FADE_END = 1200;
+type TestTrackManualPieceKind = NonNullable<
+  NonNullable<CreateTrackOptions["blueprintObstacleSettings"]>["manualTestPieces"]
+>[number]["kind"];
 type TestTrackTunablePieceSpec = {
   placementIndex: number;
   trackIndex: number;
@@ -200,24 +195,7 @@ type TestTrackTunablePieceSpec = {
   label: string;
   obstacleSlotCount: number;
 };
-const TEST_TRACK_TUNABLE_PIECES: TestTrackTunablePieceSpec[] = TEST_TRACK_MANUAL_SEQUENCE.flatMap(
-  (spec, placementIndex) => {
-    if (!(spec.kind in TEST_TRACK_SET_PIECE_LENGTHS)) {
-      return [];
-    }
-    const kind = spec.kind as TestTrackManualPieceKind;
-    return [
-      {
-        placementIndex,
-        trackIndex: 0,
-        kind,
-        label: TEST_TRACK_PIECE_LABELS[kind],
-        obstacleSlotCount: TEST_TRACK_OBSTACLE_SLOT_COUNT_BY_KIND[kind],
-      },
-    ];
-  },
-).map((entry, index) => ({ ...entry, trackIndex: index + 1 }));
-const TEST_TRACK_TRANSITION_STRAIGHT_LENGTH = 13;
+const TEST_TRACK_TUNABLE_PIECES: TestTrackTunablePieceSpec[] = [];
 const TEST_TRACK_DEBUG_STORAGE_KEY = "get-tilted:v0.8.6.1:test-track-debug-settings";
 const EDITOR_LAYOUT_STORAGE_KEY = "get-tilted:v0.8.7.0:editor-layout";
 const EDITOR_VIEWBOX_WIDTH = 760;
@@ -227,8 +205,8 @@ const TEST_TRACK_OBSTACLE_SCALE_MIN = 0.5;
 const TEST_TRACK_OBSTACLE_SCALE_MAX = 1.8;
 const TEST_TRACK_LENGTH_SCALE_MIN = 0.6;
 const TEST_TRACK_LENGTH_SCALE_MAX = 1.8;
-const TEST_TRACK_WIDTH_MIN = 7;
-const TEST_TRACK_WIDTH_MAX = 12;
+const TEST_TRACK_WIDTH_MIN = DEFAULT_RUNTIME_TRACK_WIDTH;
+const TEST_TRACK_WIDTH_MAX = DEFAULT_RUNTIME_TRACK_WIDTH;
 type MenuScreen = "main" | "options" | "trackLab" | "editor";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
@@ -333,7 +311,7 @@ function readStoredTrackLibrary(): TrackPieceTemplate[] {
 
 function createDefaultTestTrackDebugSettings(): TestTrackDebugSettings {
   return {
-    trackWidth: 9,
+    trackWidth: DEFAULT_RUNTIME_TRACK_WIDTH,
     setPieceLengthScale: 1,
     pieceObstacleScales: TEST_TRACK_TUNABLE_PIECES.map((piece) =>
       Array.from({ length: piece.obstacleSlotCount }, () => 1),
@@ -549,13 +527,6 @@ function toTrackDraft(piece: TrackPieceTemplate): TrackPieceDraft {
 function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOptions {
   const seed = sanitizeTrackSeed(config.seed);
   const isFlatPlane = config.layoutPreset === "flatPlane";
-  const isTestTrack = config.layoutPreset === "testTrack";
-  const generationPolicy = isTestTrack
-    ? "default"
-    : sanitizeTrackGenerationPolicy(config.generationPolicy);
-  const testTrackDebugSettings = isTestTrack
-    ? sanitizeTestTrackDebugSettings(config.testTrackDebugSettings)
-    : createDefaultTestTrackDebugSettings();
   const trackVisualSettings = sanitizeTrackVisualSettings(config.trackVisualSettings);
   if (isFlatPlane) {
     return {
@@ -568,60 +539,19 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
       },
     };
   }
-  const pieceCount = isTestTrack
-    ? TEST_TRACK_MANUAL_SEQUENCE.length
-    : sanitizeTrackPieceCount(config.pieceCount);
-  const forcedMainPieces = isTestTrack
-    ? Array.from({ length: pieceCount }, (_, index) => {
-        const spec = TEST_TRACK_MANUAL_SEQUENCE[index];
-        const isArcObstaclePiece = (spec?.kind as string) === "arc90-obstacle-1";
-        const manualKind =
-          spec && spec.kind in TEST_TRACK_PIECE_LABELS
-            ? (spec.kind as TestTrackManualPieceKind)
-            : null;
-        const piece = createDefaultCustomPiece(isArcObstaclePiece ? "arc90" : "straight");
-        piece.id =
-          isArcObstaclePiece
-            ? `test-track-arc90-obstacle-${index + 1}`
-            : manualKind
-              ? `test-track-${manualKind}-${index + 1}`
-              : `test-track-straight-${index + 1}`;
-        piece.label = isArcObstaclePiece
-          ? "Arc 90 Obstacle 1"
-          : manualKind
-            ? TEST_TRACK_PIECE_LABELS[manualKind]
-            : "Straight";
-        piece.length =
-          spec && spec.kind in TEST_TRACK_LAYOUT_PIECE_LENGTHS
-            ? TEST_TRACK_LAYOUT_PIECE_LENGTHS[
-                spec.kind as keyof typeof TEST_TRACK_LAYOUT_PIECE_LENGTHS
-              ] * testTrackDebugSettings.setPieceLengthScale
-            : TEST_TRACK_TRANSITION_STRAIGHT_LENGTH;
-        piece.turnDeg = isArcObstaclePiece ? 90 : 0;
-        piece.bankDeg = isArcObstaclePiece ? 8 : 0;
-        piece.turnDirection = "left";
-        piece.weight = 1;
-        return piece;
-      })
-    : undefined;
-  const manualTestPieces = isTestTrack
-    ? TEST_TRACK_TUNABLE_PIECES.map((piece) => ({
-        placementIndex: piece.placementIndex,
-        testPieceIndex: piece.trackIndex - 1,
-        kind: piece.kind,
-      }))
-    : undefined;
+  // Temporary quarantine mode: active generation uses a fixed forced-piece layout.
+  const forcedMainPieces = buildTemporaryThreeStraightForcedPieces();
   const blueprint = buildTrackBlueprint({
-    config: { seed, pieceCount },
-    customPieces: sanitizeTrackPieceLibrary(config.customPieces),
-    includeCustomPieces: config.catalogMode === "builtin_plus_custom",
-    trackWidth: isTestTrack ? testTrackDebugSettings.trackWidth : 9,
+    config: { seed, pieceCount: TEMPORARY_ACTIVE_TRACK_PIECE_COUNT },
+    customPieces: [],
+    includeCustomPieces: false,
+    trackWidth: DEFAULT_RUNTIME_TRACK_WIDTH,
     enableBranchPieces: false,
     maxHeadingDriftDeg: 18,
-    enforceBendPairs: true,
-    generationPolicy,
+    enforceBendPairs: false,
+    generationPolicy: "default",
     forcedMainPieces,
-    disableStarterSequence: isTestTrack,
+    disableStarterSequence: true,
   });
   return {
     seed,
@@ -631,17 +561,6 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
       showObjectWireframes: trackVisualSettings.showObjectWireframes,
       wireframeUsesObjectTransparency: trackVisualSettings.wireframeUsesObjectTransparency,
     },
-    blueprintObstacleSettings: isTestTrack
-      ? {
-          enableAutomaticObstacles: false,
-          manualTestPieces,
-          manualTestTuning: {
-            pieceObstacleScales: testTrackDebugSettings.pieceObstacleScales,
-            setPieceLengthScale: testTrackDebugSettings.setPieceLengthScale,
-            showObstacleDebugLabels: true,
-          },
-        }
-      : undefined,
   };
 }
 
@@ -1174,9 +1093,14 @@ export function HelloMarble() {
     }
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b1320);
+    scene.background = new THREE.Color(SCENE_BACKGROUND_COLOR);
+    scene.fog = new THREE.Fog(
+      SCENE_BACKGROUND_COLOR,
+      DISTANCE_FADE_START,
+      DISTANCE_FADE_END,
+    );
 
-    const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 240);
+    const camera = new THREE.PerspectiveCamera(65, 1, 0.1, CAMERA_FAR_PLANE);
     camera.position.set(0, 7.5, 0);
     camera.lookAt(0, LOOK_HEIGHT, LOOK_AHEAD);
     camera.up.set(0, 1, 0);

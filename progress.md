@@ -1295,3 +1295,248 @@ v0.8.10.0 full publish follow-up (commit remaining workspace changes):
   - `output/web-game/shot-fall-check-2.png`
 - Verification context:
   - No additional code changes beyond those already verified in the previous full publish run (`lint`, `typecheck`, `build` were already green on this working tree state).
+
+v0.8.11.0 local iteration milestone (track quarantine + temporary 3-straight generation baseline):
+- Quarantined legacy/current track definition content into `client/src/game/track/temporary/legacyTrackDefinitions.ts` with an explicit deletion-intent note:
+  - Archived prior runtime built-in track piece catalog (straight + arc + arc setpiece entries).
+  - Archived prior test-track authored sequence/constants.
+  - Archived prior authored static fallback `SEGMENTS` course definitions.
+  - File header now explicitly states these are temporary and likely should be deleted after the new generation pipeline lands.
+- Added active temporary generation module `client/src/game/track/temporary/temporaryThreeStraightTrack.ts`:
+  - New fixed temporary baseline helpers for exactly three straight pieces (`spawn`, `middle`, `finish`).
+  - New `TEMPORARY_ACTIVE_TRACK_PIECE_COUNT = 3` and `TEMPORARY_THREE_STRAIGHT_SEGMENTS` exports.
+- Rewired active modular catalog in `client/src/game/track/modularTrack.ts`:
+  - `BUILTIN_TRACK_PIECES` now sourced from `buildTemporaryThreeStraightForcedPieces()`.
+  - Legacy built-in track templates are no longer active in runtime generation.
+- Rewired runtime track option builder in `client/src/game/HelloMarble.tsx`:
+  - `createTrackOptionsFromConfig(...)` now forces non-flat generation to a temporary fixed 3-straight blueprint.
+  - Disabled active use of legacy test-track authored piece sequence for generation.
+  - Added explicit inline note indicating temporary quarantine mode behavior.
+- Updated `client/src/game/track/createTrack.ts` fallback authored loop:
+  - Removed direct use of legacy `SEGMENTS` constant.
+  - Replaced with `TEMPORARY_THREE_STRAIGHT_SEGMENTS` from the temporary active module.
+- Version discipline (significant local-iteration scope jump into track-generation architecture):
+  - Bumped to `0.8.11.0` and synchronized Android wrapper versions in the same change:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.11.0`, `appVersionCode=81100`)
+    - `android/app/build.gradle` (`versionName=0.8.11.0`, `versionCode=81100`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Mode/commit context:
+  - Local Iteration Mode followed.
+  - No commit/push performed.
+
+v0.8.11.0 local iteration follow-up (finish marker width parity):
+- Updated finish marker width to match the active track width profile in `client/src/game/track/createTrack.ts`.
+  - Blueprint path (`createTrackFromBlueprint`):
+    - Added `markerWidth = maxSegmentWidth + 0.8`.
+    - Start marker and finish marker now both use `markerWidth`.
+    - This removes the previous hardcoded wider finish marker (`FINISH_WIDTH + 1.2`).
+  - Legacy fallback path:
+    - Finish marker width now matches the start marker width (`TRACK_W + 0.8`) instead of using wider `FINISH_WIDTH + 1.2`.
+- Result:
+  - The final finish line marker no longer appears wider than the rest of the track in the current temporary 3-straight generation path.
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Version discipline:
+  - Version bump intentionally deferred; retained `0.8.11.0` (same local-iteration issue/theme).
+
+v0.8.11.0 local iteration follow-up (undo marker rollback issue + constant active straight width):
+- Fully undid the previous finish-marker patch in `client/src/game/track/createTrack.ts`:
+  - Removed blueprint `markerWidth` usage that had changed start/finish marker sizing.
+  - Restored start marker size to `TRACK_W + 0.8`.
+  - Restored finish marker size to `FINISH_WIDTH + 1.2`.
+  - This reverts the change that caused the start line to extend past the beginning walls.
+- Applied the actual active-path width-consistency fix (blueprint path only):
+  - In `buildBlueprintSweepPath(...)`, appended finish sweep samples now use `width: lastPlayable.width` instead of `FINISH_WIDTH`.
+  - In `createTrackFromBlueprint(...)`, `containmentLocal.finishHalfX` now uses `computeContainmentHalfX(maxSegmentWidth)` instead of `Math.max(FINISH_WIDTH, maxSegmentWidth)`.
+- Result:
+  - Active generated track remains constant-width through the final straight/finish extension.
+  - Start marker behavior is returned to pre-regression sizing.
+- Scope decision applied:
+  - Active path only; legacy fallback branch width model remains unchanged.
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Version discipline:
+  - Version bump intentionally deferred; retained `0.8.11.0` (same local-iteration issue/theme).
+
+v0.8.12.0 local iteration milestone (global runtime track width doubled to 18 + wall-touch start/finish lines):
+- Introduced a new runtime width source of truth in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts`:
+  - `GLOBAL_RUNTIME_TRACK_WIDTH = 18`.
+- Enforced doubled global runtime width in generation pipeline:
+  - `client/src/game/track/modularTrack.ts`:
+    - `FALLBACK_TRACK_WIDTH` now uses `GLOBAL_RUNTIME_TRACK_WIDTH` (18).
+  - `client/src/game/HelloMarble.tsx`:
+    - Runtime blueprint generation now always uses `trackWidth: GLOBAL_RUNTIME_TRACK_WIDTH`.
+    - Test-track width clamp min/max are both now `GLOBAL_RUNTIME_TRACK_WIDTH` (18), and default test-track width is 18.
+- Enforced doubled global runtime width in track construction:
+  - `client/src/game/track/createTrack.ts`:
+    - `TRACK_W` now uses `GLOBAL_RUNTIME_TRACK_WIDTH`.
+    - `FINISH_WIDTH` now equals `GLOBAL_RUNTIME_TRACK_WIDTH` (removes finish-width divergence).
+- Updated start/finish line sizing to touch both walls (inner-wall span) instead of oversizing past wall bounds:
+  - Added `computeLineSpanWidth(trackWidth)` using wall interior span formula:
+    - `trackWidth - (RAIL_INSET * 2 + RAIL_THICK)`.
+  - Blueprint path markers:
+    - Start marker width uses first sample width interior span.
+    - Finish marker width uses last sample width interior span.
+  - Fallback path markers:
+    - Start and finish marker widths both use `computeLineSpanWidth(TRACK_W)`.
+- Width continuity safeguard retained:
+  - Blueprint finish sweep extension continues to inherit `lastPlayable.width`, so end straight does not widen.
+- Version discipline (significant local-iteration runtime behavior change):
+  - Bumped to `0.8.12.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.12.0`, `appVersionCode=81200`)
+    - `android/app/build.gradle` (`versionName=0.8.12.0`, `versionCode=81200`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Mode/commit context:
+  - Local Iteration Mode followed.
+  - No commit/push performed.
+
+v0.8.13.0 local iteration milestone (very long middle + gentle 15°/−15° S-bend across non-flat runtime):
+- Updated temporary forced runtime pattern in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts` from 3 pieces to 5 pieces:
+  - `TEMPORARY_ACTIVE_TRACK_PIECE_COUNT` changed from `3` to `5`.
+  - New forced-piece sequence (applies to all non-flat runtime modes through existing wiring):
+    1) spawn straight (`length: 12`)
+    2) very long middle straight (`length: 700`)
+    3) gentle left curve (`kind: straight`, `length: 180`, `turnDeg: 15`, `turnDirection: left`)
+    4) matching gentle right curve (`kind: straight`, `length: 180`, `turnDeg: 15`, `turnDirection: right`)
+    5) finish straight (`length: 12`)
+  - All pieces keep `widthScale: 1`, rails on both sides, no tunnel roof, no extra banking/grade.
+- Updated fallback segment pattern in the same file to match new long profile:
+  - lengths: `12`, `700`, `180`, `180`, `12`
+  - yaw sequence: `0`, `0`, `+15`, `-15`, `0`.
+- Kept scope as requested for active non-flat runtime flow:
+  - Existing `HelloMarble` non-flat forced-piece generation path remains in place and now consumes the new 5-piece pattern.
+  - Updated inline comment in `client/src/game/HelloMarble.tsx` to reflect fixed forced-layout behavior (no longer “3 straight pieces”).
+- Version discipline (significant local-iteration behavior change):
+  - Bumped to `0.8.13.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.13.0`, `appVersionCode=81300`)
+    - `android/app/build.gradle` (`versionName=0.8.13.0`, `versionCode=81300`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Mode/commit context:
+  - Local Iteration Mode followed.
+  - No commit/push performed.
+
+v0.8.14.0 local iteration milestone (full-track render + late fade + dual width architecture reset):
+- Implemented full-track visibility past prior hard cutoff in `client/src/game/HelloMarble.tsx`:
+  - Increased gameplay camera far plane from `240` to `2200` via `CAMERA_FAR_PLANE`.
+- Replaced hard-cut perception with late/subtle distance fade on gameplay geometry:
+  - Added scene fog with background-matching color:
+    - `DISTANCE_FADE_START = 350`
+    - `DISTANCE_FADE_END = 1200`
+  - Applied at scene creation so distant track, obstacles, and marbles/ghosts fade together visually.
+- Reset default runtime track width back to original narrow width and introduced explicit dual-width architecture:
+  - `client/src/game/track/temporary/temporaryThreeStraightTrack.ts`:
+    - Added `DEFAULT_RUNTIME_TRACK_WIDTH = 9` (active runtime default)
+    - Added `SETPIECE_WIDE_TRACK_WIDTH = 18` (reserved for future obstacle/set-piece sections)
+- Rewired runtime width usage to narrow default:
+  - `client/src/game/track/modularTrack.ts`:
+    - `FALLBACK_TRACK_WIDTH` now uses `DEFAULT_RUNTIME_TRACK_WIDTH`.
+  - `client/src/game/HelloMarble.tsx`:
+    - Runtime blueprint generation now uses `trackWidth: DEFAULT_RUNTIME_TRACK_WIDTH`.
+    - Test-track width min/max/default now pinned to `DEFAULT_RUNTIME_TRACK_WIDTH`.
+  - `client/src/game/track/createTrack.ts`:
+    - `TRACK_W` and `FINISH_WIDTH` now use `DEFAULT_RUNTIME_TRACK_WIDTH`.
+- Marker/wall alignment behavior preserved after width rollback:
+  - Existing wall-touch marker span logic (`computeLineSpanWidth`) remains active for both start and finish lines.
+- Existing long middle + gentle S-bend pattern retained (only width architecture changed in this milestone).
+- Version discipline (significant local-iteration rendering + width architecture update):
+  - Bumped to `0.8.14.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.14.0`, `appVersionCode=81400`)
+    - `android/app/build.gradle` (`versionName=0.8.14.0`, `versionCode=81400`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Mode/commit context:
+  - Local Iteration Mode followed.
+  - No commit/push performed.
+
+v0.8.15.0 local iteration milestone (sharper S-bend retune for more careful driving):
+- Retuned temporary forced runtime pattern in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts` to increase driving precision requirements while preserving the same 5-piece flow.
+- Updated piece tuning values:
+  - Long setup straight reduced:
+    - `temporary-middle-straight-long` length: `700 -> 350`
+  - Opposite turn pair sharpened and tightened:
+    - Left curve piece:
+      - id: `temporary-curve-left-15 -> temporary-curve-left-35`
+      - label: `Temporary Curve Left 35`
+      - length: `180 -> 90`
+      - turnDeg: `15 -> 35`
+    - Right curve piece:
+      - id: `temporary-curve-right-15 -> temporary-curve-right-35`
+      - label: `Temporary Curve Right 35`
+      - length: `180 -> 90`
+      - turnDeg: `15 -> 35`
+  - Exit/finish straight left unchanged at length `12`.
+- Updated fallback segment mirror pattern in same file to match runtime retune:
+  - lengths: `12, 350, 90, 90, 12`
+  - yaw profile: `0, 0, +35, -35, 0`
+- Behavioral intent/result:
+  - Curves now require more active steering and line control.
+  - Opposite-turn pairing still restores near-straight heading after the second bend.
+- Version discipline (significant runtime behavior retune):
+  - Bumped to `0.8.15.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.15.0`, `appVersionCode=81500`)
+    - `android/app/build.gradle` (`versionName=0.8.15.0`, `versionCode=81500`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Mode/commit context:
+  - Local Iteration Mode followed.
+  - No commit/push performed.
+
+v0.8.16.0 local iteration milestone (compressed S-curve retune to 25° over 50):
+- Retuned the temporary opposite-curve pair in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts` to a compressed, sharper-feel profile while lowering absolute angle:
+  - Left curve:
+    - id: `temporary-curve-left-35 -> temporary-curve-left-25`
+    - label: `Temporary Curve Left 25`
+    - length: `90 -> 50`
+    - turnDeg: `35 -> 25`
+  - Right curve:
+    - id: `temporary-curve-right-35 -> temporary-curve-right-25`
+    - label: `Temporary Curve Right 25`
+    - length: `90 -> 50`
+    - turnDeg: `35 -> 25`
+- Preserved rest of active 5-piece pattern:
+  - spawn `12`
+  - setup straight `350`
+  - finish straight `12`
+- Updated fallback segment mirror profile in same file:
+  - curve segments changed from `90 @ ±35` to `50 @ ±25`.
+- Expected handling impact:
+  - Less highway-smooth arc shape due to compression, while avoiding over-harshness from high turn angle.
+  - Still restores heading quickly via opposite-turn pairing.
+- Version discipline (significant runtime behavior retune):
+  - Bumped to `0.8.16.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.8.16.0`, `appVersionCode=81600`)
+    - `android/app/build.gradle` (`versionName=0.8.16.0`, `versionCode=81600`)
+- Verification (Local Iteration):
+  - `npm run -w client typecheck` passed.
+- Mode/commit context:
+  - Local Iteration Mode followed.
+  - No commit/push performed.
+
+v0.8.16.0 full publish task (commit + push pending workspace changes):
+- Prepared a publish-ready commit for all current tracked and untracked workspace changes, including:
+  - temporary modular track tuning files
+  - track generation wiring updates
+  - HelloMarble runtime integration updates
+  - versioned Android wrapper sync files
+  - local notes/temporary artifacts currently present in workspace
+- Verification (Full Publish Test Mode):
+  - `npm run lint` passed.
+  - `npm run typecheck` passed.
+  - `npm run build` passed.
+- Version discipline:
+  - No additional bump applied in this task.
+  - Existing synchronized version `0.8.16.0` retained across:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json`
+    - `android/app/build.gradle`
+- Commit/push context:
+  - Commit and push executed in this task.

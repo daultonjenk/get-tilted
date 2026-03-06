@@ -1,0 +1,22 @@
++High score / global leaderboard (Play Store integration?)
++Seed of the Day race
+
+Player follows straight stretch that is smooth, and easy to drive on
+	-rewards speed not tilting accuracy
+	-momentum is important and makes the player feel "fun"
+
+After straight stretches, player then hits "obstacle sections"
+	-straight sections of track with obstacles the players must dodge
+	-obstacles can move, can be holes in the track, or any other number
+	 of devious things
+	-obstacle sections are designed to slow players down a fair bit,
+	 and allow marbles to "catch up" to one another and experience
+	 a fun close quarters race.
+
+BOUNDED CAMERA 
++When marbles are close, camera becomes locked to the point in between the
+ two of them, and focuses on a more "race-like" view. This highlights the
+ fun rivaly-style race between marbles.
+
+
+v0.9 - UI polish and overall menu feel

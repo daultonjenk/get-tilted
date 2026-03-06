@@ -6,6 +6,10 @@ import {
   ARC90_OBSTACLE_1_SETPIECE_GROUP_PREFIX,
   type TrackBlueprint,
 } from "./modularTrack";
+import {
+  DEFAULT_RUNTIME_TRACK_WIDTH,
+  TEMPORARY_THREE_STRAIGHT_SEGMENTS,
+} from "./temporary/temporaryThreeStraightTrack";
 
 type ManualSetPieceKind =
   | "arc90-obstacle-1"
@@ -103,16 +107,6 @@ export type TrackBuildResult = {
   setMovingObstacleMaterial: (material: CANNON.Material) => void;
 };
 
-type SegmentDef = {
-  length: number;
-  slopeDeg: number;
-  yawDeg: number;
-  landingLength?: number;
-  railLeft?: boolean;
-  railRight?: boolean;
-  width?: number;
-};
-
 type PartSpec = {
   size: THREE.Vector3;
   position: THREE.Vector3;
@@ -163,7 +157,7 @@ type MovingObstacleSpec = {
   laneMaxScale: number;
 };
 
-const TRACK_W = 9;
+const TRACK_W = DEFAULT_RUNTIME_TRACK_WIDTH;
 const FLOOR_THICK = 0.6;
 const RAIL_THICK = 0.35;
 const RAIL_H = 2.0;
@@ -172,7 +166,7 @@ const RAIL_FLOOR_OVERLAP = 0.12;
 const MARBLE_RADIUS = 0.5;
 const START_LENGTH = 8;
 const FINISH_LENGTH = 10;
-const FINISH_WIDTH = 12;
+const FINISH_WIDTH = DEFAULT_RUNTIME_TRACK_WIDTH;
 const MARKER_THICK = 0.12;
 const WALL_CLEARANCE = 0.2;
 const OFF_COURSE_MARGIN = 1.1;
@@ -239,22 +233,6 @@ const TEST_TRACK_TILT_LAYER_SWITCH_UP_FRACTION = 0.28;
 const TEST_TRACK_HOLE_EDGE_BLEND_RENDER = 0;
 const TEST_TRACK_HOLE_EDGE_BLEND_COLLIDER = 0;
 const TEST_TRACK_DECAGON_SIDES = 10;
-
-// Roughly 2x original authored length.
-const SEGMENTS: SegmentDef[] = [
-  { length: 11, slopeDeg: 0, yawDeg: 0 },
-  { length: 10, slopeDeg: 0, yawDeg: 0 },
-  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
-  { length: 11, slopeDeg: 0, yawDeg: 0 },
-  { length: 10, slopeDeg: 0, yawDeg: 0 },
-  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
-  { length: 11, slopeDeg: 0, yawDeg: 0 },
-  { length: 10, slopeDeg: 0, yawDeg: 0 },
-  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
-  { length: 11, slopeDeg: 0, yawDeg: 0 },
-  { length: 10, slopeDeg: 0, yawDeg: 0 },
-  { length: 9, slopeDeg: 0, yawDeg: 0, landingLength: 3 },
-];
 
 function degToRad(value: number): number {
   return (value * Math.PI) / 180;
@@ -661,6 +639,10 @@ function clamp(value: number, min: number, max: number): number {
 
 function computeContainmentHalfX(trackWidth: number): number {
   return Math.max(0, trackWidth / 2 - RAIL_INSET - RAIL_THICK / 2 - MARBLE_RADIUS - 0.02);
+}
+
+function computeLineSpanWidth(trackWidth: number): number {
+  return Math.max(0.5, trackWidth - (RAIL_INSET * 2 + RAIL_THICK));
 }
 
 type BlueprintSweepSample = {
@@ -2599,7 +2581,7 @@ function buildBlueprintSweepPath(
   for (let i = 1; i < finishPoints.length; i += 1) {
     samples.push({
       center: finishPoints[i]!,
-      width: FINISH_WIDTH,
+      width: lastPlayable.width,
       railLeft: true,
       railRight: true,
       tunnelRoof: false,
@@ -3354,16 +3336,18 @@ function createTrackFromBlueprint(
   const trialFinishGateNormal = finishDirection.clone().normalize();
 
   const finishYaw = Math.atan2(finishDirection.x, finishDirection.z);
+  const startMarkerWidth = computeLineSpanWidth(samples[0]?.width ?? TRACK_W);
+  const finishMarkerWidth = computeLineSpanWidth(samples[samples.length - 1]?.width ?? TRACK_W);
 
   addVisualPart(group, {
-    size: new THREE.Vector3(TRACK_W + 0.8, MARKER_THICK, 0.45),
+    size: new THREE.Vector3(startMarkerWidth, MARKER_THICK, 0.45),
     position: new THREE.Vector3(0, FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01, trialStartZ),
     rotation: new THREE.Euler(0, 0, 0, "XYZ"),
     material: startMarkerMaterial,
   });
 
   addVisualPart(group, {
-    size: new THREE.Vector3(FINISH_WIDTH + 1.2, MARKER_THICK, 0.55),
+    size: new THREE.Vector3(finishMarkerWidth, MARKER_THICK, 0.55),
     position: finishStart
       .clone()
       .addScaledVector(finishDirection, Math.max(FINISH_LENGTH * 0.58, 3.2))
@@ -3398,7 +3382,7 @@ function createTrackFromBlueprint(
     movingObstacleBodies: [],
     containmentLocal: {
       mainHalfX: computeContainmentHalfX(maxSegmentWidth),
-      finishHalfX: computeContainmentHalfX(Math.max(FINISH_WIDTH, maxSegmentWidth)),
+      finishHalfX: computeContainmentHalfX(maxSegmentWidth),
       finishStartZ,
     },
     wallContainmentMode: "curvedPathClamp",
@@ -4111,7 +4095,7 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
     uvScale: [Math.max(startBackWallWidth * 0.3, 1), Math.max(RAIL_H, 1)],
   });
 
-  for (const segment of SEGMENTS) {
+  for (const segment of TEMPORARY_THREE_STRAIGHT_SEGMENTS) {
     currentYawDeg += segment.yawDeg;
 
     addSegment({
@@ -4297,16 +4281,17 @@ export function createTrack(opts?: CreateTrackOptions): TrackBuildResult {
 
   // Zone D: final static wall with three floor-level marble cutouts.
   addFinalThreeHoleWall(trialFinishZ - 6.4);
+  const markerWallToWallWidth = computeLineSpanWidth(TRACK_W);
 
   addVisualPart(group, {
-    size: new THREE.Vector3(TRACK_W + 0.8, MARKER_THICK, 0.45),
+    size: new THREE.Vector3(markerWallToWallWidth, MARKER_THICK, 0.45),
     position: new THREE.Vector3(0, FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01, trialStartZ),
     rotation: new THREE.Euler(0, 0, 0, "XYZ"),
     material: startMarkerMaterial,
   });
 
   addVisualPart(group, {
-    size: new THREE.Vector3(FINISH_WIDTH + 1.2, MARKER_THICK, 0.55),
+    size: new THREE.Vector3(markerWallToWallWidth, MARKER_THICK, 0.55),
     position: new THREE.Vector3(0, FLOOR_THICK / 2 + MARKER_THICK / 2 + 0.01, trialFinishZ),
     rotation: new THREE.Euler(0, 0, 0, "XYZ"),
     material: finishMarkerMaterial,
