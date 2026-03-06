@@ -131,7 +131,6 @@ import {
 } from "./track/modularTrack";
 import {
   DEFAULT_RUNTIME_TRACK_WIDTH,
-  TEMPORARY_ACTIVE_TRACK_PIECE_COUNT,
   buildTemporaryThreeStraightForcedPieces,
 } from "./track/temporary/temporaryThreeStraightTrack";
 import {
@@ -452,10 +451,10 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
       },
     };
   }
-  // Temporary quarantine mode: active generation uses a fixed forced-piece layout.
-  const forcedMainPieces = buildTemporaryThreeStraightForcedPieces();
+  // Temporary quarantine mode: active generation uses a seeded forced-piece layout.
+  const forcedMainPieces = buildTemporaryThreeStraightForcedPieces(seed);
   const blueprint = buildTrackBlueprint({
-    config: { seed, pieceCount: TEMPORARY_ACTIVE_TRACK_PIECE_COUNT },
+    config: { seed, pieceCount: forcedMainPieces.length },
     customPieces: [],
     includeCustomPieces: false,
     trackWidth: DEFAULT_RUNTIME_TRACK_WIDTH,
@@ -475,8 +474,8 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
       wireframeUsesObjectTransparency: trackVisualSettings.wireframeUsesObjectTransparency,
     },
     blueprintObstacleSettings: {
-      enableMovingObstacles: true,
       enableHoleSetPieces: true,
+      safeStartStraightCount: 1,
     },
   };
 }

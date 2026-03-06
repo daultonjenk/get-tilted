@@ -3138,7 +3138,13 @@ function selectBlueprintHoleSetPieces(
 
   // Collect eligible straight placements sorted by placement order
   const eligibleByOrder = source
-    .filter((p) => p.kind === "straight" && !p.isCompensatingTurn && p.points.length >= 2)
+    .filter(
+      (p) =>
+        p.kind === "straight" &&
+        !p.isCompensatingTurn &&
+        Math.abs(p.turnDeg) < 3 &&
+        p.points.length >= 2,
+    )
     .sort((a, b) => (placementOrder.get(a.id) ?? 0) - (placementOrder.get(b.id) ?? 0));
 
   if (eligibleByOrder.length === 0) {

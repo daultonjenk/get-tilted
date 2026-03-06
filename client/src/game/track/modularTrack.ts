@@ -135,7 +135,7 @@ const DEFAULT_CUSTOM_TEMPLATE: Omit<TrackPieceTemplate, "id" | "label"> = {
 
 // Temporary active catalog while legacy tracks remain quarantined under ./temporary/.
 export const BUILTIN_TRACK_PIECES: ReadonlyArray<TrackPieceTemplate> =
-  buildTemporaryThreeStraightForcedPieces();
+  buildTemporaryThreeStraightForcedPieces("catalog");
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);

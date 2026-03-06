@@ -1,6 +1,16 @@
 Original prompt: Implement v0.1 scaffold + Hello Marble with client/server monorepo, physics marble scene, debug/reset controls, and quality gates.
 
 Progress:
+
+## v0.9.2.0 — Track simplification: seeded straights + mirrored curve pairs + holes, no obstacles
+
+- Replaced fixed 5-piece forced track layout with a seeded random layout generator in `temporaryThreeStraightTrack.ts`.
+- `buildTemporaryThreeStraightForcedPieces(seed)` now takes a seed string and generates: spawn straight (12u) + 3 seeded content blocks + finish straight (12u). Each content block (seeded 40/30/30) is either a 110u plain straight or a mirrored curve pair (LR or RL, each leg 40u at 25°), netting 0° heading change per pair.
+- Removed `TEMPORARY_ACTIVE_TRACK_PIECE_COUNT` export (replaced by `forcedMainPieces.length` in HelloMarble.tsx).
+- Updated `HelloMarble.tsx`: passes seed into `buildTemporaryThreeStraightForcedPieces(seed)`, uses `forcedMainPieces.length` for `pieceCount`, removed `enableMovingObstacles: true`, set `safeStartStraightCount: 1` (protects only spawn straight; 12u finish is too short for holes regardless).
+- Added `Math.abs(p.turnDeg) < 3` guard to `selectBlueprintHoleSetPieces` filter in `createTrack.ts` so curved pieces (turnDeg=±25) are never eligible for hole assignment.
+- Fixed `modularTrack.ts` catalog call `buildTemporaryThreeStraightForcedPieces("catalog")` to pass required seed argument.
+- Result: zero moving obstacles, zero static gate meshes, seeded track shape varies per run, holes on 110u straights only.
 - Created npm-workspaces monorepo with `client/` and `server/`.
 - Implemented Three.js + cannon-es Hello Marble scene with fixed timestep, keyboard force input, reset button, and debug HUD.
 - Switched server/client transport checks to raw WebSocket alignment for current AGENTS constraints.

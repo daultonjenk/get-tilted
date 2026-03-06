@@ -10,93 +10,156 @@ export type TemporaryTrackSegmentDef = {
   width?: number;
 };
 
-// Active temporary baseline while legacy track content is quarantined.
-export const TEMPORARY_ACTIVE_TRACK_PIECE_COUNT = 5;
 // Default width for fast/non-obstacle runtime sections.
 export const DEFAULT_RUNTIME_TRACK_WIDTH = 9;
 // Reserved wide width for future obstacle/set-piece expansion.
 export const SETPIECE_WIDE_TRACK_WIDTH = 18;
 
-const TEMPORARY_THREE_STRAIGHT_FORCED_PIECES: ReadonlyArray<TrackPieceTemplate> = [
-  {
-    id: "temporary-spawn-straight",
-    label: "Temporary Spawn Straight",
-    kind: "straight",
-    weight: 1,
-    length: 12,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 0,
-    turnDirection: "left",
-    turnDeg: 0,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: "temporary-middle-straight-long",
-    label: "Temporary Middle Straight Long",
-    kind: "straight",
-    weight: 1,
-    length: 350,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 0,
-    turnDirection: "left",
-    turnDeg: 0,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: "temporary-curve-left-25",
-    label: "Temporary Curve Left 25",
-    kind: "straight",
-    weight: 1,
-    length: 50,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 0,
-    turnDirection: "left",
-    turnDeg: 25,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: "temporary-curve-right-25",
-    label: "Temporary Curve Right 25",
-    kind: "straight",
-    weight: 1,
-    length: 50,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 0,
-    turnDirection: "right",
-    turnDeg: 25,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-  {
-    id: "temporary-finish-straight-short",
-    label: "Temporary Finish Straight",
-    kind: "straight",
-    weight: 1,
-    length: 12,
-    widthScale: 1,
-    gradeDeg: 0,
-    bankDeg: 0,
-    turnDirection: "left",
-    turnDeg: 0,
-    tunnelRoof: false,
-    railLeft: true,
-    railRight: true,
-  },
-];
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
-export function buildTemporaryThreeStraightForcedPieces(): TrackPieceTemplate[] {
-  return TEMPORARY_THREE_STRAIGHT_FORCED_PIECES.map((piece) => ({ ...piece }));
+function makeLayoutRandom(seed: string): () => number {
+  let state = hashStr(`${seed}-layout`) || 1;
+  return () => {
+    state += 0x6d2b79f5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function buildTemporaryThreeStraightForcedPieces(seed: string): TrackPieceTemplate[] {
+  const random = makeLayoutRandom(seed);
+  const pieces: TrackPieceTemplate[] = [];
+
+  // Fixed spawn straight
+  pieces.push({
+    id: "tmp-spawn",
+    label: "Spawn Straight",
+    kind: "straight",
+    weight: 1,
+    length: 12,
+    widthScale: 1,
+    gradeDeg: 0,
+    bankDeg: 0,
+    turnDirection: "left",
+    turnDeg: 0,
+    tunnelRoof: false,
+    railLeft: true,
+    railRight: true,
+  });
+
+  // 3 seeded content blocks
+  for (let b = 0; b < 3; b += 1) {
+    const roll = random();
+    if (roll < 0.4) {
+      pieces.push({
+        id: `tmp-straight-${b}`,
+        label: "Straight",
+        kind: "straight",
+        weight: 1,
+        length: 110,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      });
+    } else if (roll < 0.7) {
+      // curve-LR
+      pieces.push({
+        id: `tmp-cl-${b}`,
+        label: "Curve Left",
+        kind: "straight",
+        weight: 1,
+        length: 40,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 25,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      });
+      pieces.push({
+        id: `tmp-cr-${b}`,
+        label: "Curve Right",
+        kind: "straight",
+        weight: 1,
+        length: 40,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "right",
+        turnDeg: 25,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      });
+    } else {
+      // curve-RL
+      pieces.push({
+        id: `tmp-cr-${b}`,
+        label: "Curve Right",
+        kind: "straight",
+        weight: 1,
+        length: 40,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "right",
+        turnDeg: 25,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      });
+      pieces.push({
+        id: `tmp-cl-${b}`,
+        label: "Curve Left",
+        kind: "straight",
+        weight: 1,
+        length: 40,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 25,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      });
+    }
+  }
+
+  // Fixed finish straight
+  pieces.push({
+    id: "tmp-finish",
+    label: "Finish Straight",
+    kind: "straight",
+    weight: 1,
+    length: 12,
+    widthScale: 1,
+    gradeDeg: 0,
+    bankDeg: 0,
+    turnDirection: "left",
+    turnDeg: 0,
+    tunnelRoof: false,
+    railLeft: true,
+    railRight: true,
+  });
+
+  return pieces;
 }
 
 export const TEMPORARY_THREE_STRAIGHT_SEGMENTS: ReadonlyArray<TemporaryTrackSegmentDef> = [
