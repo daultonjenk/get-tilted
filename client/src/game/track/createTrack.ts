@@ -2434,35 +2434,41 @@ function buildFloorSliceGeometries(
 ): THREE.BufferGeometry[] {
   const floorGeometries: THREE.BufferGeometry[] = [];
   const intervalsBySample = new Map<BlueprintSweepSample, FloorInterval[]>();
-  let maxSliceCount = 0;
   for (let i = 0; i < samples.length; i += 1) {
-    const sample = samples[i]!;
-    const frame = frames[i]!;
-    const intervals = buildFloorIntervalsAtSample(sample, frame, floorHoles, edgeBlend);
-    intervalsBySample.set(sample, intervals);
-    maxSliceCount = Math.max(maxSliceCount, intervals.length);
+    const intervals = buildFloorIntervalsAtSample(samples[i]!, frames[i]!, floorHoles, edgeBlend);
+    intervalsBySample.set(samples[i]!, intervals);
   }
-  for (let sliceIndex = 0; sliceIndex < maxSliceCount; sliceIndex += 1) {
-    const geometry = buildSweptRectGeometry(
-      samples,
-      frames,
-      (sample) => {
-        const interval = intervalsBySample.get(sample)?.[sliceIndex];
-        if (!interval) {
-          return null;
-        }
-        return {
-          minX: interval.minX,
-          maxX: interval.maxX,
-          minY: -FLOOR_THICK,
-          maxY: 0,
-        };
-      },
-      { capEnds: false },
-    );
-    if (geometry) {
-      floorGeometries.push(geometry);
+
+  // Group consecutive samples by interval count and build a separate swept
+  // geometry per group with capEnds: true so that the floor terminates cleanly
+  // at hole entry/exit boundaries instead of producing diagonal transition faces
+  // that run from the hole edge to the track wall.
+  let runStart = 0;
+  while (runStart < samples.length) {
+    const runCount = intervalsBySample.get(samples[runStart]!)!.length;
+    let runEnd = runStart + 1;
+    while (
+      runEnd < samples.length &&
+      (intervalsBySample.get(samples[runEnd]!)?.length ?? 0) === runCount
+    ) {
+      runEnd += 1;
     }
+    const runSamples = samples.slice(runStart, runEnd);
+    const runFrames = frames.slice(runStart, runEnd);
+    for (let sliceIndex = 0; sliceIndex < runCount; sliceIndex += 1) {
+      const geometry = buildSweptRectGeometry(
+        runSamples,
+        runFrames,
+        (sample) => {
+          const interval = intervalsBySample.get(sample)?.[sliceIndex];
+          if (!interval) return null;
+          return { minX: interval.minX, maxX: interval.maxX, minY: -FLOOR_THICK, maxY: 0 };
+        },
+        { capEnds: true },
+      );
+      if (geometry) floorGeometries.push(geometry);
+    }
+    runStart = runEnd;
   }
   return floorGeometries;
 }

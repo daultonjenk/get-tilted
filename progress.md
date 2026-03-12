@@ -2,6 +2,13 @@ Original prompt: Implement v0.1 scaffold + Hello Marble with client/server monor
 
 Progress:
 
+## v0.9.2.2 — Fix hole "lines" connecting to track walls
+
+- In `buildFloorSliceGeometries`, replaced the single-pass `buildSweptRectGeometry` loop (one geometry per sliceIndex across all samples, `capEnds: false`) with a run-grouping approach.
+- Consecutive samples are grouped by interval count; a separate `buildSweptRectGeometry` is built per group per sliceIndex, using `capEnds: true`.
+- This ensures floor geometry terminates cleanly at hole entry/exit boundaries with perpendicular cap faces rather than diagonal transition quads that ran from the hole edge to the track wall.
+- The three resulting run groups for a holed straight: (1) full-width strip before hole, capped at entry; (2) left+right strips over hole, capped at entry/exit; (3) full-width strip after hole, capped at exit.
+
 ## v0.9.2.1 — Fix floor texture square bug: remove flat-patch early return in buildFloorSliceGeometries
 
 - Removed 3-line early return in `buildFloorSliceGeometries` that routed all hole-bearing tracks through `buildFloorHolePatchGeometries`, which created a single flat `ExtrudeGeometry` rectangle bounding the entire track footprint.
