@@ -2,6 +2,13 @@ Original prompt: Implement v0.1 scaffold + Hello Marble with client/server monor
 
 Progress:
 
+## v0.9.2.1 — Fix floor texture square bug: remove flat-patch early return in buildFloorSliceGeometries
+
+- Removed 3-line early return in `buildFloorSliceGeometries` that routed all hole-bearing tracks through `buildFloorHolePatchGeometries`, which created a single flat `ExtrudeGeometry` rectangle bounding the entire track footprint.
+- Deleted `buildFloorHolePatchGeometries` (was dead code after fix, triggered unused-var lint error).
+- All floor geometry (with or without holes) now goes through the swept interval path (`buildFloorIntervalsAtSample` → `buildSweptRectGeometry`), which correctly follows the track path along curves and computes circular arc chords for hole cutouts.
+- Bug was invisible before v0.9.2.0 because `safeStartStraightCount: 3` (AUTO) meant `allFloorHoles` was always empty; after v0.9.2.0 set it to `1`, holes were selected and the broken path triggered.
+
 ## v0.9.2.0 — Track simplification: seeded straights + mirrored curve pairs + holes, no obstacles
 
 - Replaced fixed 5-piece forced track layout with a seeded random layout generator in `temporaryThreeStraightTrack.ts`.
