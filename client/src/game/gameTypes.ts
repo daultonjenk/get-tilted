@@ -47,7 +47,7 @@ export type TuningState = {
 
 export type TrialState = "idle" | "running" | "finished";
 export type RacePhase = "waiting" | "countdown" | "racing";
-export type GameMode = "unselected" | "solo" | "flatPlane" | "multiplayer";
+export type GameMode = "unselected" | "solo" | "testAll" | "multiplayer";
 
 export type GhostSnapshot = {
   seq: number | undefined;

@@ -32,6 +32,7 @@ export type CreateTrackOptions = {
     enableAutomaticObstacles?: boolean;
     enableMovingObstacles?: boolean;
     enableHoleSetPieces?: boolean;
+    forceHoleSpawnOnAll?: boolean;
     manualTestPieces?: Array<{
       placementIndex: number;
       testPieceIndex: number;
@@ -3004,6 +3005,7 @@ function selectBlueprintHoleSetPieces(
   placements: TrackBlueprint["placements"],
   seed: string,
   safeStartCount: number,
+  forceAll?: boolean,
 ): HoleSetPieceSelection[] {
   const random = makeSeededRandom(`${seed}-hole-set-pieces`);
   const mainLane = placements.filter((p) => p.lane === "main");
@@ -3047,7 +3049,8 @@ function selectBlueprintHoleSetPieces(
       continue;
     }
 
-    if (random() > AUTO_HOLE_SPAWN_CHANCE) {
+    const roll = random();
+    if (!forceAll && roll > AUTO_HOLE_SPAWN_CHANCE) {
       continue;
     }
 
@@ -3316,6 +3319,7 @@ function createTrackFromBlueprint(
         sourcePlacements,
         blueprint.seed,
         Math.max(0, Math.floor(obstacleSettings?.safeStartStraightCount ?? AUTO_HOLE_SAFE_START_COUNT)),
+        obstacleSettings?.forceHoleSpawnOnAll,
       )
     : [];
   const holeSetPieceIds = new Set(holeSelections.map((s) => s.placementId));

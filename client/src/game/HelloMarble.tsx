@@ -132,6 +132,7 @@ import {
 import {
   DEFAULT_RUNTIME_TRACK_WIDTH,
   buildTemporaryThreeStraightForcedPieces,
+  buildTestAllForcedPieces,
 } from "./track/temporary/temporaryThreeStraightTrack";
 import {
   EDITOR_REFERENCE_MARBLE_RADIUS,
@@ -199,7 +200,7 @@ const SHADOW_LIGHT_OFFSET_Z_MAX = 30;
 type MenuScreen = "main" | "options" | "trackLab" | "editor";
 type OptionsSubmenu = "root" | "controls" | "camera";
 type TrackCatalogMode = "builtin" | "builtin_plus_custom";
-type TrackLayoutPreset = "default" | "flatPlane";
+type TrackLayoutPreset = "default" | "testAll";
 const SOLO_TRACK_GENERATION_POLICY: TrackGenerationPolicy = "singleplayer_camera_friendly_10";
 
 type EditorShapeDraft = {
@@ -438,16 +439,34 @@ function toTrackDraft(piece: TrackPieceTemplate): TrackPieceDraft {
 
 function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOptions {
   const seed = sanitizeTrackSeed(config.seed);
-  const isFlatPlane = config.layoutPreset === "flatPlane";
+  const isTestAll = config.layoutPreset === "testAll";
   const trackVisualSettings = sanitizeTrackVisualSettings(config.trackVisualSettings);
-  if (isFlatPlane) {
+  if (isTestAll) {
+    const testPieces = buildTestAllForcedPieces();
+    const blueprint = buildTrackBlueprint({
+      config: { seed, pieceCount: testPieces.length },
+      customPieces: [],
+      includeCustomPieces: false,
+      trackWidth: DEFAULT_RUNTIME_TRACK_WIDTH,
+      enableBranchPieces: false,
+      maxHeadingDriftDeg: 18,
+      enforceBendPairs: false,
+      generationPolicy: "default",
+      forcedMainPieces: testPieces,
+      disableStarterSequence: true,
+    });
     return {
       seed,
-      preset: "flatPlane",
+      blueprint,
       visualSettings: {
         objectTransparencyPercent: trackVisualSettings.objectTransparencyPercent,
         showObjectWireframes: trackVisualSettings.showObjectWireframes,
         wireframeUsesObjectTransparency: trackVisualSettings.wireframeUsesObjectTransparency,
+      },
+      blueprintObstacleSettings: {
+        enableHoleSetPieces: true,
+        safeStartStraightCount: 0,
+        forceHoleSpawnOnAll: true,
       },
     };
   }
@@ -798,14 +817,14 @@ export function HelloMarble() {
 
   useEffect(() => {
     const visualSettings = toTrackVisualSettingsFromTuning(tuningRef.current);
-    if (gameMode === "flatPlane") {
+    if (gameMode === "testAll") {
       applyTrackConfigRef.current(
         buildTrackConfig(
           trackLabSeedRef.current,
           trackLabPieceCountRef.current,
           "builtin",
           [],
-          "flatPlane",
+          "testAll",
           visualSettings,
         ),
       );
@@ -2537,7 +2556,7 @@ export function HelloMarble() {
     respawnMarble(false);
     if (
       gameModeRef.current !== "solo" &&
-      gameModeRef.current !== "flatPlane"
+      gameModeRef.current !== "testAll"
     ) {
       freezeMarble();
     }
@@ -2592,7 +2611,7 @@ export function HelloMarble() {
       respawnMarble(false);
       if (
         gameModeRef.current !== "solo" &&
-        gameModeRef.current !== "flatPlane"
+        gameModeRef.current !== "testAll"
       ) {
         freezeMarble();
       }
@@ -3368,7 +3387,7 @@ export function HelloMarble() {
             countdownGoHandledRef.current = true;
             if (
               gameModeRef.current === "solo" ||
-              gameModeRef.current === "flatPlane"
+              gameModeRef.current === "testAll"
             ) {
               unfreezeMarbleRef.current();
             }
@@ -3381,7 +3400,7 @@ export function HelloMarble() {
             countdownGoHandledRef.current = true;
             if (
               gameModeRef.current === "solo" ||
-              gameModeRef.current === "flatPlane"
+              gameModeRef.current === "testAll"
             ) {
               unfreezeMarbleRef.current();
             }
@@ -3789,7 +3808,7 @@ export function HelloMarble() {
   const showingOptionsCamera = showOptionsMenu && optionsSubmenu === "camera";
   const showMultiplayerResult = gameMode === "multiplayer" && raceResult != null;
   const showSoloResult =
-    (gameMode === "solo" || gameMode === "flatPlane") &&
+    (gameMode === "solo" || gameMode === "testAll") &&
     trialState === "finished";
   const multiplayerRaceInProgress =
     gameMode === "multiplayer" &&
@@ -4762,7 +4781,7 @@ export function HelloMarble() {
     if (nextMode === gameMode) {
       return;
     }
-    if (nextMode !== "solo" && nextMode !== "flatPlane") {
+    if (nextMode !== "solo" && nextMode !== "testAll") {
       soloStartSequenceRef.current += 1;
     }
     setGameMode(nextMode);
@@ -4785,14 +4804,14 @@ export function HelloMarble() {
       void startSoloRaceSequence();
       return;
     }
-    if (nextMode === "flatPlane") {
+    if (nextMode === "testAll") {
       applyTrackConfigRef.current(
         buildTrackConfig(
           trackLabSeedRef.current,
           trackLabPieceCountRef.current,
           "builtin",
           [],
-          "flatPlane",
+          "testAll",
           toTrackVisualSettingsFromTuning(tuningRef.current),
         ),
       );
@@ -4904,9 +4923,9 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
-                onClick={() => switchGameMode("flatPlane")}
+                onClick={() => switchGameMode("testAll")}
               >
-                Flat Plane
+                Test All
               </button>
               <button
                 type="button"
@@ -6138,7 +6157,7 @@ export function HelloMarble() {
       ) : null}
       {(showMultiplayerNetworkUi ||
         gameMode === "solo" ||
-        gameMode === "flatPlane") &&
+        gameMode === "testAll") &&
       debugMenuEnabled ? (
         <DebugDrawer
           open={drawerOpen}

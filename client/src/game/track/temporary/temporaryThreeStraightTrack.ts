@@ -162,6 +162,37 @@ export function buildTemporaryThreeStraightForcedPieces(seed: string): TrackPiec
   return pieces;
 }
 
+export function buildTestAllForcedPieces(): TrackPieceTemplate[] {
+  const pieces: TrackPieceTemplate[] = [];
+  // Fixed spawn straight
+  pieces.push({ id: "test-spawn", label: "Spawn Straight", kind: "straight", weight: 1,
+    length: 12, widthScale: 1, gradeDeg: 0, bankDeg: 0, turnDirection: "left", turnDeg: 0,
+    tunnelRoof: false, railLeft: true, railRight: true });
+  // Straight with hole (guaranteed)
+  pieces.push({ id: "test-straight", label: "Straight", kind: "straight", weight: 1,
+    length: 110, widthScale: 1, gradeDeg: 0, bankDeg: 0, turnDirection: "left", turnDeg: 0,
+    tunnelRoof: false, railLeft: true, railRight: true });
+  // Curve Left → Curve Right
+  pieces.push({ id: "test-cl", label: "Curve Left", kind: "straight", weight: 1,
+    length: 40, widthScale: 1, gradeDeg: 0, bankDeg: 0, turnDirection: "left", turnDeg: 25,
+    tunnelRoof: false, railLeft: true, railRight: true });
+  pieces.push({ id: "test-cr", label: "Curve Right", kind: "straight", weight: 1,
+    length: 40, widthScale: 1, gradeDeg: 0, bankDeg: 0, turnDirection: "right", turnDeg: 25,
+    tunnelRoof: false, railLeft: true, railRight: true });
+  // Curve Right → Curve Left
+  pieces.push({ id: "test-cr2", label: "Curve Right", kind: "straight", weight: 1,
+    length: 40, widthScale: 1, gradeDeg: 0, bankDeg: 0, turnDirection: "right", turnDeg: 25,
+    tunnelRoof: false, railLeft: true, railRight: true });
+  pieces.push({ id: "test-cl2", label: "Curve Left", kind: "straight", weight: 1,
+    length: 40, widthScale: 1, gradeDeg: 0, bankDeg: 0, turnDirection: "left", turnDeg: 25,
+    tunnelRoof: false, railLeft: true, railRight: true });
+  // Fixed finish straight
+  pieces.push({ id: "test-finish", label: "Finish Straight", kind: "straight", weight: 1,
+    length: 12, widthScale: 1, gradeDeg: 0, bankDeg: 0, turnDirection: "left", turnDeg: 0,
+    tunnelRoof: false, railLeft: true, railRight: true });
+  return pieces;
+}
+
 export const TEMPORARY_THREE_STRAIGHT_SEGMENTS: ReadonlyArray<TemporaryTrackSegmentDef> = [
   { length: 12, slopeDeg: 0, yawDeg: 0 },
   { length: 350, slopeDeg: 0, yawDeg: 0 },

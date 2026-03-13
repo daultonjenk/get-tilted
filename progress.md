@@ -2,6 +2,17 @@ Original prompt: Implement v0.1 scaffold + Hello Marble with client/server monor
 
 Progress:
 
+## v0.9.2.3 — Replace Flat Plane with Test All mode
+
+- Replaced `"flatPlane"` with `"testAll"` in `GameMode` union type (`gameTypes.ts`).
+- Added `buildTestAllForcedPieces()` to `temporaryThreeStraightTrack.ts`: deterministic 7-piece layout (spawn 12u, straight 110u, curve-LR 40u+40u, curve-RL 40u+40u, finish 12u).
+- Added `forceHoleSpawnOnAll?: boolean` to `blueprintObstacleSettings` type in `createTrack.ts`.
+- Updated `selectBlueprintHoleSetPieces` to accept optional `forceAll` param; when true, skips the `AUTO_HOLE_SPAWN_CHANCE` gate while still consuming the RNG roll.
+- `createTrackOptionsFromConfig` in `HelloMarble.tsx` replaced `isFlatPlane` flat-plane preset path with `isTestAll` block that uses `buildTestAllForcedPieces` + `forceHoleSpawnOnAll: true` + `safeStartStraightCount: 0`.
+- All `"flatPlane"` game mode string references in `HelloMarble.tsx` updated to `"testAll"`.
+- Button text changed from "Flat Plane" to "Test All".
+- The 110u straight always gets a hole (only eligible piece; guaranteed with forceHoleSpawnOnAll).
+
 ## v0.9.2.2 — Fix hole "lines" connecting to track walls
 
 - In `buildFloorSliceGeometries`, replaced the single-pass `buildSweptRectGeometry` loop (one geometry per sliceIndex across all samples, `capEnds: false`) with a run-grouping approach.
