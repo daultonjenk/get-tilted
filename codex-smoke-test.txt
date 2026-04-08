@@ -1,0 +1,2 @@
+Temporary smoke test file for branch/push/PR workflow validation.
+Created on 2026-04-08.
