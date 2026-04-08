@@ -250,6 +250,43 @@ type RuntimeContainmentSample = {
 
 type TrackPieceDraft = Omit<TrackPieceTemplate, "id">;
 
+function readQueryParam(name: string): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = new URLSearchParams(window.location.search).get(name);
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : null;
+}
+
+function readQueryBoolean(name: string): boolean | null {
+  const raw = readQueryParam(name);
+  if (!raw) {
+    return null;
+  }
+  const normalized = raw.toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (
+    normalized === "0" ||
+    normalized === "false" ||
+    normalized === "no" ||
+    normalized === "off"
+  ) {
+    return false;
+  }
+  return null;
+}
+
+function readInitialRoomCode(): string {
+  const room = readQueryParam("room");
+  return room ? room.toUpperCase() : "";
+}
+
 function readStoredToggle(key: string, defaultValue: boolean): boolean {
   if (typeof window === "undefined") {
     return defaultValue;
@@ -262,6 +299,10 @@ function readStoredToggle(key: string, defaultValue: boolean): boolean {
 }
 
 function readStoredTrackSeed(): string {
+  const querySeed = readQueryParam("seed");
+  if (querySeed) {
+    return sanitizeTrackSeed(querySeed);
+  }
   if (typeof window === "undefined") {
     return DEFAULT_TRACK_SEED;
   }
@@ -576,13 +617,7 @@ export function HelloMarble() {
   const [netStatus, setNetStatus] = useState<WSStatus>("disconnected");
   const [netError, setNetError] = useState<string | null>(null);
   const [joinTiming, setJoinTiming] = useState<JoinTimingSnapshot | null>(null);
-  const [autoJoinRoomCode] = useState(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-    const room = new URLSearchParams(window.location.search).get("room");
-    return room ? room.toUpperCase() : "";
-  });
+  const [autoJoinRoomCode] = useState(() => readInitialRoomCode());
   const initialGameMode: GameMode = autoJoinRoomCode ? "multiplayer" : "unselected";
   const [gameMode, setGameMode] = useState<GameMode>(initialGameMode);
   const [menuScreen, setMenuScreen] = useState<MenuScreen>("main");
@@ -604,6 +639,10 @@ export function HelloMarble() {
     return sanitizeJoinHost(window.localStorage.getItem(DEV_JOIN_HOST_KEY) ?? "");
   });
   const [playerNameInput, setPlayerNameInput] = useState(() => {
+    const queryName = readQueryParam("name");
+    if (queryName) {
+      return sanitizePlayerName(queryName);
+    }
     if (typeof window === "undefined") return "";
     return sanitizePlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "");
   });
@@ -612,18 +651,26 @@ export function HelloMarble() {
     const stored = window.localStorage.getItem(MARBLE_SKIN_STORAGE_KEY);
     return resolveSkinById(stored).id;
   });
-  const [gyroEnabled, setGyroEnabled] = useState(() =>
-    readStoredToggle(GYRO_ENABLED_STORAGE_KEY, true),
-  );
+  const [gyroEnabled, setGyroEnabled] = useState(() => {
+    const queryGyro = readQueryBoolean("gyro");
+    if (typeof queryGyro === "boolean") {
+      return queryGyro;
+    }
+    return readStoredToggle(GYRO_ENABLED_STORAGE_KEY, true);
+  });
   const [musicEnabled, setMusicEnabled] = useState(() =>
     readStoredToggle(MUSIC_ENABLED_STORAGE_KEY, true),
   );
   const [soundEnabled, setSoundEnabled] = useState(() =>
     readStoredToggle(SOUND_ENABLED_STORAGE_KEY, true),
   );
-  const [debugMenuEnabled, setDebugMenuEnabled] = useState(() =>
-    readStoredToggle(DEBUG_MENU_ENABLED_STORAGE_KEY, false),
-  );
+  const [debugMenuEnabled, setDebugMenuEnabled] = useState(() => {
+    const queryDebug = readQueryBoolean("debug");
+    if (typeof queryDebug === "boolean") {
+      return queryDebug;
+    }
+    return readStoredToggle(DEBUG_MENU_ENABLED_STORAGE_KEY, false);
+  });
   const [trackLabSeed, setTrackLabSeed] = useState(() => readStoredTrackSeed());
   const [trackLabPieceCount, setTrackLabPieceCount] = useState(() => readStoredTrackPieceCount());
   const [trackLabCustomPieces, setTrackLabCustomPieces] = useState<TrackPieceTemplate[]>(() =>
@@ -974,6 +1021,78 @@ export function HelloMarble() {
   useEffect(() => {
     multiplayerTrackSeedRef.current = sanitizeTrackSeed(multiplayerTrackSeed);
   }, [multiplayerTrackSeed]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.__GET_TILTED_DIAGNOSTICS__ = {
+      appVersion: APP_VERSION,
+      buildId: BUILD_ID,
+      gameMode,
+      menuScreen,
+      optionsSubmenu,
+      roomCode,
+      localPlayerId,
+      hostPlayerId,
+      playerCount: playersInRoom.length,
+      playerNames: playersInRoom.map((player) => player.name?.trim() || player.playerId),
+      readyPlayerIds,
+      localReady,
+      racePhase,
+      controlsLocked,
+      countdownToken,
+      countdownStartAtMs,
+      netStatus,
+      netError,
+      gyroEnabled,
+      tiltEnabled: tiltStatus.enabled,
+      tiltSupported: tiltStatus.supported,
+      tiltPermission: tiltStatus.permission,
+      debugMenuEnabled,
+      trackLabSeed,
+      multiplayerTrackSeed,
+      trialState,
+      trialCurrentMs,
+      trialLastMs,
+      trialBestMs,
+      marbleSpeed: debug.speed,
+      marblePos: [debug.posX, debug.posY, debug.posZ],
+      ghostPlayers: netSmoothing.ghostPlayers,
+    };
+  }, [
+    gameMode,
+    menuScreen,
+    optionsSubmenu,
+    roomCode,
+    localPlayerId,
+    hostPlayerId,
+    playersInRoom,
+    readyPlayerIds,
+    localReady,
+    racePhase,
+    controlsLocked,
+    countdownToken,
+    countdownStartAtMs,
+    netStatus,
+    netError,
+    gyroEnabled,
+    tiltStatus.enabled,
+    tiltStatus.supported,
+    tiltStatus.permission,
+    debugMenuEnabled,
+    trackLabSeed,
+    multiplayerTrackSeed,
+    trialState,
+    trialCurrentMs,
+    trialLastMs,
+    trialBestMs,
+    debug.posX,
+    debug.posY,
+    debug.posZ,
+    debug.speed,
+    netSmoothing.ghostPlayers,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -4892,9 +5011,9 @@ export function HelloMarble() {
     : "";
 
   return (
-    <div className="appShell">
-      <p className="versionBadge">Version {APP_VERSION}</p>
-      <div className="viewport" ref={mountRef} />
+    <div className="appShell" data-testid="app-shell">
+      <p className="versionBadge" data-testid="version-badge">Version {APP_VERSION}</p>
+      <div className="viewport" ref={mountRef} data-testid="game-viewport" />
       {showRotateToPortraitOverlay ? (
         <div className="orientationGuardOverlay" role="alert" aria-live="polite">
           <div className="orientationGuardCard">
@@ -4906,8 +5025,8 @@ export function HelloMarble() {
         </div>
       ) : null}
       {showModePicker ? (
-        <div className="raceOverlay menuOverlay">
-          <div className="raceOverlayCard menuCard">
+        <div className="raceOverlay menuOverlay" data-testid="mode-picker-overlay">
+          <div className="raceOverlayCard menuCard" data-testid="mode-picker-card">
             <div className="menuTitleWrap">
               <h1 className="menuGameTitle">Get Tilted</h1>
             </div>
@@ -4916,6 +5035,7 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
+                data-testid="main-menu-singleplayer"
                 onClick={() => switchGameMode("solo")}
               >
                 Singleplayer
@@ -4923,6 +5043,7 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
+                data-testid="main-menu-test-all"
                 onClick={() => switchGameMode("testAll")}
               >
                 Test All
@@ -4930,6 +5051,7 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
+                data-testid="main-menu-multiplayer"
                 onClick={() => switchGameMode("multiplayer")}
               >
                 Multiplayer
@@ -4937,6 +5059,7 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
+                data-testid="main-menu-options"
                 onClick={() => {
                   setOptionsSubmenu("root");
                   setMenuScreen("options");
@@ -4947,6 +5070,7 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="menuActionButton"
+                data-testid="main-menu-editor"
                 onClick={() => setMenuScreen("editor")}
               >
                 Editor
@@ -4956,8 +5080,8 @@ export function HelloMarble() {
         </div>
       ) : null}
       {showOptionsMenu ? (
-        <div className="raceOverlay menuOverlay">
-          <div className="raceOverlayCard menuCard optionsCard">
+        <div className="raceOverlay menuOverlay" data-testid="options-overlay">
+          <div className="raceOverlayCard menuCard optionsCard" data-testid="options-card">
             <div className="menuHeaderRow">
               <button
                 type="button"
@@ -4973,6 +5097,7 @@ export function HelloMarble() {
                 <span className="optionsFieldLabel">Player Name</span>
                 <input
                   id="optionsPlayerName"
+                  data-testid="options-player-name"
                   className="optionsTextInput"
                   value={playerNameInput}
                   onChange={(event) => setPlayerNameInput(sanitizePlayerName(event.target.value))}
@@ -5020,6 +5145,7 @@ export function HelloMarble() {
                     <span>Gyro Enabled</span>
                     <input
                       id="optionsGyroEnabled"
+                      data-testid="options-gyro-enabled"
                       type="checkbox"
                       checked={gyroEnabled}
                       onChange={(event) => handleGyroSettingChange(event.target.checked)}
@@ -5135,6 +5261,7 @@ export function HelloMarble() {
                 <span>debug</span>
                 <input
                   id="optionsDebugEnabled"
+                  data-testid="options-debug-enabled"
                   type="checkbox"
                   checked={debugMenuEnabled}
                   onChange={(event) => setDebugMenuEnabled(event.target.checked)}
@@ -5951,15 +6078,23 @@ export function HelloMarble() {
         </div>
       ) : null}
       {showRaceLobby ? (
-        <div className="raceOverlay menuOverlay multiplayerLobbyOverlay">
-          <div className="raceOverlayCard multiplayerLobbyCard">
+        <div
+          className="raceOverlay menuOverlay multiplayerLobbyOverlay"
+          data-testid="multiplayer-lobby-overlay"
+        >
+          <div className="raceOverlayCard multiplayerLobbyCard" data-testid="multiplayer-lobby-card">
             <button type="button" className="lobbyBackButton" onClick={returnToMainMenu}>
               {"< Back"}
             </button>
             <p className="raceOverlayTitle">Multiplayer Lobby {roomCode ? `• ${roomCode}` : ""}</p>
             <div className="lobbyQrWrap">
               {qrImageUrl ? (
-                <img className="lobbyQrImage" src={qrImageUrl} alt="Join room QR code" />
+                <img
+                  className="lobbyQrImage"
+                  src={qrImageUrl}
+                  alt="Join room QR code"
+                  data-testid="multiplayer-lobby-qr"
+                />
               ) : (
                 <p className="raceHint">
                   {creatingLobby ? "Creating lobby..." : "QR available after room creation."}
@@ -5982,6 +6117,7 @@ export function HelloMarble() {
               <button
                 type="button"
                 className={`readyButton lobbyActionButton ${localReady ? "ready" : ""}`}
+                data-testid="lobby-ready-button"
                 onClick={() => void toggleReady()}
                 disabled={!canToggleLobbyReady}
               >
@@ -5990,6 +6126,7 @@ export function HelloMarble() {
               <button
                 type="button"
                 className="readyButton lobbyActionButton startMatchButton"
+                data-testid="lobby-start-match-button"
                 onClick={startMatch}
                 disabled={!canStartMatch}
               >
