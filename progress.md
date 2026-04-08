@@ -1721,3 +1721,40 @@ Versioning follow-up (2026-04-07):
   - `android/twa-manifest.json`
   - `android/app/build.gradle`
 - Added matching README guidance so the simplified workflow still preserves reliable build identification during testing.
+
+Diagnostics + automation foundation update (2026-04-07):
+- Added root Playwright workflow scripts in `package.json`:
+  - `test:e2e`
+  - `test:e2e:headed`
+  - `test:e2e:ui`
+- Added an automation-specific dev path that avoids `tsx watch` IPC issues:
+  - root `dev:e2e`
+  - root `dev:server:e2e`
+  - `server/package.json` `dev:nowatch`
+- Added `playwright.config.ts` with:
+  - local web-server orchestration
+  - Chromium desktop project
+  - retained traces/video/screenshots on failure
+- Added `e2e/smoke.spec.ts` baseline smoke coverage for:
+  - main menu + options persistence across reload
+  - singleplayer active race flow
+  - multiplayer host-lobby room-code creation
+- Added lightweight runtime diagnostics exposure on `window.__GET_TILTED_DIAGNOSTICS__` for automation-friendly game-state polling.
+- Added a few stable `data-testid` hooks to `HelloMarble.tsx` for primary menu/lobby/options interactions.
+- Added query-string test hooks for automation-friendly startup:
+  - `debug`
+  - `gyro`
+  - `name`
+  - `seed`
+- Updated `.gitignore` for Playwright artifacts (`playwright-report/`, `test-results/`).
+
+Verification:
+- `npm run lint` passed.
+- `npm run typecheck` passed.
+- `npm run build` passed.
+- `npm run test` passed.
+- `npm run test:e2e` passed with sandbox escalation because local server binding is blocked inside the default sandbox.
+
+Current limitation captured by tooling work:
+- Local server startup for automated browser runs requires escalated execution in this environment because sandboxed commands cannot bind local ports here.
+- The smoke suite currently treats multiplayer as a host-lobby baseline, not a full two-client ready/countdown flow yet; attempted stricter multiplayer coverage exposed current handshake instability and should be revisited in a later pass.
