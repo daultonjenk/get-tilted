@@ -1696,3 +1696,28 @@ Repo analysis update (2026-04-07):
 - Recommendation context for future Codex work:
   - first restore reproducible local execution (`npm ci`)
   - then add browser automation (Playwright), browser remote debugging, and scripted smoke tests before asking Codex for a major gameplay redesign pass
+
+Workflow normalization update (2026-04-07):
+- Replaced the old agent-specific `AGENTS.md` execution playbook with a simpler project guide.
+- Removed custom "Full Publish Test Mode" / "Local Iteration Mode" process rules, forced commit/push behavior, rigid response-format rules, and version-bump ceremony that were no longer helpful for normal development.
+- Kept the useful long-lived project constraints:
+  - raw WebSockets
+  - Cloudflare Pages + Workers Durable Objects
+  - networking separation from gameplay modules
+  - mobile-first tilt/fallback expectations
+  - deterministic seeded randomness for multiplayer-relevant track generation
+- Added a standard Git workflow recommendation centered on working in branches and using PRs instead of pushing directly to `main`.
+- Updated `README.md` to match the normalized workflow:
+  - changed runtime requirement from Node 20+ to Node 22+
+  - switched install guidance from `npm install` to `npm ci`
+  - added a concise normal development workflow section
+  - removed outdated `v0.1` framing from the intro/manual-test wording
+
+Versioning follow-up (2026-04-07):
+- Restored one useful versioning rule after workflow normalization:
+  - each meaningful commit should bump the visible app version so in-game testing can distinguish new builds from cached builds
+- Documented the required version-sync set in `AGENTS.md`:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
+- Added matching README guidance so the simplified workflow still preserves reliable build identification during testing.
