@@ -1669,3 +1669,55 @@ v0.9.1.0 update (Track Hole Set Pieces + Checkpoints):
   - `npm run lint` passed.
   - `npm run typecheck` passed.
   - `npm run build` passed.
+
+Repo analysis update (2026-04-07):
+- Performed an end-to-end repository inspection to define the highest-leverage Codex workflow for a full troubleshooting/revamp pass.
+- Confirmed the intended architecture is still present:
+  - Vite/React/TypeScript/Three.js/cannon-es client
+  - shared raw-WebSocket protocol workspace
+  - local Node WS server
+  - Cloudflare Worker + Durable Object backend
+  - Android TWA wrapper with synchronized `0.9.2.3` versioning
+- Found the current local environment is not bootstrapped:
+  - no `node_modules/` directories are present
+  - `npm run test` fails because `vitest` is missing
+  - `npm run lint` fails because `eslint` is missing
+  - `npm run typecheck` / `npm run build` fail because `tsc` is missing
+- Verified current automated test surface is very thin:
+  - only `shared/src/protocol.test.ts` exists
+  - there are no client gameplay tests, no server/worker integration tests, and no Playwright/browser automation checked into the repo
+- Identified structural complexity hotspots that will strongly affect Codex productivity:
+  - `client/src/game/HelloMarble.tsx` is ~6700 lines
+  - `client/src/game/track/createTrack.ts` is ~4900 lines
+  - runtime/gameplay state, menu flow, editor flow, networking, and debug surfaces are heavily concentrated in a few files
+- Noted one important dev/prod parity risk for future revamp work:
+  - Worker Durable Object path includes race-state rate limiting/value-range validation
+  - local Node dev server path currently forwards/caches race state without equivalent validation/rate limiting
+- Recommendation context for future Codex work:
+  - first restore reproducible local execution (`npm ci`)
+  - then add browser automation (Playwright), browser remote debugging, and scripted smoke tests before asking Codex for a major gameplay redesign pass
+
+Workflow normalization update (2026-04-07):
+- Replaced the old agent-specific `AGENTS.md` execution playbook with a simpler project guide.
+- Removed custom "Full Publish Test Mode" / "Local Iteration Mode" process rules, forced commit/push behavior, rigid response-format rules, and version-bump ceremony that were no longer helpful for normal development.
+- Kept the useful long-lived project constraints:
+  - raw WebSockets
+  - Cloudflare Pages + Workers Durable Objects
+  - networking separation from gameplay modules
+  - mobile-first tilt/fallback expectations
+  - deterministic seeded randomness for multiplayer-relevant track generation
+- Added a standard Git workflow recommendation centered on working in branches and using PRs instead of pushing directly to `main`.
+- Updated `README.md` to match the normalized workflow:
+  - changed runtime requirement from Node 20+ to Node 22+
+  - switched install guidance from `npm install` to `npm ci`
+  - added a concise normal development workflow section
+  - removed outdated `v0.1` framing from the intro/manual-test wording
+
+Versioning follow-up (2026-04-07):
+- Restored one useful versioning rule after workflow normalization:
+  - each meaningful commit should bump the visible app version so in-game testing can distinguish new builds from cached builds
+- Documented the required version-sync set in `AGENTS.md`:
+  - `client/src/buildInfo.ts`
+  - `android/twa-manifest.json`
+  - `android/app/build.gradle`
+- Added matching README guidance so the simplified workflow still preserves reliable build identification during testing.

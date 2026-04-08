@@ -1,17 +1,38 @@
-# Get Tilted (v0.1)
+# Get Tilted
 
-Mobile-first marble racer prototype. This milestone ships the scaffold and a "Hello Marble" scene.
+Mobile-first marble racing game prototype built with React, Three.js, cannon-es, raw WebSockets,
+and Cloudflare Workers/Durable Objects.
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 22+
 - npm 10+
 
 ## Install
 
 ```bash
-npm install
+npm ci
 ```
+
+## Development workflow
+
+Recommended normal workflow:
+
+1. Create a branch for your work.
+2. Install dependencies with `npm ci`.
+3. Run the app locally with `npm run dev`.
+4. Run relevant checks before opening or merging a PR:
+   - `npm run lint`
+   - `npm run typecheck`
+   - `npm run build`
+   - `npm run test`
+
+For normal committed work, bump the visible app version so in-game testing clearly shows that you
+are on a new build and not a cached one. Keep the mirrored Android version fields in sync with the
+same change.
+
+If you are using an agent or automation tool, treat `AGENTS.md` as lightweight project context, not
+as a special execution contract.
 
 ## Run in development
 
@@ -41,7 +62,7 @@ npm run lint
 npm run typecheck
 ```
 
-## v0.1 manual test
+## Manual smoke test
 
 1. Start dev servers with `npm run dev`.
 2. Open the Vite URL shown in terminal.
@@ -50,9 +71,9 @@ npm run typecheck
 5. Click **Reset Marble** and confirm it returns to spawn.
 6. Confirm server logs show `server ready` and connection timestamps.
 
-## Test on phone (current milestone)
+## Test on phone
 
-v0.1 does not use tilt yet. For mobile smoke testing:
+For mobile smoke testing:
 
 1. Ensure phone and dev machine are on the same network.
 2. Start dev server and expose Vite host if needed (`npm run dev:client -- --host`).
