@@ -1,5 +1,37 @@
 import type { TrackPieceTemplate } from "../modularTrack";
 
+type AuthoredBlueprintSetPieceKind =
+  | "arc90-obstacle-1"
+  | "straight-obstacle-1"
+  | "straight-tight-triangles"
+  | "straight-wide-triangles"
+  | "straight-center-hole-respawn";
+
+export type AuthoredBlueprintSetPieceSpec = {
+  placementIndex: number;
+  testPieceIndex: number;
+  kind: AuthoredBlueprintSetPieceKind;
+};
+
+export type AuthoredBlueprintSetPieceTuning = {
+  pieceObstacleScales?: number[][];
+  setPieceLengthScale?: number;
+  showObstacleDebugLabels?: boolean;
+};
+
+export type TemporarySoloCourseLayout = {
+  courseName: string;
+  courseTagline: string;
+  briefing: string;
+  successHint: string;
+  forcedMainPieces: TrackPieceTemplate[];
+  manualSetPieces: AuthoredBlueprintSetPieceSpec[];
+  manualSetPieceTuning?: AuthoredBlueprintSetPieceTuning;
+  enableMovingObstacles: boolean;
+  movingObstacleSafeStartStraightCount: number;
+  enableHoleSetPieces: boolean;
+};
+
 export type TemporaryTrackSegmentDef = {
   length: number;
   slopeDeg: number;
@@ -14,6 +46,15 @@ export type TemporaryTrackSegmentDef = {
 export const DEFAULT_RUNTIME_TRACK_WIDTH = 9;
 // Reserved wide width for future obstacle/set-piece expansion.
 export const SETPIECE_WIDE_TRACK_WIDTH = 18;
+export const SOLO_GAUNTLET_NAME = "Stormrun Gauntlet";
+export const SOLO_GAUNTLET_TAGLINE = "A replayable solo sprint with a commit-or-die drop.";
+
+const ARC90_OBSTACLE_SETPIECE_ID_LEFT = "builtin-setpiece-arc90-obstacle-1-left";
+const ARC90_OBSTACLE_SETPIECE_ID_RIGHT = "builtin-setpiece-arc90-obstacle-1-right";
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 
 function hashStr(s: string): number {
   let h = 2166136261;
@@ -160,6 +201,167 @@ export function buildTemporaryThreeStraightForcedPieces(seed: string): TrackPiec
   });
 
   return pieces;
+}
+
+export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout {
+  const random = makeLayoutRandom(seed);
+  const arcTurnsLeft = random() < 0.5;
+  const arcDirection: "left" | "right" = arcTurnsLeft ? "left" : "right";
+  const arcSetPieceId = arcTurnsLeft
+    ? ARC90_OBSTACLE_SETPIECE_ID_LEFT
+    : ARC90_OBSTACLE_SETPIECE_ID_RIGHT;
+  const obstacleStraightLength = 34 + Math.round(random() * 10);
+  const slalomLength = 48 + Math.round(random() * 12);
+  const recoveryLength = 46 + Math.round(random() * 14);
+  const slalomBank = arcTurnsLeft ? -4 : 4;
+  const recoveryBank = arcTurnsLeft ? 5 : -5;
+  const recoveryGrade = 2.2 + random() * 1.6;
+  const introGrade = -1.4 - random() * 1.4;
+  const obstacleWidthScale = clamp(1.08 + random() * 0.1, 1.04, 1.18);
+  const recoveryWidthScale = clamp(1.04 + random() * 0.16, 1.06, 1.22);
+
+  return {
+    courseName: SOLO_GAUNTLET_NAME,
+    courseTagline: SOLO_GAUNTLET_TAGLINE,
+    briefing: "Learn the blockers, ride the ninety, then commit to the drop for a checkpointed finish sprint.",
+    successHint: "Hold your nerve through the drop, then react cleanly to the finish machinery.",
+    forcedMainPieces: [
+      {
+        id: "solo-gauntlet-start",
+        label: "Run-Up",
+        kind: "straight",
+        weight: 1,
+        length: 18,
+        widthScale: 1.06,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-breaker",
+        label: "Breaker Lane",
+        kind: "straight",
+        weight: 1,
+        length: obstacleStraightLength,
+        widthScale: obstacleWidthScale,
+        gradeDeg: introGrade,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: arcSetPieceId,
+        label: arcTurnsLeft ? "Pressure Bend Left" : "Pressure Bend Right",
+        kind: "arc90",
+        weight: 1,
+        length: 16,
+        widthScale: 1.04,
+        gradeDeg: 0,
+        bankDeg: arcTurnsLeft ? 9 : -9,
+        turnDirection: arcDirection,
+        turnDeg: 90,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-slalom",
+        label: "Knife-Edge Slalom",
+        kind: "straight",
+        weight: 1,
+        length: slalomLength,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: slalomBank,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-drop",
+        label: "Commit Drop",
+        kind: "straight",
+        weight: 1,
+        length: 28,
+        widthScale: 1.14,
+        gradeDeg: -2,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-finish-sprint",
+        label: "Storm Sprint",
+        kind: "straight",
+        weight: 1,
+        length: recoveryLength,
+        widthScale: recoveryWidthScale,
+        gradeDeg: recoveryGrade,
+        bankDeg: recoveryBank,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-finish",
+        label: "Finish Straight",
+        kind: "straight",
+        weight: 1,
+        length: 12,
+        widthScale: 1.02,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+    ],
+    manualSetPieces: [
+      {
+        placementIndex: 1,
+        testPieceIndex: 1,
+        kind: "straight-obstacle-1",
+      },
+      {
+        placementIndex: 5,
+        testPieceIndex: 2,
+        kind: "straight-tight-triangles",
+      },
+      {
+        placementIndex: 6,
+        testPieceIndex: 3,
+        kind: "straight-center-hole-respawn",
+      },
+    ],
+    manualSetPieceTuning: {
+      setPieceLengthScale: 1.04,
+      pieceObstacleScales: [
+        [0.9, 0.86, 0.82, 0.74],
+        [0.86, 0.9, 0.8, 0.9, 0.86, 0.82],
+        [0.68, 0.74, 0.7, 0.76, 0.71, 0.69, 0.73],
+        [],
+      ],
+    },
+    enableMovingObstacles: true,
+    movingObstacleSafeStartStraightCount: 7,
+    enableHoleSetPieces: false,
+  };
 }
 
 export function buildTestAllForcedPieces(): TrackPieceTemplate[] {

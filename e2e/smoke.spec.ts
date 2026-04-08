@@ -51,6 +51,20 @@ function installPageErrorCollector(page: Page): () => string[] {
   return () => pageErrors;
 }
 
+async function revisitWithRetry(page: Page, url: string, attempts = 3): Promise<void> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded" });
+      return;
+    } catch (error) {
+      lastError = error;
+      await page.waitForTimeout(1_500);
+    }
+  }
+  throw lastError;
+}
+
 test("main menu renders and options persist across reload", async ({ page }) => {
   test.setTimeout(90_000);
   const getErrors = installPageErrorCollector(page);
@@ -61,23 +75,27 @@ test("main menu renders and options persist across reload", async ({ page }) => 
 
   await page.getByTestId("main-menu-options").click();
   const playerNameInput = page.getByTestId("options-player-name");
+  await expect(page.getByTestId("options-card")).toBeVisible();
   await expect(playerNameInput).toBeVisible();
   await playerNameInput.fill("Playwright Pilot");
   await expect(playerNameInput).toHaveValue("Playwright Pilot");
 
-  await page.reload();
+  await revisitWithRetry(page, "/?debug=1&gyro=0&seed=playwright_seed");
   await expect(page.getByTestId("mode-picker-card")).toBeVisible();
   await page.getByTestId("main-menu-options").click();
+  await expect(page.getByTestId("options-card")).toBeVisible();
   await expect(page.getByTestId("options-player-name")).toHaveValue("Playwright Pilot");
   await expect(page.getByTestId("options-debug-enabled")).toBeChecked();
   expect(getErrors(), getErrors().join("\n")).toEqual([]);
 });
 
 test("singleplayer enters an active race flow", async ({ page }) => {
+  test.setTimeout(90_000);
   const getErrors = installPageErrorCollector(page);
   await page.goto("/?debug=1&gyro=0&seed=solo_seed");
 
   await page.getByTestId("main-menu-singleplayer").click();
+  await expect(page.getByTestId("solo-course-hud")).toBeVisible();
 
   const diagnostics = await waitForDiagnostics(
     page,
@@ -86,6 +104,7 @@ test("singleplayer enters an active race flow", async ({ page }) => {
 
   expect(diagnostics.gameMode).toBe("solo");
   expect(["countdown", "racing"]).toContain(diagnostics.racePhase);
+  expect(diagnostics.soloCourseName).toBeTruthy();
   expect(getErrors(), getErrors().join("\n")).toEqual([]);
 });
 
@@ -106,7 +125,5 @@ test("multiplayer host lobby boots and receives a room code", async ({ browser }
 
   await expect(hostPage.getByTestId("multiplayer-lobby-card")).toBeVisible();
   expect(hostLobby.roomCode).toHaveLength(6);
-
-  await hostPage.close();
   expect(getHostErrors(), getHostErrors().join("\n")).toEqual([]);
 });

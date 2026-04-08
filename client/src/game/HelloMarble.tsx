@@ -131,6 +131,8 @@ import {
 } from "./track/modularTrack";
 import {
   DEFAULT_RUNTIME_TRACK_WIDTH,
+  SOLO_GAUNTLET_NAME,
+  buildSoloGauntletCourse,
   buildTemporaryThreeStraightForcedPieces,
   buildTestAllForcedPieces,
 } from "./track/temporary/temporaryThreeStraightTrack";
@@ -317,6 +319,62 @@ function readStoredTrackPieceCount(): number {
   return sanitizeTrackPieceCount(raw ? Number(raw) : TRACK_PIECE_COUNT_DEFAULT);
 }
 
+function readStoredBestTimesBySeed(): Record<string, number> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  const raw = window.localStorage.getItem(BEST_TIME_STORAGE_KEY);
+  if (!raw) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const entries = Object.entries(parsed).filter(
+      ([seed, value]) =>
+        typeof seed === "string" &&
+        Number.isFinite(value) &&
+        typeof value === "number" &&
+        value >= 0,
+    ) as Array<[string, number]>;
+    if (entries.length > 0) {
+      return Object.fromEntries(entries.map(([seed, value]) => [sanitizeTrackSeed(seed), value]));
+    }
+  } catch {
+    const legacyBest = Number(raw);
+    if (Number.isFinite(legacyBest) && legacyBest >= 0) {
+      return {
+        [readStoredTrackSeed()]: legacyBest,
+      };
+    }
+  }
+  return {};
+}
+
+function readStoredBestTimeForSeed(seed: string): number | null {
+  const bestTimesBySeed = readStoredBestTimesBySeed();
+  const value = bestTimesBySeed[sanitizeTrackSeed(seed)];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function writeStoredBestTimeForSeed(seed: string, value: number | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const nextSeed = sanitizeTrackSeed(seed);
+  const bestTimesBySeed = readStoredBestTimesBySeed();
+  if (value == null) {
+    delete bestTimesBySeed[nextSeed];
+  } else {
+    bestTimesBySeed[nextSeed] = value;
+  }
+  const entries = Object.entries(bestTimesBySeed).filter(([, storedValue]) => storedValue >= 0);
+  if (entries.length === 0) {
+    window.localStorage.removeItem(BEST_TIME_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(BEST_TIME_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
+}
+
 function readStoredTrackLibrary(): TrackPieceTemplate[] {
   if (typeof window === "undefined") {
     return [];
@@ -481,6 +539,7 @@ function toTrackDraft(piece: TrackPieceTemplate): TrackPieceDraft {
 function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOptions {
   const seed = sanitizeTrackSeed(config.seed);
   const isTestAll = config.layoutPreset === "testAll";
+  const sanitizedGenerationPolicy = sanitizeTrackGenerationPolicy(config.generationPolicy);
   const trackVisualSettings = sanitizeTrackVisualSettings(config.trackVisualSettings);
   if (isTestAll) {
     const testPieces = buildTestAllForcedPieces();
@@ -508,6 +567,37 @@ function createTrackOptionsFromConfig(config: RuntimeTrackConfig): CreateTrackOp
         enableHoleSetPieces: true,
         safeStartStraightCount: 0,
         forceHoleSpawnOnAll: true,
+      },
+    };
+  }
+  if (sanitizedGenerationPolicy === "singleplayer_camera_friendly_10") {
+    const soloCourse = buildSoloGauntletCourse(seed);
+    const blueprint = buildTrackBlueprint({
+      config: { seed, pieceCount: soloCourse.forcedMainPieces.length },
+      customPieces: [],
+      includeCustomPieces: false,
+      trackWidth: DEFAULT_RUNTIME_TRACK_WIDTH,
+      enableBranchPieces: false,
+      maxHeadingDriftDeg: 18,
+      enforceBendPairs: false,
+      generationPolicy: "default",
+      forcedMainPieces: soloCourse.forcedMainPieces,
+      disableStarterSequence: true,
+    });
+    return {
+      seed,
+      blueprint,
+      visualSettings: {
+        objectTransparencyPercent: trackVisualSettings.objectTransparencyPercent,
+        showObjectWireframes: trackVisualSettings.showObjectWireframes,
+        wireframeUsesObjectTransparency: trackVisualSettings.wireframeUsesObjectTransparency,
+      },
+      blueprintObstacleSettings: {
+        enableMovingObstacles: soloCourse.enableMovingObstacles,
+        enableHoleSetPieces: soloCourse.enableHoleSetPieces,
+        safeStartStraightCount: soloCourse.movingObstacleSafeStartStraightCount,
+        manualTestPieces: soloCourse.manualSetPieces,
+        manualTestTuning: soloCourse.manualSetPieceTuning,
       },
     };
   }
@@ -601,17 +691,9 @@ export function HelloMarble() {
   const [trialState, setTrialState] = useState<TrialState>("idle");
   const [trialCurrentMs, setTrialCurrentMs] = useState<number | null>(null);
   const [trialLastMs, setTrialLastMs] = useState<number | null>(null);
-  const [trialBestMs, setTrialBestMs] = useState<number | null>(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
-    const raw = window.localStorage.getItem(BEST_TIME_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  });
+  const [trialBestMs, setTrialBestMs] = useState<number | null>(() =>
+    readStoredBestTimeForSeed(readStoredTrackSeed()),
+  );
   const debug = useDebugStore();
   const netSmoothing = useNetStore();
   const [netStatus, setNetStatus] = useState<WSStatus>("disconnected");
@@ -681,6 +763,7 @@ export function HelloMarble() {
     toTrackDraft(createDefaultCustomPiece("straight")),
   );
   const [trackLabStatus, setTrackLabStatus] = useState("");
+  const trialBestSeedRef = useRef(readStoredTrackSeed());
   const [editorLayout, setEditorLayout] = useState<EditorLayout>(() => readStoredEditorLayout());
   const [editorSelectedObstacleId, setEditorSelectedObstacleId] = useState<string | null>(null);
   const [editorReferenceMarbleSelected, setEditorReferenceMarbleSelected] = useState(false);
@@ -724,6 +807,15 @@ export function HelloMarble() {
   const editorSvgRef = useRef<SVGSVGElement | null>(null);
   const editorDragStateRef = useRef<EditorDragState | null>(null);
   const multiplayerTrackSeedRef = useRef(multiplayerTrackSeed);
+
+  const syncTrackLabSeed = (nextSeedInput: string): string => {
+    const nextSeed = sanitizeTrackSeed(nextSeedInput);
+    trackLabSeedRef.current = nextSeed;
+    trialBestSeedRef.current = nextSeed;
+    setTrackLabSeed(nextSeed);
+    setTrialBestMs(readStoredBestTimeForSeed(nextSeed));
+    return nextSeed;
+  };
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 700px)");
@@ -1026,6 +1118,7 @@ export function HelloMarble() {
     if (typeof window === "undefined") {
       return;
     }
+    const soloCourse = buildSoloGauntletCourse(trackLabSeed);
     window.__GET_TILTED_DIAGNOSTICS__ = {
       appVersion: APP_VERSION,
       buildId: BUILD_ID,
@@ -1052,6 +1145,8 @@ export function HelloMarble() {
       debugMenuEnabled,
       trackLabSeed,
       multiplayerTrackSeed,
+      soloCourseName: soloCourse.courseName,
+      soloCourseTagline: soloCourse.courseTagline,
       trialState,
       trialCurrentMs,
       trialLastMs,
@@ -1098,11 +1193,7 @@ export function HelloMarble() {
     if (typeof window === "undefined") {
       return;
     }
-    if (trialBestMs == null) {
-      window.localStorage.removeItem(BEST_TIME_STORAGE_KEY);
-      return;
-    }
-    window.localStorage.setItem(BEST_TIME_STORAGE_KEY, String(trialBestMs));
+    writeStoredBestTimeForSeed(trialBestSeedRef.current, trialBestMs);
   }, [trialBestMs]);
 
   useEffect(() => {
@@ -3918,6 +4009,7 @@ export function HelloMarble() {
 
   const showTouchFallback =
     !gyroEnabled || !tiltStatus.supported || tiltStatus.permission === "denied";
+  const soloCourse = useMemo(() => buildSoloGauntletCourse(trackLabSeed), [trackLabSeed]);
   const showModePicker = gameMode === "unselected" && menuScreen === "main";
   const showOptionsMenu = gameMode === "unselected" && menuScreen === "options";
   const showTrackLabMenu = gameMode === "unselected" && menuScreen === "trackLab";
@@ -3958,6 +4050,13 @@ export function HelloMarble() {
     gyroEnabled &&
     racePhase === "racing" &&
     trialState !== "finished";
+  const showSoloHud = gameplayUiVisible && gameMode === "solo";
+  const soloHudMessage =
+    racePhase === "countdown"
+      ? "Memorize the line, then hit the drop with confidence."
+      : racePhase === "racing"
+        ? soloCourse.successHint
+        : soloCourse.briefing;
   const optionsTitleLabel = (() => {
     if (showingOptionsRoot) {
       return "Options";
@@ -4727,7 +4826,7 @@ export function HelloMarble() {
       "default",
       toTrackVisualSettingsFromTuning(tuningRef.current),
     );
-    setTrackLabSeed(nextConfig.seed);
+    syncTrackLabSeed(nextConfig.seed);
     setTrackLabPieceCount(nextConfig.pieceCount);
     applyTrackConfigRef.current(nextConfig);
     setTrackLabStatus(
@@ -4744,7 +4843,7 @@ export function HelloMarble() {
 
   const randomizeSeedForTrackLab = () => {
     const next = randomTrackSeed("track");
-    setTrackLabSeed(next);
+    syncTrackLabSeed(next);
     setTrackLabStatus(`Seed randomized: ${next}`);
   };
 
@@ -4837,10 +4936,8 @@ export function HelloMarble() {
     raceClientRef.current?.sendRaceStart(seed);
   };
 
-  const rebuildSoloTrackWithRandomSeed = (): void => {
-    const nextSeed = randomTrackSeed("solo");
-    trackLabSeedRef.current = nextSeed;
-    setTrackLabSeed(nextSeed);
+  const applySoloTrackSeed = (seed: string): void => {
+    const nextSeed = syncTrackLabSeed(seed);
     const nextConfig = buildTrackConfig(
       nextSeed,
       trackLabPieceCountRef.current,
@@ -4854,6 +4951,10 @@ export function HelloMarble() {
     applyTrackConfigRef.current(nextConfig);
   };
 
+  const rebuildSoloTrackWithRandomSeed = (): void => {
+    applySoloTrackSeed(randomTrackSeed("solo"));
+  };
+
   const startSoloRaceSequence = async () => {
     const sequenceId = soloStartSequenceRef.current + 1;
     soloStartSequenceRef.current = sequenceId;
@@ -4862,6 +4963,7 @@ export function HelloMarble() {
     setCountdownStartAtMs(null);
     setTrialState("idle");
     setTrialCurrentMs(null);
+    setRespawnCount(0);
     hasSentFinishRef.current = false;
     countdownIndexRef.current = -1;
     countdownGoHandledRef.current = false;
@@ -4885,9 +4987,11 @@ export function HelloMarble() {
   };
 
   const restartSoloRace = () => {
-    if (gameModeRef.current === "solo") {
-      rebuildSoloTrackWithRandomSeed();
-    }
+    void startSoloRaceSequence();
+  };
+
+  const remixSoloRace = () => {
+    rebuildSoloTrackWithRandomSeed();
     void startSoloRaceSequence();
   };
 
@@ -5031,6 +5135,11 @@ export function HelloMarble() {
               <h1 className="menuGameTitle">Get Tilted</h1>
             </div>
             <p className="menuIntroText">Pick a mode and roll in.</p>
+            <div className="menuFeatureCard">
+              <p className="menuFeatureEyebrow">Current Solo Slice</p>
+              <h2 className="menuFeatureTitle">{SOLO_GAUNTLET_NAME}</h2>
+              <p className="menuFeatureText">{soloCourse.briefing}</p>
+            </div>
             <div className="mainMenuButtonGrid">
               <button
                 type="button"
@@ -5038,7 +5147,7 @@ export function HelloMarble() {
                 data-testid="main-menu-singleplayer"
                 onClick={() => switchGameMode("solo")}
               >
-                Singleplayer
+                Solo Gauntlet
               </button>
               <button
                 type="button"
@@ -5291,7 +5400,7 @@ export function HelloMarble() {
                   id="trackLabSeedInput"
                   className="optionsTextInput"
                   value={trackLabSeed}
-                  onChange={(event) => setTrackLabSeed(sanitizeTrackSeedInput(event.target.value))}
+                  onChange={(event) => syncTrackLabSeed(sanitizeTrackSeedInput(event.target.value))}
                   placeholder="seed_123"
                   maxLength={64}
                   autoComplete="off"
@@ -5308,7 +5417,7 @@ export function HelloMarble() {
                 <button
                   type="button"
                   className="menuActionButton optionsMenuButton"
-                  onClick={() => setTrackLabSeed(DEFAULT_TRACK_SEED)}
+                  onClick={() => syncTrackLabSeed(DEFAULT_TRACK_SEED)}
                 >
                   Reset Seed
                 </button>
@@ -6077,6 +6186,32 @@ export function HelloMarble() {
           ) : null}
         </div>
       ) : null}
+      {showSoloHud ? (
+        <div className="soloHudCard" data-testid="solo-course-hud">
+          <p className="soloHudEyebrow">Solo Demo</p>
+          <p className="soloHudTitle">{soloCourse.courseName}</p>
+          <p className="soloHudTagline">{soloCourse.courseTagline}</p>
+          <div className="soloHudStats">
+            <p>
+              <span>Seed</span>
+              <strong>{trackLabSeed}</strong>
+            </p>
+            <p>
+              <span>Time</span>
+              <strong>{formatTimeMs(trialCurrentMs)}</strong>
+            </p>
+            <p>
+              <span>Best</span>
+              <strong>{formatTimeMs(trialBestMs)}</strong>
+            </p>
+            <p>
+              <span>Respawns</span>
+              <strong>{respawnCount}</strong>
+            </p>
+          </div>
+          <p className="soloHudHint">{soloHudMessage}</p>
+        </div>
+      ) : null}
       {showRaceLobby ? (
         <div
           className="raceOverlay menuOverlay multiplayerLobbyOverlay"
@@ -6230,11 +6365,16 @@ export function HelloMarble() {
         <div className="raceOverlay">
           <div className="raceOverlayCard raceResultCard">
             <p className="raceOverlayTitle">Race Results</p>
-            <p className="raceResultHeadline">Solo Finished</p>
+            <p className="raceResultHeadline">Gauntlet Cleared</p>
+            <p>{soloCourse.courseName}</p>
+            <p>Seed: {trackLabSeed}</p>
             <p>Time: {formatTimeMs(trialLastMs)}</p>
-            <p>Best: {formatTimeMs(trialBestMs)}</p>
+            <p>Personal Best: {formatTimeMs(trialBestMs)}</p>
             <button type="button" className="readyButton ready" onClick={restartSoloRace}>
-              RESTART RACE
+              RESTART SAME SEED
+            </button>
+            <button type="button" className="menuActionButton" onClick={remixSoloRace}>
+              SHUFFLE TRACK
             </button>
             <button
               type="button"

@@ -1642,6 +1642,60 @@ v0.9.0.0 update:
 - Commit/push context:
   - Commit and push executed in this task.
 
+v0.9.3.0 update (Solo Gauntlet vertical-slice pass):
+- Phase D — Replace placeholder solo track flow with a deliberate authored gauntlet:
+  - Added `buildSoloGauntletCourse(seed)` in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts`.
+  - The solo course now has a seeded authored sequence instead of relying on the old placeholder three-straight layout:
+    - run-up straight
+    - blocker lane using `straight-obstacle-1`
+    - authored `arc90-obstacle-1` pressure bend
+    - triangle slalom section
+    - center-drop checkpoint moment using `straight-center-hole-respawn`
+    - moving-obstacle finish sprint
+    - short finish straight
+  - Solo course metadata is now exported alongside the geometry recipe:
+    - course name
+    - tagline
+    - briefing
+    - success hint
+  - `createTrackOptionsFromConfig()` in `client/src/game/HelloMarble.tsx` now distinguishes real solo generation (`singleplayer_camera_friendly_10`) from the fallback/default path and routes solo into the new authored gauntlet blueprint.
+  - Solo blueprint obstacle settings now explicitly enable:
+    - authored manual obstacle pieces
+    - seeded moving obstacles on the finish sprint
+    - disabled auto hole spawning in favor of the deliberate drop/checkpoint section
+- Solo play loop improvements in `client/src/game/HelloMarble.tsx`:
+  - Added `applySoloTrackSeed()` helper to rebuild solo tracks deterministically from a chosen seed.
+  - Restarting a solo run no longer randomizes the course; `RESTART SAME SEED` now actually replays the same gauntlet layout.
+  - Added `SHUFFLE TRACK` action on the solo result card for intentional reseeding.
+  - Reset respawn count at the start of each solo race sequence so the new HUD reflects the current attempt instead of lifetime session carry-over.
+  - Updated the solo result presentation from generic “Solo Finished” to a more intentional “Gauntlet Cleared” flow with seed visibility.
+- New solo-facing presentation layer:
+  - Added a main-menu feature card advertising the current solo slice direction.
+  - Renamed the main solo button label to `Solo Gauntlet`.
+  - Added a compact in-race solo HUD showing:
+    - course name/tagline
+    - seed
+    - current time
+    - personal best
+    - respawns
+    - contextual hint text
+  - Added corresponding styles in `client/src/index.css`.
+- Diagnostics update:
+  - `window.__GET_TILTED_DIAGNOSTICS__` now includes `soloCourseName` and `soloCourseTagline`.
+  - Updated `client/src/env.d.ts` to match the expanded diagnostics shape.
+- Version discipline:
+  - Bumped visible build/app version to `0.9.3.0`.
+  - Synchronized:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.3.0`, `appVersionCode=90300`)
+    - `android/app/build.gradle` (`versionName=0.9.3.0`, `versionCode=90300`)
+- Verification:
+  - `npm run lint` passed.
+  - `npm run typecheck` passed.
+  - `npm run build` passed.
+  - `npm run test` passed.
+  - `npm run test:e2e` passed after sandbox escalation for local server/browser execution.
+
 v0.9.1.0 update (Track Hole Set Pieces + Checkpoints):
 - Phase C — Auto-generated hole set pieces + checkpoint system (createTrack.ts + HelloMarble.tsx):
   - New types: `AutoHoleKind = "center-hole" | "side-holes" | "double-hole"`, `HoleSetPieceSelection`.
@@ -1758,3 +1812,52 @@ Verification:
 Current limitation captured by tooling work:
 - Local server startup for automated browser runs requires escalated execution in this environment because sandboxed commands cannot bind local ports here.
 - The smoke suite currently treats multiplayer as a host-lobby baseline, not a full two-client ready/countdown flow yet; attempted stricter multiplayer coverage exposed current handshake instability and should be revisited in a later pass.
+
+v0.9.3.0 update (Solo vertical-slice gauntlet pass):
+- Replaced the placeholder solo straight-track path with a deterministic authored gauntlet in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts`.
+  - Added `buildSoloGauntletCourse(seed)` to generate a seeded solo-only course profile with:
+    - named course metadata (`Stormrun Gauntlet`)
+    - authored forced main pieces
+    - manual set-piece obstacle specs
+    - a checkpointed center-drop section
+    - a moving-obstacle finish sprint
+  - Kept the older temporary straight-piece builder for non-solo/default fallback paths.
+- Updated `client/src/game/HelloMarble.tsx` to route `singleplayer_camera_friendly_10` through the new authored solo course instead of the placeholder forced-piece path.
+  - Solo track build now enables the manual authored set pieces and moving-obstacle section.
+  - Restarting solo now preserves the current seed for cleaner time-trial replay.
+  - Added a `Shuffle Track` path that explicitly rerolls a new solo seed.
+  - Added a solo HUD showing course identity, current seed, live time, PB, and respawns.
+  - Added a solo-feature callout to the main menu and retitled the solo button to `Solo Gauntlet`.
+  - Added diagnostics fields for solo course name/tagline.
+  - Reset respawn count when a new solo run starts.
+- Updated `client/src/index.css` with styles for:
+  - main-menu solo feature card
+  - in-race solo HUD
+  - responsive mobile placement for the solo HUD
+- Version discipline:
+  - Bumped visible build version to `0.9.3.0` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.3.0`, `appVersionCode=90300`)
+    - `android/app/build.gradle` (`versionName=0.9.3.0`, `versionCode=90300`)
+
+Verification:
+- `npm run lint` passed.
+- `npm run typecheck` passed.
+- `npm run build` passed.
+- `npm run test` passed.
+- `npm run test:e2e` passed with escalation for local server/browser execution.
+
+Follow-up stabilization on the same `v0.9.3.0` pass:
+- Fixed a solo-loop correctness issue in `client/src/game/HelloMarble.tsx`:
+  - `Personal Best` is now tracked per track seed instead of globally, so `Shuffle Track` no longer leaks best times across different course variants.
+  - Added lightweight best-time migration support for legacy numeric storage into the new seed-keyed storage shape.
+  - Updated solo seed-sync paths (`Solo`, `Track Lab`, seed randomize/reset, preview apply) so the displayed PB always matches the active seed.
+- Fixed a Playwright harness flake in `e2e/smoke.spec.ts`:
+  - removed an explicit multiplayer-page close that could race Playwright artifact writing and fail the suite even when the lobby flow itself succeeded.
+
+Verification refresh after stabilization:
+- `npm run lint` passed.
+- `npm run typecheck` passed.
+- `npm run build` passed.
+- `npm run test` passed.
+- `npm run test:e2e` passed with escalation.

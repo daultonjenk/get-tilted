@@ -34,6 +34,8 @@ type GetTiltedDiagnostics = {
   debugMenuEnabled: boolean;
   trackLabSeed: string;
   multiplayerTrackSeed: string;
+  soloCourseName: string;
+  soloCourseTagline: string;
   trialState: string;
   trialCurrentMs: number | null;
   trialLastMs: number | null;
