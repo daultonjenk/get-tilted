@@ -1802,6 +1802,17 @@ Diagnostics + automation foundation update (2026-04-07):
   - `seed`
 - Updated `.gitignore` for Playwright artifacts (`playwright-report/`, `test-results/`).
 
+v0.9.4.1 update (Solo lane straightening pass):
+- Simplified the active solo gauntlet geometry in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts` so the course now reads as one uninterrupted carved lane.
+  - Removed the remaining per-piece heading drift from the solo route (`turnDeg` now stays `0` across the active lane).
+  - Standardized solo lane width with a single `SOLO_GAUNTLET_WIDTH_SCALE` constant so the walls no longer pinch and widen between obstacle beats.
+  - Updated solo course copy to match the new straight-lane identity.
+- Version discipline:
+  - Bumped visible build version to `0.9.4.1` and synchronized:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.4.1`, `appVersionCode=90401`)
+    - `android/app/build.gradle` (`versionName=0.9.4.1`, `versionCode=90401`)
+
 Verification:
 - `npm run lint` passed.
 - `npm run typecheck` passed.

@@ -47,7 +47,8 @@ export const DEFAULT_RUNTIME_TRACK_WIDTH = 9;
 // Reserved wide width for future obstacle/set-piece expansion.
 export const SETPIECE_WIDE_TRACK_WIDTH = 18;
 export const SOLO_GAUNTLET_NAME = "Stormrun Gauntlet";
-export const SOLO_GAUNTLET_TAGLINE = "A flat, phone-first obstacle run built for clean gyro lines.";
+export const SOLO_GAUNTLET_TAGLINE = "A straight, carved-lane obstacle run built for clean gyro lines.";
+const SOLO_GAUNTLET_WIDTH_SCALE = 1.04;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -208,8 +209,8 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
   return {
     courseName: SOLO_GAUNTLET_NAME,
     courseTagline: SOLO_GAUNTLET_TAGLINE,
-    briefing: "Stay on the same plane, read the blockers early, and carve clean lines through the lane.",
-    successHint: "Favor smooth corrections over heroic saves and let the gaps come to you.",
+    briefing: "Read the blockers early and flow down one uninterrupted lane without fighting the board.",
+    successHint: "Stay centered, make small corrections, and let the obstacle rhythm carry the run.",
     forcedMainPieces: [
       {
         id: "solo-gauntlet-start",
@@ -217,7 +218,7 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 18,
-        widthScale: 1.04,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
         gradeDeg: 0,
         bankDeg: 0,
         turnDirection: "left",
@@ -232,7 +233,7 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 34,
-        widthScale: 1.08,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
         bankDeg: 0,
         gradeDeg: 0,
         turnDirection: "left",
@@ -247,11 +248,11 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 38,
-        widthScale: 1,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
         gradeDeg: 0,
         bankDeg: 0,
         turnDirection: "left",
-        turnDeg: 6,
+        turnDeg: 0,
         tunnelRoof: false,
         railLeft: true,
         railRight: true,
@@ -262,11 +263,11 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 38,
-        widthScale: 1,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
         gradeDeg: 0,
         bankDeg: 0,
         turnDirection: "right",
-        turnDeg: 6,
+        turnDeg: 0,
         tunnelRoof: false,
         railLeft: true,
         railRight: true,
@@ -277,11 +278,11 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 36,
-        widthScale: 1.04,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
         gradeDeg: 0,
         bankDeg: 0,
         turnDirection: "left",
-        turnDeg: 4,
+        turnDeg: 0,
         tunnelRoof: false,
         railLeft: true,
         railRight: true,
@@ -292,11 +293,11 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 17,
-        widthScale: 1,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
         gradeDeg: 0,
         bankDeg: 0,
         turnDirection: "right",
-        turnDeg: 4,
+        turnDeg: 0,
         tunnelRoof: false,
         railLeft: true,
         railRight: true,
@@ -307,7 +308,7 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 12,
-        widthScale: 1.02,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
         gradeDeg: 0,
         bankDeg: 0,
         turnDirection: "left",
