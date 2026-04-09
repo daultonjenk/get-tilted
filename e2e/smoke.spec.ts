@@ -65,6 +65,20 @@ async function revisitWithRetry(page: Page, url: string, attempts = 3): Promise<
   throw lastError;
 }
 
+async function expectCompactSoloHud(page: Page, limits?: {
+  maxWidth: number;
+  maxHeight: number;
+  maxTop: number;
+}): Promise<void> {
+  const hud = page.getByTestId("solo-course-hud");
+  await expect(hud).toBeVisible();
+  const box = await hud.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeLessThan(limits?.maxWidth ?? 260);
+  expect(box!.height).toBeLessThan(limits?.maxHeight ?? 110);
+  expect(box!.y).toBeLessThan(limits?.maxTop ?? 90);
+}
+
 test("main menu renders and options persist across reload", async ({ page }) => {
   test.setTimeout(90_000);
   const getErrors = installPageErrorCollector(page);
@@ -95,7 +109,7 @@ test("singleplayer enters an active race flow", async ({ page }) => {
   await page.goto("/?debug=1&gyro=0&seed=solo_seed");
 
   await page.getByTestId("main-menu-singleplayer").click();
-  await expect(page.getByTestId("solo-course-hud")).toBeVisible();
+  await expectCompactSoloHud(page);
 
   const diagnostics = await waitForDiagnostics(
     page,
@@ -106,6 +120,39 @@ test("singleplayer enters an active race flow", async ({ page }) => {
   expect(["countdown", "racing"]).toContain(diagnostics.racePhase);
   expect(diagnostics.soloCourseName).toBeTruthy();
   expect(getErrors(), getErrors().join("\n")).toEqual([]);
+});
+
+test("singleplayer stays readable on portrait mobile", async ({ browser }) => {
+  test.setTimeout(90_000);
+  const page = await browser.newPage({
+    viewport: {
+      width: 390,
+      height: 844,
+    },
+  });
+  const getErrors = installPageErrorCollector(page);
+
+  await page.goto("/?debug=1&gyro=0&seed=solo_mobile_seed");
+  await expect(page.getByTestId("mode-picker-card")).toBeVisible();
+  await expect(page.getByTestId("solo-feature-card")).toBeHidden();
+
+  await page.getByTestId("main-menu-singleplayer").click();
+  await expectCompactSoloHud(page, {
+    maxWidth: 210,
+    maxHeight: 90,
+    maxTop: 45,
+  });
+
+  const diagnostics = await waitForDiagnostics(
+    page,
+    (value) => value.gameMode === "solo" && value.racePhase !== "waiting",
+  );
+
+  expect(diagnostics.gameMode).toBe("solo");
+  expect(["countdown", "racing"]).toContain(diagnostics.racePhase);
+  expect(getErrors(), getErrors().join("\n")).toEqual([]);
+
+  await page.close();
 });
 
 test("multiplayer host lobby boots and receives a room code", async ({ browser }) => {

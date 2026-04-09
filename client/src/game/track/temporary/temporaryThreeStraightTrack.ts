@@ -47,10 +47,7 @@ export const DEFAULT_RUNTIME_TRACK_WIDTH = 9;
 // Reserved wide width for future obstacle/set-piece expansion.
 export const SETPIECE_WIDE_TRACK_WIDTH = 18;
 export const SOLO_GAUNTLET_NAME = "Stormrun Gauntlet";
-export const SOLO_GAUNTLET_TAGLINE = "A replayable solo sprint with a commit-or-die drop.";
-
-const ARC90_OBSTACLE_SETPIECE_ID_LEFT = "builtin-setpiece-arc90-obstacle-1-left";
-const ARC90_OBSTACLE_SETPIECE_ID_RIGHT = "builtin-setpiece-arc90-obstacle-1-right";
+export const SOLO_GAUNTLET_TAGLINE = "A flat, phone-first obstacle run built for clean gyro lines.";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -205,26 +202,14 @@ export function buildTemporaryThreeStraightForcedPieces(seed: string): TrackPiec
 
 export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout {
   const random = makeLayoutRandom(seed);
-  const arcTurnsLeft = random() < 0.5;
-  const arcDirection: "left" | "right" = arcTurnsLeft ? "left" : "right";
-  const arcSetPieceId = arcTurnsLeft
-    ? ARC90_OBSTACLE_SETPIECE_ID_LEFT
-    : ARC90_OBSTACLE_SETPIECE_ID_RIGHT;
-  const obstacleStraightLength = 34 + Math.round(random() * 10);
-  const slalomLength = 48 + Math.round(random() * 12);
-  const recoveryLength = 46 + Math.round(random() * 14);
-  const slalomBank = arcTurnsLeft ? -4 : 4;
-  const recoveryBank = arcTurnsLeft ? 5 : -5;
-  const recoveryGrade = 2.2 + random() * 1.6;
-  const introGrade = -1.4 - random() * 1.4;
-  const obstacleWidthScale = clamp(1.08 + random() * 0.1, 1.04, 1.18);
-  const recoveryWidthScale = clamp(1.04 + random() * 0.16, 1.06, 1.22);
+  const varyScale = (base: number, variance: number, min: number, max: number): number =>
+    clamp(base + (random() - 0.5) * variance * 2, min, max);
 
   return {
     courseName: SOLO_GAUNTLET_NAME,
     courseTagline: SOLO_GAUNTLET_TAGLINE,
-    briefing: "Learn the blockers, ride the ninety, then commit to the drop for a checkpointed finish sprint.",
-    successHint: "Hold your nerve through the drop, then react cleanly to the finish machinery.",
+    briefing: "Stay on the same plane, read the blockers early, and carve clean lines through the lane.",
+    successHint: "Favor smooth corrections over heroic saves and let the gaps come to you.",
     forcedMainPieces: [
       {
         id: "solo-gauntlet-start",
@@ -232,7 +217,7 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight",
         weight: 1,
         length: 18,
-        widthScale: 1.06,
+        widthScale: 1.04,
         gradeDeg: 0,
         bankDeg: 0,
         turnDirection: "left",
@@ -246,10 +231,10 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         label: "Breaker Lane",
         kind: "straight",
         weight: 1,
-        length: obstacleStraightLength,
-        widthScale: obstacleWidthScale,
-        gradeDeg: introGrade,
+        length: 34,
+        widthScale: 1.08,
         bankDeg: 0,
+        gradeDeg: 0,
         turnDirection: "left",
         turnDeg: 0,
         tunnelRoof: false,
@@ -257,61 +242,61 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         railRight: true,
       },
       {
-        id: arcSetPieceId,
-        label: arcTurnsLeft ? "Pressure Bend Left" : "Pressure Bend Right",
-        kind: "arc90",
-        weight: 1,
-        length: 16,
-        widthScale: 1.04,
-        gradeDeg: 0,
-        bankDeg: arcTurnsLeft ? 9 : -9,
-        turnDirection: arcDirection,
-        turnDeg: 90,
-        tunnelRoof: false,
-        railLeft: true,
-        railRight: true,
-      },
-      {
-        id: "solo-gauntlet-slalom",
-        label: "Knife-Edge Slalom",
+        id: "solo-gauntlet-slalom-left",
+        label: "Needle Sweep",
         kind: "straight",
         weight: 1,
-        length: slalomLength,
+        length: 38,
         widthScale: 1,
         gradeDeg: 0,
-        bankDeg: slalomBank,
-        turnDirection: "left",
-        turnDeg: 0,
-        tunnelRoof: false,
-        railLeft: true,
-        railRight: true,
-      },
-      {
-        id: "solo-gauntlet-drop",
-        label: "Commit Drop",
-        kind: "straight",
-        weight: 1,
-        length: 28,
-        widthScale: 1.14,
-        gradeDeg: -2,
         bankDeg: 0,
         turnDirection: "left",
-        turnDeg: 0,
+        turnDeg: 6,
         tunnelRoof: false,
         railLeft: true,
         railRight: true,
       },
       {
-        id: "solo-gauntlet-finish-sprint",
-        label: "Storm Sprint",
+        id: "solo-gauntlet-slalom-right",
+        label: "Counter Sweep",
         kind: "straight",
         weight: 1,
-        length: recoveryLength,
-        widthScale: recoveryWidthScale,
-        gradeDeg: recoveryGrade,
-        bankDeg: recoveryBank,
+        length: 38,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "right",
+        turnDeg: 6,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-motion",
+        label: "Moving Lane",
+        kind: "straight",
+        weight: 1,
+        length: 36,
+        widthScale: 1.04,
+        gradeDeg: 0,
+        bankDeg: 0,
         turnDirection: "left",
-        turnDeg: 0,
+        turnDeg: 4,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-finish-gauntlet",
+        label: "Finish Gauntlet",
+        kind: "straight",
+        weight: 1,
+        length: 17,
+        widthScale: 1,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "right",
+        turnDeg: 4,
         tunnelRoof: false,
         railLeft: true,
         railRight: true,
@@ -339,27 +324,60 @@ export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout
         kind: "straight-obstacle-1",
       },
       {
-        placementIndex: 5,
+        placementIndex: 2,
         testPieceIndex: 2,
         kind: "straight-tight-triangles",
       },
       {
-        placementIndex: 6,
+        placementIndex: 3,
         testPieceIndex: 3,
-        kind: "straight-center-hole-respawn",
+        kind: "straight-wide-triangles",
+      },
+      {
+        placementIndex: 5,
+        testPieceIndex: 4,
+        kind: "straight-obstacle-1",
       },
     ],
     manualSetPieceTuning: {
-      setPieceLengthScale: 1.04,
+      setPieceLengthScale: 0.98,
       pieceObstacleScales: [
-        [0.9, 0.86, 0.82, 0.74],
-        [0.86, 0.9, 0.8, 0.9, 0.86, 0.82],
-        [0.68, 0.74, 0.7, 0.76, 0.71, 0.69, 0.73],
-        [],
+        [
+          varyScale(0.92, 0.08, 0.78, 1),
+          varyScale(0.88, 0.08, 0.76, 0.98),
+          varyScale(0.82, 0.08, 0.72, 0.94),
+          varyScale(0.78, 0.08, 0.68, 0.9),
+        ],
+        [
+          varyScale(0.76, 0.06, 0.68, 0.84),
+          varyScale(0.82, 0.06, 0.72, 0.9),
+          varyScale(0.74, 0.06, 0.66, 0.82),
+          varyScale(0.8, 0.06, 0.72, 0.88),
+          varyScale(0.76, 0.06, 0.68, 0.84),
+          varyScale(0.72, 0.06, 0.64, 0.8),
+          varyScale(0.78, 0.06, 0.7, 0.86),
+        ],
+        [
+          varyScale(0.88, 0.07, 0.76, 0.98),
+          varyScale(0.84, 0.07, 0.74, 0.94),
+          varyScale(0.8, 0.07, 0.7, 0.9),
+          varyScale(0.86, 0.07, 0.74, 0.96),
+          varyScale(0.82, 0.07, 0.72, 0.92),
+          varyScale(0.78, 0.07, 0.68, 0.88),
+          varyScale(0.84, 0.07, 0.72, 0.94),
+        ],
+        [
+          varyScale(0.86, 0.08, 0.74, 0.98),
+          varyScale(0.82, 0.08, 0.72, 0.94),
+          varyScale(0.78, 0.08, 0.68, 0.9),
+          varyScale(0.84, 0.08, 0.72, 0.96),
+          varyScale(0.8, 0.08, 0.7, 0.92),
+          varyScale(0.76, 0.08, 0.66, 0.88),
+        ],
       ],
     },
     enableMovingObstacles: true,
-    movingObstacleSafeStartStraightCount: 7,
+    movingObstacleSafeStartStraightCount: 4,
     enableHoleSetPieces: false,
   };
 }

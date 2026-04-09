@@ -1813,6 +1813,102 @@ Current limitation captured by tooling work:
 - Local server startup for automated browser runs requires escalated execution in this environment because sandboxed commands cannot bind local ports here.
 - The smoke suite currently treats multiplayer as a host-lobby baseline, not a full two-client ready/countdown flow yet; attempted stricter multiplayer coverage exposed current handshake instability and should be revisited in a later pass.
 
+v0.9.4.0 update (Mobile-playable solo slice cleanup):
+- Refit the solo preview around phone-first gyro play instead of a showcase set piece:
+  - Rebuilt `buildSoloGauntletCourse(seed)` in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts` as a flat obstacle lane with mild heading drift only.
+  - Removed the solo-only `arc90` bend and removed the checkpointed hole/drop section from the active solo route.
+  - Kept the course deterministic by seed, but limited seed variance to authored obstacle tuning rather than changing the overall track family.
+  - New solo obstacle beats now center on:
+    - warm-up blocker lane
+    - tight triangle weave
+    - wider triangle routing lane
+    - straight moving-obstacle lane
+    - short finish gauntlet
+  - Geometry now stays within the phone-friendly envelope:
+    - no `arc90`
+    - no multilevel drop
+    - no banking/grade spectacle
+    - only mild `turnDeg` drift on straight segments
+- Updated `client/src/game/HelloMarble.tsx` for cleaner mobile play:
+  - Replaced the large in-race solo info card with a compact top-corner HUD that only shows live time, best time, and a tiny seed label.
+  - Added a brief solo countdown banner so course identity appears before the run rather than during it.
+  - Kept `RESTART SAME SEED` and `SHUFFLE TRACK` behavior unchanged.
+  - Updated solo result copy to reflect a flatter obstacle-run identity and show respawn count there instead of in the active HUD.
+  - Gated the mobile in-race camera sliders behind the existing debug drawer/camera-tab path so they no longer appear during normal play.
+- Updated `client/src/index.css`:
+  - Slimmed the solo HUD into a compact top-left panel with `pointer-events: none`.
+  - Added styles for the new countdown banner.
+  - Hid the nonessential solo promo feature card on narrow screens so the menu stays lighter on phones.
+- Updated Playwright coverage in `e2e/smoke.spec.ts`:
+  - Added a compact-HUD assertion helper.
+  - Tightened the solo desktop smoke test to validate the smaller HUD footprint.
+  - Added a dedicated portrait-mobile solo smoke test that verifies:
+    - the solo promo card is hidden on narrow screens
+    - the compact HUD stays visible
+    - the HUD remains small and top-anchored during play
+- Version discipline:
+  - Bumped visible build version to `0.9.4.0` and synchronized:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.4.0`, `appVersionCode=90400`)
+    - `android/app/build.gradle` (`versionName=0.9.4.0`, `versionCode=90400`)
+
+Verification:
+- `npm run lint` passed.
+- `npm run typecheck` passed.
+- `npm run build` passed.
+- `npm run test` passed.
+- `npm run test:e2e` passed with escalation for local server/browser execution.
+
+v0.9.4.0 update (Mobile-playable solo cleanup):
+- Refit the solo preview into a phone-first obstacle run instead of a spectacle-heavy gauntlet.
+- `client/src/game/track/temporary/temporaryThreeStraightTrack.ts`:
+  - Rebuilt `buildSoloGauntletCourse(seed)` around a fixed flat-lane template.
+  - Removed the solo `arc90` authored bend and removed the center-drop/hole checkpoint section from the solo slice.
+  - Kept all solo geometry on the same rough plane:
+    - no banking
+    - no grade changes
+    - only mild straight-piece yaw drift (`turnDeg` up to 6 on the S-lane, 4 on the finish alignment)
+  - Reframed the obstacle beats around:
+    - warm-up blocker lane
+    - tight triangle weave
+    - wide triangle weave
+    - moving-lane pressure section
+    - short authored finish gauntlet
+  - Kept deterministic seeded variation only in authored obstacle tuning, not in geometry family changes.
+- `client/src/game/HelloMarble.tsx`:
+  - Replaced the information-heavy in-race solo card with a compact top-left HUD that only shows:
+    - live time
+    - per-seed PB
+    - a tiny seed label
+  - Added a compact solo countdown banner so course identity appears before the run instead of blocking the active run.
+  - Moved richer solo identity copy out of the active-run HUD and into the menu/result flow.
+  - Restricted mobile in-race camera sliders to explicit debug usage (`debugMenuEnabled` + open drawer + camera tab) so default play is not obstructed.
+  - Updated the solo result copy from the old drop-oriented framing to flatter obstacle-run framing and added respawn count there instead of during active play.
+- `client/src/index.css`:
+  - Slimmed the solo promo card.
+  - Hid the nonessential solo promo card entirely on narrow screens.
+  - Reworked solo HUD styling into a compact corner footprint for active play.
+  - Added countdown-brief styling and removed the old bottom-card mobile placement.
+- `e2e/smoke.spec.ts`:
+  - Replaced the loose solo HUD assertion with a compact-HUD helper.
+  - Added a portrait-mobile solo smoke test that verifies:
+    - solo starts on a phone-sized viewport
+    - the mobile promo card is hidden
+    - the active solo HUD remains compact and top-anchored
+  - Kept the existing menu/options persistence and multiplayer lobby smoke coverage.
+- Version discipline:
+  - Bumped visible build version to `0.9.4.0` and synchronized:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.4.0`, `appVersionCode=90400`)
+    - `android/app/build.gradle` (`versionName=0.9.4.0`, `versionCode=90400`)
+
+Verification:
+- `npm run lint` passed.
+- `npm run typecheck` passed.
+- `npm run build` passed.
+- `npm run test` passed.
+- `npm run test:e2e` passed with escalation.
+
 v0.9.3.0 update (Solo vertical-slice gauntlet pass):
 - Replaced the placeholder solo straight-track path with a deterministic authored gauntlet in `client/src/game/track/temporary/temporaryThreeStraightTrack.ts`.
   - Added `buildSoloGauntletCourse(seed)` to generate a seeded solo-only course profile with:

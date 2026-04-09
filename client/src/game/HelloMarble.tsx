@@ -4047,16 +4047,19 @@ export function HelloMarble() {
   const showMobileInRaceCameraControls =
     gameplayUiVisible &&
     isMobile &&
+    debugMenuEnabled &&
+    drawerOpen &&
+    activeDebugTab === "camera" &&
     gyroEnabled &&
     racePhase === "racing" &&
     trialState !== "finished";
-  const showSoloHud = gameplayUiVisible && gameMode === "solo";
-  const soloHudMessage =
-    racePhase === "countdown"
-      ? "Memorize the line, then hit the drop with confidence."
-      : racePhase === "racing"
-        ? soloCourse.successHint
-        : soloCourse.briefing;
+  const showSoloHud =
+    gameplayUiVisible &&
+    gameMode === "solo" &&
+    (racePhase === "countdown" || racePhase === "racing");
+  const showSoloCountdownBrief =
+    gameMode === "solo" && racePhase === "countdown" && trialState !== "finished";
+  const compactSoloSeed = trackLabSeed.replace(/^solo_/, "").slice(0, 8);
   const optionsTitleLabel = (() => {
     if (showingOptionsRoot) {
       return "Options";
@@ -5135,10 +5138,10 @@ export function HelloMarble() {
               <h1 className="menuGameTitle">Get Tilted</h1>
             </div>
             <p className="menuIntroText">Pick a mode and roll in.</p>
-            <div className="menuFeatureCard">
+            <div className="menuFeatureCard" data-testid="solo-feature-card">
               <p className="menuFeatureEyebrow">Current Solo Slice</p>
               <h2 className="menuFeatureTitle">{SOLO_GAUNTLET_NAME}</h2>
-              <p className="menuFeatureText">{soloCourse.briefing}</p>
+              <p className="menuFeatureText">{soloCourse.courseTagline}</p>
             </div>
             <div className="mainMenuButtonGrid">
               <button
@@ -6186,16 +6189,16 @@ export function HelloMarble() {
           ) : null}
         </div>
       ) : null}
+      {showSoloCountdownBrief ? (
+        <div className="soloCountdownBrief" data-testid="solo-countdown-brief">
+          <p className="soloCountdownEyebrow">Solo Demo</p>
+          <p className="soloCountdownTitle">{soloCourse.courseName}</p>
+          <p className="soloCountdownText">{soloCourse.courseTagline}</p>
+        </div>
+      ) : null}
       {showSoloHud ? (
         <div className="soloHudCard" data-testid="solo-course-hud">
-          <p className="soloHudEyebrow">Solo Demo</p>
-          <p className="soloHudTitle">{soloCourse.courseName}</p>
-          <p className="soloHudTagline">{soloCourse.courseTagline}</p>
           <div className="soloHudStats">
-            <p>
-              <span>Seed</span>
-              <strong>{trackLabSeed}</strong>
-            </p>
             <p>
               <span>Time</span>
               <strong>{formatTimeMs(trialCurrentMs)}</strong>
@@ -6204,12 +6207,10 @@ export function HelloMarble() {
               <span>Best</span>
               <strong>{formatTimeMs(trialBestMs)}</strong>
             </p>
-            <p>
-              <span>Respawns</span>
-              <strong>{respawnCount}</strong>
-            </p>
           </div>
-          <p className="soloHudHint">{soloHudMessage}</p>
+          <p className="soloHudMeta">
+            Seed {isMobile ? compactSoloSeed : trackLabSeed}
+          </p>
         </div>
       ) : null}
       {showRaceLobby ? (
@@ -6365,11 +6366,13 @@ export function HelloMarble() {
         <div className="raceOverlay">
           <div className="raceOverlayCard raceResultCard">
             <p className="raceOverlayTitle">Race Results</p>
-            <p className="raceResultHeadline">Gauntlet Cleared</p>
+            <p className="raceResultHeadline">Obstacle Run Cleared</p>
             <p>{soloCourse.courseName}</p>
+            <p>{soloCourse.courseTagline}</p>
             <p>Seed: {trackLabSeed}</p>
             <p>Time: {formatTimeMs(trialLastMs)}</p>
             <p>Personal Best: {formatTimeMs(trialBestMs)}</p>
+            <p>Respawns: {respawnCount}</p>
             <button type="button" className="readyButton ready" onClick={restartSoloRace}>
               RESTART SAME SEED
             </button>

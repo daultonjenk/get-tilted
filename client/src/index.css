@@ -313,8 +313,8 @@ textarea {
 }
 
 .menuFeatureCard {
-  width: min(430px, 100%);
-  padding: 0.95rem 1rem;
+  width: min(400px, 100%);
+  padding: 0.82rem 0.92rem;
   border: 1px solid rgb(233 245 255 / 24%);
   border-radius: 0.9rem;
   background:
@@ -344,10 +344,10 @@ textarea {
 }
 
 .menuFeatureText {
-  margin: 0.45rem 0 0;
+  margin: 0.35rem 0 0;
   color: #e6f0ff;
-  font-size: 0.92rem;
-  line-height: 1.4;
+  font-size: 0.85rem;
+  line-height: 1.35;
 }
 
 .menuSelect {
@@ -875,70 +875,91 @@ textarea {
   }
 }
 
-.soloHudCard {
+.soloCountdownBrief {
   position: absolute;
   top: 3rem;
-  right: 0.85rem;
   z-index: 18;
-  width: min(360px, calc(100vw - 1.7rem));
-  padding: 0.9rem 0.95rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(360px, calc(100vw - 2rem));
+  padding: 0.42rem 0.72rem;
   border: 1px solid rgb(255 241 208 / 22%);
-  border-radius: 0.95rem;
+  border-radius: 999px;
   background:
     radial-gradient(circle at 88% 16%, rgb(255 159 66 / 16%), transparent 32%),
-    linear-gradient(160deg, rgb(8 18 30 / 88%), rgb(11 33 55 / 84%));
+    linear-gradient(160deg, rgb(8 18 30 / 92%), rgb(11 33 55 / 88%));
   box-shadow:
-    0 12px 32px rgb(1 6 17 / 40%),
+    0 8px 20px rgb(1 6 17 / 34%),
     inset 0 0 0 1px rgb(255 255 255 / 4%);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
+  text-align: center;
+  pointer-events: none;
 }
 
-.soloHudEyebrow {
+.soloCountdownEyebrow {
   margin: 0;
   color: #ffd08b;
-  font-size: 0.72rem;
+  font-size: 0.63rem;
   font-weight: 900;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
-.soloHudTitle {
-  margin: 0.26rem 0 0;
+.soloCountdownTitle {
+  margin: 0.12rem 0 0;
   color: #fff3d5;
-  font-size: clamp(1.1rem, 4vw, 1.55rem);
+  font-size: clamp(0.92rem, 3.4vw, 1.1rem);
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.soloHudTagline {
-  margin: 0.22rem 0 0;
+.soloCountdownText {
+  margin: 0.14rem 0 0;
   color: #d7eaff;
-  font-size: 0.88rem;
-  line-height: 1.35;
+  font-size: 0.73rem;
+  line-height: 1.2;
+}
+
+.soloHudCard {
+  position: absolute;
+  top: 3rem;
+  left: 0.85rem;
+  z-index: 18;
+  width: min(220px, calc(100vw - 1.7rem));
+  padding: 0.42rem 0.46rem;
+  border: 1px solid rgb(255 241 208 / 18%);
+  border-radius: 0.82rem;
+  background:
+    linear-gradient(160deg, rgb(8 18 30 / 92%), rgb(11 33 55 / 88%));
+  box-shadow:
+    0 10px 24px rgb(1 6 17 / 34%),
+    inset 0 0 0 1px rgb(255 255 255 / 4%);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
 }
 
 .soloHudStats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.48rem;
-  margin-top: 0.7rem;
+  gap: 0.3rem;
+  margin-top: 0;
 }
 
 .soloHudStats p {
   display: flex;
   flex-direction: column;
-  gap: 0.16rem;
+  gap: 0.08rem;
   margin: 0;
-  padding: 0.55rem 0.6rem;
+  padding: 0.34rem 0.38rem;
   border: 1px solid rgb(154 202 255 / 14%);
-  border-radius: 0.7rem;
-  background: rgb(8 23 39 / 42%);
+  border-radius: 0.58rem;
+  background: rgb(8 23 39 / 50%);
 }
 
 .soloHudStats span {
   color: #9cc7ef;
-  font-size: 0.67rem;
+  font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -946,17 +967,22 @@ textarea {
 
 .soloHudStats strong {
   color: #eff7ff;
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   font-weight: 900;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
-.soloHudHint {
-  margin: 0.72rem 0 0;
-  color: #ffdfb0;
-  font-size: 0.83rem;
-  line-height: 1.42;
+.soloHudMeta {
+  margin: 0.3rem 0 0;
+  color: #b9d6f2;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .floatingGyroCalibrateButton {
@@ -1462,6 +1488,10 @@ textarea {
     width: min(360px, 100%);
   }
 
+  .menuFeatureCard {
+    display: none;
+  }
+
   .multiplayerLobbyCard {
     width: min(440px, 100%);
   }
@@ -1488,12 +1518,24 @@ textarea {
     font-size: clamp(1.35rem, 4.4vw, 1.75rem);
   }
 
+  .soloCountdownBrief {
+    top: 2.6rem;
+    width: min(320px, calc(100vw - 1rem));
+    padding-inline: 0.56rem;
+  }
+
+  .soloCountdownText {
+    display: none;
+  }
+
   .soloHudCard {
-    top: auto;
-    right: 0.5rem;
+    top: 0.9rem;
     left: 0.5rem;
-    bottom: 0.5rem;
-    width: auto;
+    width: min(190px, calc(100vw - 1rem));
+  }
+
+  .soloHudMeta {
+    display: none;
   }
 
   .optionsPanel {
