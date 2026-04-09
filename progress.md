@@ -1968,3 +1968,14 @@ Verification refresh after stabilization:
 - `npm run build` passed.
 - `npm run test` passed.
 - `npm run test:e2e` passed with escalation.
+
+Moving obstacle collision fix (`v0.9.4.2`):
+- Updated `client/src/game/HelloMarble.tsx` so moving obstacle bodies participate in the same physics-world lifecycle as static obstacle bodies.
+  - Added a shared obstacle-body collector that includes both `track.bodies.slice(2)` and `track.movingObstacleBodies`.
+  - Initial track setup now applies collision filtering and `world.addBody(...)` to the moving obstacle bodies as well.
+  - Track rebuild and teardown paths now remove/re-add those kinematic moving bodies correctly, preventing end-of-lane blockers from becoming visual-only.
+- Version discipline:
+  - Bumped visible build version to `0.9.4.2` and synchronized Android wrapper versions:
+    - `client/src/buildInfo.ts`
+    - `android/twa-manifest.json` (`appVersion=0.9.4.2`, `appVersionCode=90402`)
+    - `android/app/build.gradle` (`versionName=0.9.4.2`, `versionCode=90402`)

@@ -1294,6 +1294,8 @@ export function HelloMarble() {
       throw new Error("Track did not provide board physics body");
     }
     let boardWallBody = track.wallBody;
+    const getTrackObstacleBodies = (trackBuild: TrackBuildResult): CANNON.Body[] =>
+      Array.from(new Set([...trackBuild.bodies.slice(2), ...trackBuild.movingObstacleBodies]));
 
     const applyTrackCollisionFiltering = (
       floorBody: CANNON.Body,
@@ -1325,7 +1327,7 @@ export function HelloMarble() {
     solver.iterations = tuningRef.current.physicsSolverIterations;
     solver.tolerance = 1e-4;
     world.gravity.set(0, -tuningRef.current.gravityG, 0);
-    applyTrackCollisionFiltering(boardBody, boardWallBody, track.bodies.slice(2));
+    applyTrackCollisionFiltering(boardBody, boardWallBody, getTrackObstacleBodies(track));
     world.addBody(boardBody);
 
     const boardMat = new CANNON.Material("board");
@@ -1365,8 +1367,8 @@ export function HelloMarble() {
     });
     world.addContactMaterial(movingObstacleContactMat);
     // bodies[0] = boardBody (added above), bodies[1] = boardWallBody (added above)
-    // bodies[2+] = obstacle bodies
-    for (const body of track.bodies.slice(2)) {
+    // remaining entries are static and kinematic obstacle bodies
+    for (const body of getTrackObstacleBodies(track)) {
       world.addBody(body);
     }
 
@@ -2779,7 +2781,7 @@ export function HelloMarble() {
       }
       const nextBoardWallBody = nextTrack.wallBody;
 
-      for (const body of track.bodies) {
+      for (const body of [boardBody, boardWallBody, ...getTrackObstacleBodies(track)]) {
         world.removeBody(body);
       }
       scene.remove(track.group);
@@ -2791,11 +2793,11 @@ export function HelloMarble() {
       boardWallBody = nextBoardWallBody;
       boardWallBody.material = boardWallMat;
       track.setMovingObstacleMaterial(movingObstacleMat);
-      applyTrackCollisionFiltering(boardBody, boardWallBody, track.bodies.slice(2));
+      applyTrackCollisionFiltering(boardBody, boardWallBody, getTrackObstacleBodies(track));
       world.addBody(boardBody);
       world.addBody(boardWallBody);
-      // bodies[0] = boardBody, bodies[1] = boardWallBody, bodies[2+] = obstacles
-      for (const body of track.bodies.slice(2)) {
+      // remaining entries are static and kinematic obstacle bodies
+      for (const body of getTrackObstacleBodies(track)) {
         world.addBody(body);
       }
       movingObstacleBodySet = new Set(track.movingObstacleBodies);
@@ -3995,7 +3997,7 @@ export function HelloMarble() {
         }
         playerState.material.dispose();
       }
-      for (const body of track.bodies) {
+      for (const body of [boardBody, boardWallBody, ...getTrackObstacleBodies(track)]) {
         world.removeBody(body);
       }
       world.removeBody(marbleBody);
