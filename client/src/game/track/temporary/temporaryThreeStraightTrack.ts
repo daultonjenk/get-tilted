@@ -1,5 +1,37 @@
 import type { TrackPieceTemplate } from "../modularTrack";
 
+type AuthoredBlueprintSetPieceKind =
+  | "arc90-obstacle-1"
+  | "straight-obstacle-1"
+  | "straight-tight-triangles"
+  | "straight-wide-triangles"
+  | "straight-center-hole-respawn";
+
+export type AuthoredBlueprintSetPieceSpec = {
+  placementIndex: number;
+  testPieceIndex: number;
+  kind: AuthoredBlueprintSetPieceKind;
+};
+
+export type AuthoredBlueprintSetPieceTuning = {
+  pieceObstacleScales?: number[][];
+  setPieceLengthScale?: number;
+  showObstacleDebugLabels?: boolean;
+};
+
+export type TemporarySoloCourseLayout = {
+  courseName: string;
+  courseTagline: string;
+  briefing: string;
+  successHint: string;
+  forcedMainPieces: TrackPieceTemplate[];
+  manualSetPieces: AuthoredBlueprintSetPieceSpec[];
+  manualSetPieceTuning?: AuthoredBlueprintSetPieceTuning;
+  enableMovingObstacles: boolean;
+  movingObstacleSafeStartStraightCount: number;
+  enableHoleSetPieces: boolean;
+};
+
 export type TemporaryTrackSegmentDef = {
   length: number;
   slopeDeg: number;
@@ -14,6 +46,13 @@ export type TemporaryTrackSegmentDef = {
 export const DEFAULT_RUNTIME_TRACK_WIDTH = 9;
 // Reserved wide width for future obstacle/set-piece expansion.
 export const SETPIECE_WIDE_TRACK_WIDTH = 18;
+export const SOLO_GAUNTLET_NAME = "Stormrun Gauntlet";
+export const SOLO_GAUNTLET_TAGLINE = "A straight, carved-lane obstacle run built for clean gyro lines.";
+const SOLO_GAUNTLET_WIDTH_SCALE = 1.04;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 
 function hashStr(s: string): number {
   let h = 2166136261;
@@ -160,6 +199,188 @@ export function buildTemporaryThreeStraightForcedPieces(seed: string): TrackPiec
   });
 
   return pieces;
+}
+
+export function buildSoloGauntletCourse(seed: string): TemporarySoloCourseLayout {
+  const random = makeLayoutRandom(seed);
+  const varyScale = (base: number, variance: number, min: number, max: number): number =>
+    clamp(base + (random() - 0.5) * variance * 2, min, max);
+
+  return {
+    courseName: SOLO_GAUNTLET_NAME,
+    courseTagline: SOLO_GAUNTLET_TAGLINE,
+    briefing: "Read the blockers early and flow down one uninterrupted lane without fighting the board.",
+    successHint: "Stay centered, make small corrections, and let the obstacle rhythm carry the run.",
+    forcedMainPieces: [
+      {
+        id: "solo-gauntlet-start",
+        label: "Run-Up",
+        kind: "straight",
+        weight: 1,
+        length: 18,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-breaker",
+        label: "Breaker Lane",
+        kind: "straight",
+        weight: 1,
+        length: 34,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
+        bankDeg: 0,
+        gradeDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-slalom-left",
+        label: "Needle Sweep",
+        kind: "straight",
+        weight: 1,
+        length: 38,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-slalom-right",
+        label: "Counter Sweep",
+        kind: "straight",
+        weight: 1,
+        length: 38,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "right",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-motion",
+        label: "Moving Lane",
+        kind: "straight",
+        weight: 1,
+        length: 36,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-finish-gauntlet",
+        label: "Finish Gauntlet",
+        kind: "straight",
+        weight: 1,
+        length: 17,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "right",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+      {
+        id: "solo-gauntlet-finish",
+        label: "Finish Straight",
+        kind: "straight",
+        weight: 1,
+        length: 12,
+        widthScale: SOLO_GAUNTLET_WIDTH_SCALE,
+        gradeDeg: 0,
+        bankDeg: 0,
+        turnDirection: "left",
+        turnDeg: 0,
+        tunnelRoof: false,
+        railLeft: true,
+        railRight: true,
+      },
+    ],
+    manualSetPieces: [
+      {
+        placementIndex: 1,
+        testPieceIndex: 1,
+        kind: "straight-obstacle-1",
+      },
+      {
+        placementIndex: 2,
+        testPieceIndex: 2,
+        kind: "straight-tight-triangles",
+      },
+      {
+        placementIndex: 3,
+        testPieceIndex: 3,
+        kind: "straight-wide-triangles",
+      },
+      {
+        placementIndex: 5,
+        testPieceIndex: 4,
+        kind: "straight-obstacle-1",
+      },
+    ],
+    manualSetPieceTuning: {
+      setPieceLengthScale: 0.98,
+      pieceObstacleScales: [
+        [
+          varyScale(0.92, 0.08, 0.78, 1),
+          varyScale(0.88, 0.08, 0.76, 0.98),
+          varyScale(0.82, 0.08, 0.72, 0.94),
+          varyScale(0.78, 0.08, 0.68, 0.9),
+        ],
+        [
+          varyScale(0.76, 0.06, 0.68, 0.84),
+          varyScale(0.82, 0.06, 0.72, 0.9),
+          varyScale(0.74, 0.06, 0.66, 0.82),
+          varyScale(0.8, 0.06, 0.72, 0.88),
+          varyScale(0.76, 0.06, 0.68, 0.84),
+          varyScale(0.72, 0.06, 0.64, 0.8),
+          varyScale(0.78, 0.06, 0.7, 0.86),
+        ],
+        [
+          varyScale(0.88, 0.07, 0.76, 0.98),
+          varyScale(0.84, 0.07, 0.74, 0.94),
+          varyScale(0.8, 0.07, 0.7, 0.9),
+          varyScale(0.86, 0.07, 0.74, 0.96),
+          varyScale(0.82, 0.07, 0.72, 0.92),
+          varyScale(0.78, 0.07, 0.68, 0.88),
+          varyScale(0.84, 0.07, 0.72, 0.94),
+        ],
+        [
+          varyScale(0.86, 0.08, 0.74, 0.98),
+          varyScale(0.82, 0.08, 0.72, 0.94),
+          varyScale(0.78, 0.08, 0.68, 0.9),
+          varyScale(0.84, 0.08, 0.72, 0.96),
+          varyScale(0.8, 0.08, 0.7, 0.92),
+          varyScale(0.76, 0.08, 0.66, 0.88),
+        ],
+      ],
+    },
+    enableMovingObstacles: true,
+    movingObstacleSafeStartStraightCount: 4,
+    enableHoleSetPieces: false,
+  };
 }
 
 export function buildTestAllForcedPieces(): TrackPieceTemplate[] {
