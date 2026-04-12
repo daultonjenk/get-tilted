@@ -136,6 +136,13 @@ import {
   buildTemporaryThreeStraightForcedPieces,
   buildTestAllForcedPieces,
 } from "./track/temporary/temporaryThreeStraightTrack";
+import { createTrackCollisionAssetFromTrack } from "./simulation-v2/cannonTrackAsset";
+import { loadRapier } from "./simulation-v2/rapierLoader";
+import { RapierSimulationV2 } from "./simulation-v2/rapierSimulationV2";
+import type {
+  SimulationInput,
+  SimulationSnapshot,
+} from "./simulation-v2/types";
 import {
   EDITOR_REFERENCE_MARBLE_RADIUS,
   clampEditorReferenceMarble,
@@ -251,6 +258,12 @@ type RuntimeContainmentSample = {
 };
 
 type TrackPieceDraft = Omit<TrackPieceTemplate, "id">;
+
+type ControlIntentState = {
+  combined: TiltSample;
+  tilt: TiltSample;
+  fallback: TiltSample;
+};
 
 function readQueryParam(name: string): string | null {
   if (typeof window === "undefined") {
@@ -659,6 +672,10 @@ export function HelloMarble() {
   const resetRef = useRef<() => void>(() => {});
   const enableTiltRef = useRef<() => Promise<void>>(async () => {});
   const calibrateTiltRef = useRef<() => void>(() => {});
+  const simulationBackend = useMemo(
+    () => (readQueryParam("sim") === "v2" ? "v2" : "v1"),
+    [],
+  );
 
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined"
@@ -1286,7 +1303,11 @@ export function HelloMarble() {
       "default",
       toTrackVisualSettingsFromTuning(tuningRef.current),
     );
+    const useSimulationV2 = simulationBackend === "v2";
     let track = createTrack(createTrackOptionsFromConfig(initialTrackConfig));
+    let trackCollisionAssetV2 = createTrackCollisionAssetFromTrack(track);
+    let rapierModule: Awaited<ReturnType<typeof loadRapier>> | null = null;
+    let rapierSimulationV2: RapierSimulationV2 | null = null;
     scene.add(track.group);
 
     let boardBody = track.bodies[0];
@@ -1704,6 +1725,79 @@ export function HelloMarble() {
       marbleMesh.quaternion.copy(localRenderCurrMarbleQuat);
       boardPosThree.copy(localRenderCurrBoardPos);
       boardQuatThree.copy(localRenderCurrBoardQuat);
+    };
+
+    const syncBodiesFromSimulationSnapshot = (
+      snapshot: SimulationSnapshot,
+    ): void => {
+      boardBody.position.set(
+        snapshot.board.position[0],
+        snapshot.board.position[1],
+        snapshot.board.position[2],
+      );
+      boardBody.quaternion.set(
+        snapshot.board.rotation[0],
+        snapshot.board.rotation[1],
+        snapshot.board.rotation[2],
+        snapshot.board.rotation[3],
+      );
+      boardBody.velocity.set(0, 0, 0);
+      boardBody.angularVelocity.set(0, 0, 0);
+      boardBody.aabbNeedsUpdate = true;
+      boardBody.updateAABB();
+
+      boardWallBody.position.copy(boardBody.position);
+      boardWallBody.quaternion.copy(boardBody.quaternion);
+      boardWallBody.velocity.set(0, 0, 0);
+      boardWallBody.angularVelocity.set(0, 0, 0);
+      boardWallBody.aabbNeedsUpdate = true;
+      boardWallBody.updateAABB();
+
+      marbleBody.position.set(
+        snapshot.marble.position[0],
+        snapshot.marble.position[1],
+        snapshot.marble.position[2],
+      );
+      marbleBody.quaternion.set(
+        snapshot.marble.rotation[0],
+        snapshot.marble.rotation[1],
+        snapshot.marble.rotation[2],
+        snapshot.marble.rotation[3],
+      );
+      marbleBody.velocity.set(
+        snapshot.marble.velocity[0],
+        snapshot.marble.velocity[1],
+        snapshot.marble.velocity[2],
+      );
+      marbleBody.angularVelocity.set(
+        snapshot.marble.angularVelocity[0],
+        snapshot.marble.angularVelocity[1],
+        snapshot.marble.angularVelocity[2],
+      );
+      marbleBody.aabbNeedsUpdate = true;
+      marbleBody.updateAABB();
+
+      lastCheckpointIndex = snapshot.checkpoints.lastReachedIndex;
+    };
+
+    const rebuildSimulationV2Runtime = (): void => {
+      if (!useSimulationV2 || !rapierModule) {
+        return;
+      }
+      rapierSimulationV2?.dispose();
+      rapierSimulationV2 = new RapierSimulationV2({
+        rapier: rapierModule,
+        trackAsset: trackCollisionAssetV2,
+      });
+      if (
+        gameModeRef.current !== "solo" &&
+        gameModeRef.current !== "testAll"
+      ) {
+        rapierSimulationV2.setFrozen(true);
+      }
+      syncBodiesFromSimulationSnapshot(rapierSimulationV2.getSnapshot());
+      setRespawnCount(rapierSimulationV2.getSnapshot().respawnCount);
+      syncLocalRenderSnapshotsFromBodies();
     };
 
     const disposeTrack = (trackToDispose: TrackBuildResult): void => {
@@ -2705,6 +2799,12 @@ export function HelloMarble() {
     window.addEventListener("keyup", handleKeyUp);
 
     const freezeMarble = () => {
+      if (useSimulationV2 && rapierSimulationV2) {
+        rapierSimulationV2.setFrozen(true);
+        syncBodiesFromSimulationSnapshot(rapierSimulationV2.getSnapshot());
+        syncLocalRenderSnapshotsFromBodies();
+        return;
+      }
       marbleBody.type = CANNON.Body.STATIC;
       marbleBody.mass = 0;
       marbleBody.updateMassProperties();
@@ -2714,6 +2814,12 @@ export function HelloMarble() {
     };
 
     const unfreezeMarble = () => {
+      if (useSimulationV2 && rapierSimulationV2) {
+        rapierSimulationV2.setFrozen(false);
+        syncBodiesFromSimulationSnapshot(rapierSimulationV2.getSnapshot());
+        syncLocalRenderSnapshotsFromBodies();
+        return;
+      }
       marbleBody.type = CANNON.Body.DYNAMIC;
       marbleBody.mass = 1;
       marbleBody.updateMassProperties();
@@ -2727,15 +2833,30 @@ export function HelloMarble() {
     const respawnMarble = (incrementCounter: boolean) => {
       isRaceFinishedLocal = false;
       hasSentFinishRef.current = false;
-      unfreezeMarble();
-      const checkpointSpawn =
-        lastCheckpointIndex >= 0
-          ? track.checkpoints[lastCheckpointIndex]?.spawnPos
-          : undefined;
-      marbleBody.position.copy(computeSpawnWorld(checkpointSpawn));
-      marbleBody.quaternion.set(0, 0, 0, 1);
-      marbleBody.velocity.set(0, 0, 0);
-      marbleBody.angularVelocity.set(0, 0, 0);
+      if (useSimulationV2 && rapierSimulationV2) {
+        rapierSimulationV2.setFrozen(false);
+        const checkpointSpawn =
+          lastCheckpointIndex >= 0
+            ? track.checkpoints[lastCheckpointIndex]?.spawnPos
+            : undefined;
+        const result = rapierSimulationV2.resetMarble(
+          checkpointSpawn
+            ? [checkpointSpawn.x, checkpointSpawn.y, checkpointSpawn.z]
+            : undefined,
+          incrementCounter,
+        );
+        syncBodiesFromSimulationSnapshot(result.snapshot);
+      } else {
+        unfreezeMarble();
+        const checkpointSpawn =
+          lastCheckpointIndex >= 0
+            ? track.checkpoints[lastCheckpointIndex]?.spawnPos
+            : undefined;
+        marbleBody.position.copy(computeSpawnWorld(checkpointSpawn));
+        marbleBody.quaternion.set(0, 0, 0, 1);
+        marbleBody.velocity.set(0, 0, 0);
+        marbleBody.angularVelocity.set(0, 0, 0);
+      }
       trialStartAt = null;
       prevTrialStartMetric = readGateMetric(
         track.trialStartGateLocal,
@@ -2760,8 +2881,10 @@ export function HelloMarble() {
       syncLocalRenderSnapshotsFromBodies();
       setTrialState("idle");
       setTrialCurrentMs(null);
-      if (incrementCounter) {
+      if (incrementCounter && !(useSimulationV2 && rapierSimulationV2)) {
         setRespawnCount((count) => count + 1);
+      } else if (useSimulationV2 && rapierSimulationV2) {
+        setRespawnCount(rapierSimulationV2.getSnapshot().respawnCount);
       }
     };
     resetRef.current = () => respawnMarble(false);
@@ -2771,6 +2894,19 @@ export function HelloMarble() {
       gameModeRef.current !== "testAll"
     ) {
       freezeMarble();
+    }
+    if (useSimulationV2) {
+      void loadRapier()
+        .then((loadedRapier) => {
+          if (disposed) {
+            return;
+          }
+          rapierModule = loadedRapier;
+          rebuildSimulationV2Runtime();
+        })
+        .catch((error) => {
+          console.error("[get-tilted] simulation-v2 failed to initialize", error);
+        });
     }
 
     const rebuildTrack = (nextConfig: RuntimeTrackConfig): void => {
@@ -2788,6 +2924,7 @@ export function HelloMarble() {
       disposeTrack(track);
 
       track = nextTrack;
+      trackCollisionAssetV2 = createTrackCollisionAssetFromTrack(track);
       boardBody = nextBoardBody;
       boardBody.material = boardMat;
       boardWallBody = nextBoardWallBody;
@@ -2820,6 +2957,9 @@ export function HelloMarble() {
       );
       currentPitch = 0;
       currentRoll = 0;
+      if (useSimulationV2) {
+        rebuildSimulationV2Runtime();
+      }
       respawnMarble(false);
       if (
         gameModeRef.current !== "solo" &&
@@ -3108,8 +3248,9 @@ export function HelloMarble() {
       }
       simStepsMaxRecent = maxRecent;
     };
-    const resolveNormalizedIntent = (currentTuning: TuningState): TiltSample => {
-      let sourceIntent: TiltSample;
+    const resolveControlIntentState = (
+      currentTuning: TuningState,
+    ): ControlIntentState => {
       const status = tiltStatusRef.current;
       const touchIntent = touchTiltRef.current;
       const keyboardIntent = getKeyboardIntent();
@@ -3121,13 +3262,14 @@ export function HelloMarble() {
       const touchFallbackEnabled =
         !gyroEnabledRef.current || !status.supported || status.permission === "denied";
       const keyboardActive = keyboardIntent.x !== 0 || keyboardIntent.z !== 0;
+      let tiltX = 0;
+      let tiltZ = 0;
+      let fallbackX = keyboardIntent.x;
+      let fallbackZ = keyboardIntent.z;
 
       if (controlsLockedRef.current) {
-        sourceIntent = { x: 0, y: 0, z: 0 };
         inputSourcesSummary = "locked";
       } else {
-        let sourceX = keyboardIntent.x;
-        let sourceZ = keyboardIntent.z;
         let inputMask = 0;
         if (keyboardActive) {
           inputMask |= 1;
@@ -3137,35 +3279,46 @@ export function HelloMarble() {
             Math.abs(currentTuning.gyroSensitivity - 1) > 0.0001
               ? currentTuning.gyroSensitivity
               : 1;
-          sourceX += motionTiltRef.current.x * gyroGain;
-          sourceZ += motionTiltRef.current.z * gyroGain;
+          tiltX = motionTiltRef.current.x * gyroGain;
+          tiltZ = motionTiltRef.current.z * gyroGain;
           inputMask |= 2;
         }
         if (touchFallbackEnabled) {
-          sourceX += touchIntent.x;
-          sourceZ += touchIntent.z;
+          fallbackX += touchIntent.x;
+          fallbackZ += touchIntent.z;
           inputMask |= 4;
         }
-        sourceIntent = {
-          x: sourceX,
-          y: 0,
-          z: sourceZ,
-        };
         inputSourcesSummary = INPUT_LABELS[inputMask]!;
       }
 
-      const intentX = currentTuning.invertTiltX ? -sourceIntent.x : sourceIntent.x;
-      const intentZ = currentTuning.invertTiltZ ? -sourceIntent.z : sourceIntent.z;
-      inputRawIntentX = intentX;
-      inputRawIntentZ = intentZ;
-      const normalizedIntent: TiltSample = {
-        x: clamp(intentX, -1, 1),
+      const invertX = currentTuning.invertTiltX ? -1 : 1;
+      const invertZ = currentTuning.invertTiltZ ? -1 : 1;
+      const normalizedTiltIntent: TiltSample = {
+        x: clamp(tiltX * invertX, -1, 1),
         y: 0,
-        z: clamp(intentZ, -1, 1),
+        z: clamp(tiltZ * invertZ, -1, 1),
       };
-      inputIntentX = normalizedIntent.x;
-      inputIntentZ = normalizedIntent.z;
-      return normalizedIntent;
+      const normalizedFallbackIntent: TiltSample = {
+        x: clamp(fallbackX * invertX, -1, 1),
+        y: 0,
+        z: clamp(fallbackZ * invertZ, -1, 1),
+      };
+      const rawCombinedX = normalizedTiltIntent.x + normalizedFallbackIntent.x;
+      const rawCombinedZ = normalizedTiltIntent.z + normalizedFallbackIntent.z;
+      inputRawIntentX = rawCombinedX;
+      inputRawIntentZ = rawCombinedZ;
+      const combinedIntent: TiltSample = {
+        x: clamp(rawCombinedX, -1, 1),
+        y: 0,
+        z: clamp(rawCombinedZ, -1, 1),
+      };
+      inputIntentX = combinedIntent.x;
+      inputIntentZ = combinedIntent.z;
+      return {
+        combined: combinedIntent,
+        tilt: normalizedTiltIntent,
+        fallback: normalizedFallbackIntent,
+      };
     };
 
     const updateTrackController = (
@@ -3179,8 +3332,8 @@ export function HelloMarble() {
         boardBody.quaternion.w,
       );
 
-      const normalizedIntent = resolveNormalizedIntent(currentTuning);
-      const filteredIntent = filter.push(normalizedIntent, controllerDt);
+      const controlIntentState = resolveControlIntentState(currentTuning);
+      const filteredIntent = filter.push(controlIntentState.combined, controllerDt);
       lastFilteredIntent = filteredIntent;
       const maxTiltRad = (currentTuning.maxTiltDeg * Math.PI) / 180;
 
@@ -3307,6 +3460,49 @@ export function HelloMarble() {
       boardPrevQuat.set(qFinalCannon.x, qFinalCannon.y, qFinalCannon.z, qFinalCannon.w);
     };
 
+    const buildSimulationV2Input = (
+      currentTuning: TuningState,
+      nowMs: number,
+      controllerDt: number,
+    ): SimulationInput => {
+      const controlIntentState = resolveControlIntentState(currentTuning);
+      const filteredIntent = filter.push(controlIntentState.combined, controllerDt);
+      lastFilteredIntent = filteredIntent;
+      return {
+        timestampMs: nowMs,
+        tiltIntent: {
+          x: controlIntentState.tilt.x,
+          z: controlIntentState.tilt.z,
+        },
+        fallbackIntent: {
+          x: controlIntentState.fallback.x,
+          z: controlIntentState.fallback.z,
+        },
+        combinedIntent: {
+          x: filteredIntent.x,
+          z: filteredIntent.z,
+        },
+        paused: controlsLockedRef.current,
+      };
+    };
+
+    const toSimulationV2Tuning = (
+      currentTuning: TuningState,
+    ) => ({
+      gravityMagnitude: currentTuning.gravityG,
+      controlStrength: currentTuning.tiltStrength,
+      maxTiltDeg: currentTuning.maxTiltDeg,
+      linearDamping: currentTuning.linearDamping,
+      angularDamping: currentTuning.angularDamping,
+      floorFriction: clamp(currentTuning.contactFriction, 0, 1.0),
+      railRestitution: clamp(currentTuning.bounce, 0, 0.99),
+      obstacleFriction: MOVING_OBSTACLE_CONTACT_FRICTION,
+      obstacleRestitution: clamp(currentTuning.bounce, 0, 0.99),
+      ccdEnabled:
+        currentTuning.ccdIterations > 0 &&
+        currentTuning.ccdSpeedThreshold > 0,
+    });
+
     let lastGravityG = Number.NaN;
     let lastSolverIterations = -1;
     let lastLinearDamping = Number.NaN;
@@ -3319,78 +3515,93 @@ export function HelloMarble() {
 
     const simulateFixedStep = (nowMs: number, fixedDt: number): number => {
       const currentTuning = tuningRef.current;
-      if (currentTuning.gravityG !== lastGravityG) {
-        world.gravity.set(0, -currentTuning.gravityG, 0);
-        lastGravityG = currentTuning.gravityG;
-      }
-      const solverIterations = Math.round(currentTuning.physicsSolverIterations);
-      if (solverIterations !== lastSolverIterations) {
-        solver.iterations = solverIterations;
-        lastSolverIterations = solverIterations;
-      }
-      if (currentTuning.linearDamping !== lastLinearDamping) {
-        marbleBody.linearDamping = currentTuning.linearDamping;
-        lastLinearDamping = currentTuning.linearDamping;
-      }
-      if (currentTuning.angularDamping !== lastAngularDamping) {
-        marbleBody.angularDamping = currentTuning.angularDamping;
-        lastAngularDamping = currentTuning.angularDamping;
-      }
-      if (currentTuning.ccdSpeedThreshold !== lastCcdSpeedThreshold) {
-        marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
-        lastCcdSpeedThreshold = currentTuning.ccdSpeedThreshold;
-      }
-      const ccdIterations = Math.round(currentTuning.ccdIterations);
-      if (ccdIterations !== lastCcdIterations) {
-        marbleBodyWithCcd.ccdIterations = ccdIterations;
-        lastCcdIterations = ccdIterations;
-      }
-      const boardContactFriction = clamp(currentTuning.contactFriction, 0, 1.0);
-      if (boardContactFriction !== lastBoardContactFriction) {
-        boardContactMat.friction = boardContactFriction;
-        lastBoardContactFriction = boardContactFriction;
-      }
-      const contactRestitution = clamp(currentTuning.bounce, 0, 0.99);
-      if (contactRestitution !== lastBoardContactRestitution) {
-        boardContactMat.restitution = contactRestitution;
-        lastBoardContactRestitution = contactRestitution;
-      }
-      if (contactRestitution !== lastMovingObstacleRestitution) {
-        movingObstacleContactMat.restitution = contactRestitution;
-        lastMovingObstacleRestitution = contactRestitution;
-      }
-      updateTrackController(currentTuning, fixedDt);
-      track.updateMovingObstacles(fixedDt, boardBody.position, boardBody.quaternion);
+      let physicsMs = 0;
+      if (useSimulationV2) {
+        if (rapierSimulationV2) {
+          const simInput = buildSimulationV2Input(currentTuning, nowMs, fixedDt);
+          const physicsStartMs = performance.now();
+          const result = rapierSimulationV2.step(
+            simInput,
+            fixedDt,
+            toSimulationV2Tuning(currentTuning),
+          );
+          physicsMs = performance.now() - physicsStartMs;
+          syncBodiesFromSimulationSnapshot(result.snapshot);
+        }
+      } else {
+        if (currentTuning.gravityG !== lastGravityG) {
+          world.gravity.set(0, -currentTuning.gravityG, 0);
+          lastGravityG = currentTuning.gravityG;
+        }
+        const solverIterations = Math.round(currentTuning.physicsSolverIterations);
+        if (solverIterations !== lastSolverIterations) {
+          solver.iterations = solverIterations;
+          lastSolverIterations = solverIterations;
+        }
+        if (currentTuning.linearDamping !== lastLinearDamping) {
+          marbleBody.linearDamping = currentTuning.linearDamping;
+          lastLinearDamping = currentTuning.linearDamping;
+        }
+        if (currentTuning.angularDamping !== lastAngularDamping) {
+          marbleBody.angularDamping = currentTuning.angularDamping;
+          lastAngularDamping = currentTuning.angularDamping;
+        }
+        if (currentTuning.ccdSpeedThreshold !== lastCcdSpeedThreshold) {
+          marbleBodyWithCcd.ccdSpeedThreshold = currentTuning.ccdSpeedThreshold;
+          lastCcdSpeedThreshold = currentTuning.ccdSpeedThreshold;
+        }
+        const ccdIterations = Math.round(currentTuning.ccdIterations);
+        if (ccdIterations !== lastCcdIterations) {
+          marbleBodyWithCcd.ccdIterations = ccdIterations;
+          lastCcdIterations = ccdIterations;
+        }
+        const boardContactFriction = clamp(currentTuning.contactFriction, 0, 1.0);
+        if (boardContactFriction !== lastBoardContactFriction) {
+          boardContactMat.friction = boardContactFriction;
+          lastBoardContactFriction = boardContactFriction;
+        }
+        const contactRestitution = clamp(currentTuning.bounce, 0, 0.99);
+        if (contactRestitution !== lastBoardContactRestitution) {
+          boardContactMat.restitution = contactRestitution;
+          lastBoardContactRestitution = contactRestitution;
+        }
+        if (contactRestitution !== lastMovingObstacleRestitution) {
+          movingObstacleContactMat.restitution = contactRestitution;
+          lastMovingObstacleRestitution = contactRestitution;
+        }
+        updateTrackController(currentTuning, fixedDt);
+        track.updateMovingObstacles(fixedDt, boardBody.position, boardBody.quaternion);
 
-      if (currentTuning.enableExtraDownforce) {
-        extraDownForceVec.set(0, -currentTuning.extraDownForce, 0);
-        marbleBody.applyForce(extraDownForceVec, marbleBody.position);
-      }
+        if (currentTuning.enableExtraDownforce) {
+          extraDownForceVec.set(0, -currentTuning.extraDownForce, 0);
+          marbleBody.applyForce(extraDownForceVec, marbleBody.position);
+        }
 
-      const physicsStartMs = performance.now();
-      world.step(fixedDt, fixedDt, 1);
-      suppressVerticalPopOnSideImpact();
-      if (track.wallContainmentMode === "legacyLinear") {
-        resolveWallSqueezeAgainstObstacle();
-      } else if (track.wallContainmentMode === "curvedPathClamp") {
-        resolveCurvedPathContainment();
-        const checkpoints = track.checkpoints;
-        if (checkpoints.length > 0) {
-          for (let ci = lastCheckpointIndex + 1; ci < checkpoints.length; ci += 1) {
-            if (curvedContainmentNearestIndex >= checkpoints[ci]!.sampleIndex) {
-              lastCheckpointIndex = ci;
-            } else {
-              break;
+        const physicsStartMs = performance.now();
+        world.step(fixedDt, fixedDt, 1);
+        suppressVerticalPopOnSideImpact();
+        if (track.wallContainmentMode === "legacyLinear") {
+          resolveWallSqueezeAgainstObstacle();
+        } else if (track.wallContainmentMode === "curvedPathClamp") {
+          resolveCurvedPathContainment();
+          const checkpoints = track.checkpoints;
+          if (checkpoints.length > 0) {
+            for (let ci = lastCheckpointIndex + 1; ci < checkpoints.length; ci += 1) {
+              if (curvedContainmentNearestIndex >= checkpoints[ci]!.sampleIndex) {
+                lastCheckpointIndex = ci;
+              } else {
+                break;
+              }
             }
           }
         }
-      }
-      const physicsMs = performance.now() - physicsStartMs;
+        physicsMs = performance.now() - physicsStartMs;
 
-      const speed = marbleBody.velocity.length();
-      if (speed > currentTuning.maxSpeed && speed > 0) {
-        const scale = currentTuning.maxSpeed / speed;
-        marbleBody.velocity.scale(scale, marbleBody.velocity);
+        const speed = marbleBody.velocity.length();
+        if (speed > currentTuning.maxSpeed && speed > 0) {
+          const scale = currentTuning.maxSpeed / speed;
+          marbleBody.velocity.scale(scale, marbleBody.velocity);
+        }
       }
       updateMarblePosLocalToBoard();
       const outBounds = track.offCourseBoundsLocal;
@@ -3407,7 +3618,7 @@ export function HelloMarble() {
           marblePosLocalToBoard.z < outBounds.minZ ||
           marblePosLocalToBoard.z > outBounds.maxZ;
       }
-      latestMarbleBoardContactCount = countMarbleBoardContacts();
+      latestMarbleBoardContactCount = useSimulationV2 ? 0 : countMarbleBoardContacts();
       latestPenetrationDepth = penetrationDepth;
       latestAngularSpeed = marbleBody.angularVelocity.length();
       latestVerticalSpeed = marbleBody.velocity.y;
@@ -3985,6 +4196,8 @@ export function HelloMarble() {
       raceClient.disconnect();
       raceClientRef.current = null;
       applyTrackConfigRef.current = () => {};
+      rapierSimulationV2?.dispose();
+      rapierSimulationV2 = null;
       mount.removeChild(renderer.domElement);
       renderer.dispose();
       scene.remove(track.group);
@@ -4007,7 +4220,7 @@ export function HelloMarble() {
       (marbleShadowMesh.material as THREE.Material).dispose();
       marbleShadowTex.dispose();
     };
-  }, []);
+  }, [simulationBackend]);
 
   const showTouchFallback =
     !gyroEnabled || !tiltStatus.supported || tiltStatus.permission === "denied";
@@ -6923,6 +7136,7 @@ export function HelloMarble() {
         {activeDebugTab === "diagnostics" ? (
           <div className="debugSection">
             <p className="buildIdText">Build ID: {BUILD_ID}</p>
+            <p>Simulation backend: {simulationBackend}</p>
             <p>Cadence Hz: {debug.cadenceHz}</p>
             <p>Render Scale: {debug.renderScale.toFixed(2)}</p>
             <p>Perf Tier: {debug.perfTier}</p>

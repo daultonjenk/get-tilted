@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:simulation-v2": "node --experimental-specifier-resolution=node scripts/simulation-v2-smoke.ts",
     "typecheck": "tsc -b",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.12.0",
     "@get-tilted/shared-protocol": "0.1.1",
     "cannon-es": "^0.20.0",
     "react": "^19.2.0",
@@ -20,9 +22,9 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.1",
-    "@types/three": "^0.181.0",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.181.0",
     "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

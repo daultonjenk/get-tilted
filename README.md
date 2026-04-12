@@ -104,7 +104,7 @@ Determinism + multiplayer behavior:
 - Backend broadcasts the authoritative seed in `race:countdown:start`.
 - Multiplayer generation uses built-in catalog only for parity across clients.
 - Custom piece libraries are local-only in v0.8.
-- Generated modular tracks now use smooth swept channel meshes with matching Trimesh colliders for tighter visual/physics alignment.
+- Generated modular tracks render as smooth swept channels, while the active default collider path still uses sampled primitive bodies; the new `simulation-v2` path converts those authored collider bodies into Rapier collision assets instead of relying on board-following Cannon physics.
 - v0.8.1.2 stabilization note: `Split Y` / `Merge Y` remain in the editor, but randomized generation temporarily skips branch pieces while continuous-path stabilization is in progress.
 - v0.8.1.2 flow note: hard 90° bend pieces are auto-paired with an immediate compensating bend so movement quickly returns to down-track flow.
 
