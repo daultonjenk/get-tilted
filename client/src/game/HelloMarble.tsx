@@ -86,6 +86,7 @@ import {
   MUSIC_ENABLED_STORAGE_KEY,
   SOUND_ENABLED_STORAGE_KEY,
   DEBUG_MENU_ENABLED_STORAGE_KEY,
+  SIMULATION_BACKEND_STORAGE_KEY,
   TRACK_LAB_LIBRARY_STORAGE_KEY,
   TRACK_LAB_SEED_STORAGE_KEY,
   TRACK_LAB_PIECE_COUNT_STORAGE_KEY,
@@ -265,6 +266,8 @@ type ControlIntentState = {
   fallback: TiltSample;
 };
 
+type SimulationBackend = "v1" | "v2";
+
 function readQueryParam(name: string): string | null {
   if (typeof window === "undefined") {
     return null;
@@ -311,6 +314,26 @@ function readStoredToggle(key: string, defaultValue: boolean): boolean {
     return defaultValue;
   }
   return stored === "1";
+}
+
+function sanitizeSimulationBackend(value: string | null | undefined): SimulationBackend | null {
+  if (value === "v1" || value === "v2") {
+    return value;
+  }
+  return null;
+}
+
+function readStoredSimulationBackend(): SimulationBackend {
+  const querySimulation = sanitizeSimulationBackend(readQueryParam("sim"));
+  if (querySimulation) {
+    return querySimulation;
+  }
+  if (typeof window === "undefined") {
+    return "v1";
+  }
+  return sanitizeSimulationBackend(
+    window.localStorage.getItem(SIMULATION_BACKEND_STORAGE_KEY),
+  ) ?? "v1";
 }
 
 function readStoredTrackSeed(): string {
@@ -672,9 +695,8 @@ export function HelloMarble() {
   const resetRef = useRef<() => void>(() => {});
   const enableTiltRef = useRef<() => Promise<void>>(async () => {});
   const calibrateTiltRef = useRef<() => void>(() => {});
-  const simulationBackend = useMemo(
-    () => (readQueryParam("sim") === "v2" ? "v2" : "v1"),
-    [],
+  const [simulationBackend, setSimulationBackend] = useState<SimulationBackend>(() =>
+    readStoredSimulationBackend(),
   );
 
   const [isMobile, setIsMobile] = useState(() =>
@@ -1071,6 +1093,11 @@ export function HelloMarble() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(DEBUG_MENU_ENABLED_STORAGE_KEY, debugMenuEnabled ? "1" : "0");
   }, [debugMenuEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIMULATION_BACKEND_STORAGE_KEY, simulationBackend);
+  }, [simulationBackend]);
 
   useEffect(() => {
     trackLabSeedRef.current = trackLabSeed;
@@ -5357,6 +5384,37 @@ export function HelloMarble() {
               <p className="menuFeatureEyebrow">Current Solo Slice</p>
               <h2 className="menuFeatureTitle">{SOLO_GAUNTLET_NAME}</h2>
               <p className="menuFeatureText">{soloCourse.courseTagline}</p>
+            </div>
+            <div className="menuFeatureCard" data-testid="simulation-backend-card">
+              <p className="menuFeatureEyebrow">Physics Backend</p>
+              <h2 className="menuFeatureTitle">
+                {simulationBackend === "v2" ? "Simulation V2" : "Simulation V1"}
+              </h2>
+              <p className="menuFeatureText">
+                {simulationBackend === "v2"
+                  ? "Rapier-backed experimental simulation for preview troubleshooting."
+                  : "Original Cannon-based gameplay simulation."}
+              </p>
+              <div className="optionsInlineButtons">
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  data-testid="main-menu-sim-v1"
+                  onClick={() => setSimulationBackend("v1")}
+                  aria-pressed={simulationBackend === "v1"}
+                >
+                  Use V1
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  data-testid="main-menu-sim-v2"
+                  onClick={() => setSimulationBackend("v2")}
+                  aria-pressed={simulationBackend === "v2"}
+                >
+                  Use V2
+                </button>
+              </div>
             </div>
             <div className="mainMenuButtonGrid">
               <button
