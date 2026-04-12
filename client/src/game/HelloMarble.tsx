@@ -5380,6 +5380,31 @@ export function HelloMarble() {
               <h1 className="menuGameTitle">Get Tilted</h1>
             </div>
             <p className="menuIntroText">Pick a mode and roll in.</p>
+            <div className="mainMenuSimulationToggle" data-testid="main-menu-simulation-toggle">
+              <p className="mainMenuSimulationLabel">
+                Physics Backend: {simulationBackend === "v2" ? "V2" : "V1"}
+              </p>
+              <div className="mainMenuSimulationButtons">
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  data-testid="main-menu-sim-v1"
+                  onClick={() => setSimulationBackend("v1")}
+                  aria-pressed={simulationBackend === "v1"}
+                >
+                  Use V1
+                </button>
+                <button
+                  type="button"
+                  className="menuActionButton optionsMenuButton"
+                  data-testid="main-menu-sim-v2"
+                  onClick={() => setSimulationBackend("v2")}
+                  aria-pressed={simulationBackend === "v2"}
+                >
+                  Use V2
+                </button>
+              </div>
+            </div>
             <div className="menuFeatureCard" data-testid="solo-feature-card">
               <p className="menuFeatureEyebrow">Current Solo Slice</p>
               <h2 className="menuFeatureTitle">{SOLO_GAUNTLET_NAME}</h2>

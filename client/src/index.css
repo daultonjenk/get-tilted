@@ -312,6 +312,35 @@ textarea {
   font-size: clamp(0.95rem, 2.6vw, 1.1rem);
 }
 
+.mainMenuSimulationToggle {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.mainMenuSimulationLabel {
+  margin: 0;
+  color: #dcecff;
+  font-size: 0.88rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mainMenuSimulationButtons {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.58rem;
+}
+
+.mainMenuSimulationButtons .menuActionButton {
+  min-height: 52px;
+  font-size: clamp(1rem, 3vw, 1.2rem);
+  border-radius: 0.9rem;
+}
+
 .menuFeatureCard {
   width: min(400px, 100%);
   padding: 0.82rem 0.92rem;
