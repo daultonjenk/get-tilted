@@ -161,6 +161,10 @@ async function run(): Promise<void> {
     const snapshot = simulation.getSnapshot();
     assert(snapshot.marble.position[0] > 1.2, "marble should move laterally on flat ground");
     assert(snapshot.marble.position[1] > 0.35, "marble should remain above the floor");
+    assert(
+      Math.abs(snapshot.board.rotation[2]) > 0.02,
+      "visual board tilt should respond to lateral input",
+    );
     simulation.dispose();
   }
 

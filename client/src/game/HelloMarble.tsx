@@ -1754,6 +1754,52 @@ export function HelloMarble() {
       boardQuatThree.copy(localRenderCurrBoardQuat);
     };
 
+    const syncLocalRenderSnapshotsFromSimulationSnapshot = (
+      snapshot: SimulationSnapshot,
+      syncPrevious = false,
+    ): void => {
+      localRenderCurrBoardPos.set(
+        snapshot.board.position[0],
+        snapshot.board.position[1],
+        snapshot.board.position[2],
+      );
+      localRenderCurrBoardQuat.set(
+        snapshot.board.rotation[0],
+        snapshot.board.rotation[1],
+        snapshot.board.rotation[2],
+        snapshot.board.rotation[3],
+      );
+      tempVecA.set(
+        snapshot.marble.position[0],
+        snapshot.marble.position[1],
+        snapshot.marble.position[2],
+      )
+        .applyQuaternion(localRenderCurrBoardQuat)
+        .add(localRenderCurrBoardPos);
+      localRenderCurrMarblePos.copy(tempVecA);
+      tempQuatA.copy(localRenderCurrBoardQuat);
+      tempQuatB.set(
+        snapshot.marble.rotation[0],
+        snapshot.marble.rotation[1],
+        snapshot.marble.rotation[2],
+        snapshot.marble.rotation[3],
+      );
+      tempQuatA.multiply(tempQuatB);
+      localRenderCurrMarbleQuat.copy(tempQuatA);
+      if (syncPrevious) {
+        localRenderPrevBoardPos.copy(localRenderCurrBoardPos);
+        localRenderPrevBoardQuat.copy(localRenderCurrBoardQuat);
+        localRenderPrevMarblePos.copy(localRenderCurrMarblePos);
+        localRenderPrevMarbleQuat.copy(localRenderCurrMarbleQuat);
+      }
+      track.group.position.copy(localRenderCurrBoardPos);
+      track.group.quaternion.copy(localRenderCurrBoardQuat);
+      marbleMesh.position.copy(localRenderCurrMarblePos);
+      marbleMesh.quaternion.copy(localRenderCurrMarbleQuat);
+      boardPosThree.copy(localRenderCurrBoardPos);
+      boardQuatThree.copy(localRenderCurrBoardQuat);
+    };
+
     const syncBodiesFromSimulationSnapshot = (
       snapshot: SimulationSnapshot,
     ): void => {
@@ -1763,10 +1809,10 @@ export function HelloMarble() {
         snapshot.board.position[2],
       );
       boardBody.quaternion.set(
-        snapshot.board.rotation[0],
-        snapshot.board.rotation[1],
-        snapshot.board.rotation[2],
-        snapshot.board.rotation[3],
+        0,
+        0,
+        0,
+        1,
       );
       boardBody.velocity.set(0, 0, 0);
       boardBody.angularVelocity.set(0, 0, 0);
@@ -1822,9 +1868,10 @@ export function HelloMarble() {
       ) {
         rapierSimulationV2.setFrozen(true);
       }
-      syncBodiesFromSimulationSnapshot(rapierSimulationV2.getSnapshot());
-      setRespawnCount(rapierSimulationV2.getSnapshot().respawnCount);
-      syncLocalRenderSnapshotsFromBodies();
+      const snapshot = rapierSimulationV2.getSnapshot();
+      syncBodiesFromSimulationSnapshot(snapshot);
+      setRespawnCount(snapshot.respawnCount);
+      syncLocalRenderSnapshotsFromSimulationSnapshot(snapshot, true);
     };
 
     const disposeTrack = (trackToDispose: TrackBuildResult): void => {
@@ -2828,8 +2875,9 @@ export function HelloMarble() {
     const freezeMarble = () => {
       if (useSimulationV2 && rapierSimulationV2) {
         rapierSimulationV2.setFrozen(true);
-        syncBodiesFromSimulationSnapshot(rapierSimulationV2.getSnapshot());
-        syncLocalRenderSnapshotsFromBodies();
+        const snapshot = rapierSimulationV2.getSnapshot();
+        syncBodiesFromSimulationSnapshot(snapshot);
+        syncLocalRenderSnapshotsFromSimulationSnapshot(snapshot, true);
         return;
       }
       marbleBody.type = CANNON.Body.STATIC;
@@ -2843,8 +2891,9 @@ export function HelloMarble() {
     const unfreezeMarble = () => {
       if (useSimulationV2 && rapierSimulationV2) {
         rapierSimulationV2.setFrozen(false);
-        syncBodiesFromSimulationSnapshot(rapierSimulationV2.getSnapshot());
-        syncLocalRenderSnapshotsFromBodies();
+        const snapshot = rapierSimulationV2.getSnapshot();
+        syncBodiesFromSimulationSnapshot(snapshot);
+        syncLocalRenderSnapshotsFromSimulationSnapshot(snapshot, true);
         return;
       }
       marbleBody.type = CANNON.Body.DYNAMIC;
@@ -2873,6 +2922,7 @@ export function HelloMarble() {
           incrementCounter,
         );
         syncBodiesFromSimulationSnapshot(result.snapshot);
+        syncLocalRenderSnapshotsFromSimulationSnapshot(result.snapshot, true);
       } else {
         unfreezeMarble();
         const checkpointSpawn =
@@ -2905,7 +2955,9 @@ export function HelloMarble() {
         track.tiltPivotLayersLocalY?.upperY ?? 0,
         marbleBody.position.z,
       );
-      syncLocalRenderSnapshotsFromBodies();
+      if (!(useSimulationV2 && rapierSimulationV2)) {
+        syncLocalRenderSnapshotsFromBodies();
+      }
       setTrialState("idle");
       setTrialCurrentMs(null);
       if (incrementCounter && !(useSimulationV2 && rapierSimulationV2)) {
@@ -3517,14 +3569,15 @@ export function HelloMarble() {
       currentTuning: TuningState,
     ) => ({
       gravityMagnitude: currentTuning.gravityG,
-      controlStrength: currentTuning.tiltStrength,
+      controlStrength: clamp(currentTuning.tiltStrength * 0.4, 0.25, 1.1),
+      maxSpeed: currentTuning.maxSpeed,
       maxTiltDeg: currentTuning.maxTiltDeg,
       linearDamping: currentTuning.linearDamping,
       angularDamping: currentTuning.angularDamping,
       floorFriction: clamp(currentTuning.contactFriction, 0, 1.0),
-      railRestitution: clamp(currentTuning.bounce, 0, 0.99),
+      railRestitution: Math.max(clamp(currentTuning.bounce, 0, 0.99), 0.18),
       obstacleFriction: MOVING_OBSTACLE_CONTACT_FRICTION,
-      obstacleRestitution: clamp(currentTuning.bounce, 0, 0.99),
+      obstacleRestitution: Math.max(clamp(currentTuning.bounce, 0, 0.99), 0.24),
       ccdEnabled:
         currentTuning.ccdIterations > 0 &&
         currentTuning.ccdSpeedThreshold > 0,
@@ -3554,6 +3607,7 @@ export function HelloMarble() {
           );
           physicsMs = performance.now() - physicsStartMs;
           syncBodiesFromSimulationSnapshot(result.snapshot);
+          syncLocalRenderSnapshotsFromSimulationSnapshot(result.snapshot);
         }
       } else {
         if (currentTuning.gravityG !== lastGravityG) {
@@ -3746,28 +3800,30 @@ export function HelloMarble() {
       prevTrialStartMetric = startMetric;
       prevTrialFinishMetric = finishMetric;
 
-      localRenderCurrBoardPos.set(
-        boardBody.position.x,
-        boardBody.position.y,
-        boardBody.position.z,
-      );
-      localRenderCurrBoardQuat.set(
-        boardBody.quaternion.x,
-        boardBody.quaternion.y,
-        boardBody.quaternion.z,
-        boardBody.quaternion.w,
-      );
-      localRenderCurrMarblePos.set(
-        marbleBody.position.x,
-        marbleBody.position.y,
-        marbleBody.position.z,
-      );
-      localRenderCurrMarbleQuat.set(
-        marbleBody.quaternion.x,
-        marbleBody.quaternion.y,
-        marbleBody.quaternion.z,
-        marbleBody.quaternion.w,
-      );
+      if (!(useSimulationV2 && rapierSimulationV2)) {
+        localRenderCurrBoardPos.set(
+          boardBody.position.x,
+          boardBody.position.y,
+          boardBody.position.z,
+        );
+        localRenderCurrBoardQuat.set(
+          boardBody.quaternion.x,
+          boardBody.quaternion.y,
+          boardBody.quaternion.z,
+          boardBody.quaternion.w,
+        );
+        localRenderCurrMarblePos.set(
+          marbleBody.position.x,
+          marbleBody.position.y,
+          marbleBody.position.z,
+        );
+        localRenderCurrMarbleQuat.set(
+          marbleBody.quaternion.x,
+          marbleBody.quaternion.y,
+          marbleBody.quaternion.z,
+          marbleBody.quaternion.w,
+        );
+      }
 
       return physicsMs;
     };

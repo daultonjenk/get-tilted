@@ -61,6 +61,7 @@ export type SimulationStepResult = {
 export type SimulationV2Tuning = {
   gravityMagnitude: number;
   controlStrength: number;
+  maxSpeed: number;
   maxTiltDeg: number;
   linearDamping: number;
   angularDamping: number;
@@ -73,14 +74,15 @@ export type SimulationV2Tuning = {
 
 export const DEFAULT_SIMULATION_V2_TUNING: SimulationV2Tuning = {
   gravityMagnitude: 24,
-  controlStrength: 1.9,
+  controlStrength: 0.76,
+  maxSpeed: 20,
   maxTiltDeg: 13.5,
   linearDamping: 0.12,
   angularDamping: 0.18,
   floorFriction: 0.84,
-  railRestitution: 0,
+  railRestitution: 0.18,
   obstacleFriction: 0.02,
-  obstacleRestitution: 0,
+  obstacleRestitution: 0.24,
   ccdEnabled: true,
 };
 

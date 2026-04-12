@@ -13,9 +13,11 @@ import {
   type TrackColliderShapeAsset,
   type TrackCollisionAsset,
   type TrackRigidBodyAsset,
+  type TrackRigidBodyMaterial,
 } from "./types.ts";
 
 type RapierColliderDesc = InstanceType<typeof RAPIERModule.ColliderDesc>;
+type RapierCollider = InstanceType<typeof RAPIERModule.Collider>;
 type RapierRigidBody = InstanceType<typeof RAPIERModule.RigidBody>;
 type RapierWorld = InstanceType<typeof RAPIERModule.World>;
 type RapierEventQueue = InstanceType<typeof RAPIERModule.EventQueue>;
@@ -34,6 +36,7 @@ type RapierSimulationV2Options = {
 
 const IDENTITY_BOARD_POSITION: SimulationVector3 = [0, 0, 0];
 const IDENTITY_BOARD_ROTATION: SimulationQuaternion = [0, 0, 0, 1];
+const VISUAL_TILT_SMOOTH = 10;
 const DEFAULT_TRACK_BASIS = {
   sampleIndex: 0,
   right: [1, 0, 0] as SimulationVector3,
@@ -79,6 +82,24 @@ function toQuaternionTuple(
   return [quaternion.x, quaternion.y, quaternion.z, quaternion.w];
 }
 
+function quaternionFromPitchRoll(
+  pitch: number,
+  roll: number,
+): SimulationQuaternion {
+  const halfPitch = pitch * 0.5;
+  const halfRoll = roll * 0.5;
+  const sinPitch = Math.sin(halfPitch);
+  const cosPitch = Math.cos(halfPitch);
+  const sinRoll = Math.sin(halfRoll);
+  const cosRoll = Math.cos(halfRoll);
+  return [
+    sinPitch * cosRoll,
+    -sinPitch * sinRoll,
+    cosPitch * sinRoll,
+    cosPitch * cosRoll,
+  ];
+}
+
 function createColliderDesc(
   rapier: typeof RAPIERModule,
   shape: TrackColliderShapeAsset,
@@ -113,17 +134,17 @@ function createColliderDesc(
   return desc;
 }
 
-function readBodyMaterialProperties(
-  body: TrackRigidBodyAsset,
+function readMaterialProperties(
+  material: TrackRigidBodyMaterial,
   tuning: SimulationV2Tuning,
 ): { friction: number; restitution: number } {
-  if (body.material === "floor") {
+  if (material === "floor") {
     return {
       friction: tuning.floorFriction,
       restitution: 0,
     };
   }
-  if (body.material === "wall") {
+  if (material === "wall") {
     return {
       friction: 0,
       restitution: tuning.railRestitution,
@@ -184,8 +205,13 @@ export class RapierSimulationV2 {
   private readonly trackAsset: TrackCollisionAsset;
   private readonly marbleRadius: number;
   private readonly marbleBody: RapierRigidBody;
+  private readonly marbleCollider: RapierCollider;
   private readonly marbleColliderHandle: number;
   private readonly movingBodies: MovingBodyRuntime[] = [];
+  private readonly trackColliders: Array<{
+    collider: RapierCollider;
+    material: TrackRigidBodyMaterial;
+  }> = [];
   private readonly colliderHandleToObstacleId = new Map<number, string>();
   private readonly tuning: SimulationV2Tuning = {
     ...DEFAULT_SIMULATION_V2_TUNING,
@@ -194,6 +220,8 @@ export class RapierSimulationV2 {
   private lastCheckpointIndex = -1;
   private respawnCount = 0;
   private frozen = false;
+  private visualPitch = 0;
+  private visualRoll = 0;
   private latestSnapshot: SimulationSnapshot;
 
   constructor(options: RapierSimulationV2Options) {
@@ -231,11 +259,11 @@ export class RapierSimulationV2 {
       .setFriction(this.tuning.floorFriction)
       .setRestitution(0)
       .setActiveEvents(this.rapier.ActiveEvents.COLLISION_EVENTS);
-    const marbleCollider = this.world.createCollider(
+    this.marbleCollider = this.world.createCollider(
       marbleColliderDesc,
       this.marbleBody,
     );
-    this.marbleColliderHandle = marbleCollider.handle;
+    this.marbleColliderHandle = this.marbleCollider.handle;
 
     this.latestSnapshot = this.captureSnapshot();
   }
@@ -313,13 +341,16 @@ export class RapierSimulationV2 {
 
     this.setFrozen(Boolean(input.paused));
     this.syncMovingBodies(fixedDt);
+    const combinedIntent = this.resolveCombinedIntent(input);
+    this.updateVisualTilt(input.paused ? { x: 0, z: 0 } : combinedIntent, fixedDt);
 
     if (!this.frozen) {
-      const gravity = this.resolveGravityVector(input);
+      const gravity = this.resolveGravityVector(combinedIntent);
       this.world.gravity.x = gravity[0];
       this.world.gravity.y = gravity[1];
       this.world.gravity.z = gravity[2];
       this.world.step(this.eventQueue);
+      this.enforceMaxSpeed();
     }
 
     const events = this.collectEvents();
@@ -349,7 +380,7 @@ export class RapierSimulationV2 {
         w: body.rotation[3],
       });
     const rigidBody = this.world.createRigidBody(rigidBodyDesc);
-    const materialProps = readBodyMaterialProperties(body, this.tuning);
+    const materialProps = readMaterialProperties(body.material, this.tuning);
 
     for (const shape of body.shapes) {
       const colliderDesc = createColliderDesc(this.rapier, shape)
@@ -359,6 +390,7 @@ export class RapierSimulationV2 {
         colliderDesc.setActiveEvents(this.rapier.ActiveEvents.COLLISION_EVENTS);
       }
       const collider = this.world.createCollider(colliderDesc, rigidBody);
+      this.trackColliders.push({ collider, material: body.material });
       if (body.material === "obstacle") {
         this.colliderHandleToObstacleId.set(collider.handle, body.id);
       }
@@ -375,7 +407,7 @@ export class RapierSimulationV2 {
         w: body.rotation[3],
       });
     const rigidBody = this.world.createRigidBody(rigidBodyDesc);
-    const materialProps = readBodyMaterialProperties(body, this.tuning);
+    const materialProps = readMaterialProperties(body.material, this.tuning);
 
     for (const shape of body.shapes) {
       const colliderDesc = createColliderDesc(this.rapier, shape)
@@ -383,6 +415,7 @@ export class RapierSimulationV2 {
         .setRestitution(materialProps.restitution)
         .setActiveEvents(this.rapier.ActiveEvents.COLLISION_EVENTS);
       const collider = this.world.createCollider(colliderDesc, rigidBody);
+      this.trackColliders.push({ collider, material: body.material });
       this.colliderHandleToObstacleId.set(collider.handle, body.id);
     }
 
@@ -401,6 +434,13 @@ export class RapierSimulationV2 {
     this.marbleBody.setLinearDamping(this.tuning.linearDamping);
     this.marbleBody.setAngularDamping(this.tuning.angularDamping);
     this.marbleBody.enableCcd(this.tuning.ccdEnabled);
+    this.marbleCollider.setFriction(this.tuning.floorFriction);
+    this.marbleCollider.setRestitution(0);
+    for (const entry of this.trackColliders) {
+      const materialProps = readMaterialProperties(entry.material, this.tuning);
+      entry.collider.setFriction(materialProps.friction);
+      entry.collider.setRestitution(materialProps.restitution);
+    }
   }
 
   private syncMovingBodies(fixedDt: number): void {
@@ -424,34 +464,69 @@ export class RapierSimulationV2 {
     }
   }
 
-  private resolveGravityVector(input: SimulationInput): SimulationVector3 {
-    const filteredCombined = input.combinedIntent
+  private resolveCombinedIntent(input: SimulationInput): SimulationAxisIntent {
+    return input.combinedIntent
       ? normalizeIntent(input.combinedIntent)
       : normalizeIntent({
           x: input.tiltIntent.x + input.fallbackIntent.x,
           z: input.tiltIntent.z + input.fallbackIntent.z,
         });
+  }
 
+  private resolveGravityVector(
+    combinedIntent: SimulationAxisIntent,
+  ): SimulationVector3 {
     const translation = this.marbleBody.translation();
     const localPos = toVector3Tuple(translation);
     const basis = this.resolveTrackBasis(localPos);
     const maxTiltRad = (this.tuning.maxTiltDeg * Math.PI) / 180;
     const controlAcceleration =
       this.tuning.gravityMagnitude *
-      Math.tan(maxTiltRad) *
+      Math.sin(maxTiltRad) *
       this.tuning.controlStrength;
 
     const downComponent = scale(basis.up, -this.tuning.gravityMagnitude);
     const lateralComponent = scale(
       basis.right,
-      filteredCombined.x * controlAcceleration,
+      combinedIntent.x * controlAcceleration,
     );
     const forwardComponent = scale(
       basis.tangent,
-      filteredCombined.z * controlAcceleration,
+      combinedIntent.z * controlAcceleration,
     );
 
     return add(add(downComponent, lateralComponent), forwardComponent);
+  }
+
+  private updateVisualTilt(
+    combinedIntent: SimulationAxisIntent,
+    fixedDt: number,
+  ): void {
+    const visualTiltRad = ((this.tuning.maxTiltDeg * 0.92) * Math.PI) / 180;
+    const targetPitch = combinedIntent.z * visualTiltRad;
+    const targetRoll = -combinedIntent.x * visualTiltRad;
+    const alpha = 1 - Math.exp(-VISUAL_TILT_SMOOTH * fixedDt);
+    this.visualPitch += (targetPitch - this.visualPitch) * alpha;
+    this.visualRoll += (targetRoll - this.visualRoll) * alpha;
+  }
+
+  private enforceMaxSpeed(): void {
+    const velocity = this.marbleBody.linvel();
+    const speedSq = lengthSq(velocity.x, velocity.y, velocity.z);
+    const maxSpeedSq = this.tuning.maxSpeed * this.tuning.maxSpeed;
+    if (speedSq <= maxSpeedSq || speedSq <= 1e-12) {
+      return;
+    }
+
+    const scaleFactor = this.tuning.maxSpeed / Math.sqrt(speedSq);
+    this.marbleBody.setLinvel(
+      {
+        x: velocity.x * scaleFactor,
+        y: velocity.y * scaleFactor,
+        z: velocity.z * scaleFactor,
+      },
+      true,
+    );
   }
 
   private resolveTrackBasis(localPos: SimulationVector3): {
@@ -546,7 +621,10 @@ export class RapierSimulationV2 {
       },
       board: {
         position: IDENTITY_BOARD_POSITION,
-        rotation: IDENTITY_BOARD_ROTATION,
+        rotation:
+          this.visualPitch === 0 && this.visualRoll === 0
+            ? IDENTITY_BOARD_ROTATION
+            : quaternionFromPitchRoll(this.visualPitch, this.visualRoll),
       },
       trackBasis: basis,
       checkpoints: {
